@@ -1,0 +1,7 @@
+# .gitignore 
+node_modules
+ecosystem.config.js
+run.bat
+.env
+data/main.db
+main.db

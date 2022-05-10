@@ -1,0 +1,36 @@
+{
+  "name": "simple-poll-bot",
+  "version": "0.0.2",
+  "description": "a poll bot for discord utilizing slash commands",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "discord",
+    "discordjs",
+    "vote bot",
+    "simple poll bot",
+    "poll bot",
+    "slash commands"
+  ],
+  "author": "github.com/0x29a-blink",
+  "license": "ISC",
+  "dependencies": {
+    "@discordjs/builders": "^0.8.2",
+    "@discordjs/rest": "^0.1.0-canary.0",
+    "ascii-bar": "^1.0.3",
+    "chalk": "^4.1.2",
+    "dbots": "^10.0.0",
+    "discord-api-types": "^0.24.0",
+    "discord.js": "^13.3.1",
+    "dotenv": "^16.0.1",
+    "express": "^4.18.1",
+    "moment": "^2.29.1",
+    "sqlite": "^4.0.23",
+    "sqlite3": "^5.0.2",
+    "statcord.js": "^3.3.0",
+    "topgg-autoposter": "^2.0.1"
+  }
+}
