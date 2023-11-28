@@ -12,6 +12,7 @@
   thread: true
 ```
 `/poll title: Poll Title, description: Poll Description\nwith multiline\nsupport. items: One,Two,Three,Four,Five,Six,Seven,Eight,Nine,Ten public: false thread: true`
+
 ![](https://i.imgur.com/x3CSpoP.gif)
 
 ## Invite The Bot
