@@ -11,8 +11,8 @@
   public: false 
   thread: true
 ```
+`/poll title: Poll Title, description: Poll Description\nwith multiline\nsupport. items: One,Two,Three,Four,Five,Six,Seven,Eight,Nine,Ten public: false thread: true`
 ![](https://i.imgur.com/x3CSpoP.gif)
-`/poll title: Poll Title, description: Poll Description\nwith multiline\nsupport. items: One,Two,Three,Four,Five,Six,Seven,Eight,Nine,Ten (up to 25 items maximum) public: false thread: true`
 
 ## Invite The Bot
 Invite the bot using [this](https://discord.com/api/oauth2/authorize?client_id=911731627498041374&permissions=191462108352&scope=applications.commands%20bot) link.
