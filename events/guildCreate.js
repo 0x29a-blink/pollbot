@@ -1,8 +1,7 @@
-const chalk = require('chalk');
 module.exports = {
     name: 'guildCreate',
     once: false,
     execute(guild) {
-        console.log(`${chalk.blue('+ guild add:')} "${guild.name}" [${guild.id}](${guild.memberCount}) at ${Date(Date.now())}`);
+        console.log(`[ [1;34mBOT INFO - GUILD ADD[0m ] "${guild.name}" [${guild.id}](${guild.memberCount}) at ${Date(Date.now())}`);
     },
 };

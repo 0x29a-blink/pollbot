@@ -1,0 +1,40 @@
+{
+    "enumKeys": [
+        "Indonesian", "EnglishUS",    "EnglishGB",
+        "Bulgarian",  "ChineseCN",    "ChineseTW",
+        "Croatian",   "Czech",        "Danish",
+        "Dutch",      "Finnish",      "French",
+        "German",     "Greek",        "Hindi",
+        "Hungarian",  "Italian",      "Japanese",
+        "Korean",     "Lithuanian",   "Norwegian",
+        "Polish",     "PortugueseBR", "Romanian",
+        "Russian",    "SpanishES",    "Swedish",
+        "Thai",       "Turkish",      "Ukrainian",
+        "Vietnamese"
+      ],
+      
+      "enumMappings":
+      {
+        "Indonesian" : "id",       "id" : "id",           "EnglishUS" : "en-US",
+        "en-US" : "en-US",         "EnglishGB" :          "en-GB", "en-GB" : "en-GB",
+        "Bulgarian" : "bg",        "bg" : "bg",           "ChineseCN" : "zh-CN",
+        "zh-CN" : "zh-CN",         "ChineseTW" : "zh-TW", "zh-TW" : "zh-TW",
+        "Croatian" : "hr",         "hr" : "hr",           "Czech" : "cs",
+        "cs" : "cs",               "Danish" : "da",       "da" : "da",
+        "Dutch" : "nl",            "nl" : "nl",           "Finnish" : "fi",
+        "fi" : "fi",               "French" : "fr",       "fr" : "fr",
+        "German" : "de",           "de" : "de",           "Greek" : "el",
+        "el" : "el",               "Hindi" : "hi",        "hi" : "hi",
+        "Hungarian" : "hu",        "hu" : "hu",           "Italian" : "it",
+        "it" : "it",               "Japanese" : "ja",     "ja" : "ja",
+        "Korean" :"ko",            "ko" : "ko",           "Lithuanian" : "lt",
+        "lt" : "lt",               "Norwegian" : "no",    "no" : "no",
+        "Polish" : "pl",           "pl" : "pl",           "PortugueseBR" : "pt-BR",
+        "pt-BR" : "pt-BR",         "Romanian" : "ro",     "ro" : "ro",
+        "Russian" : "ru",          "ru" : "ru",           "SpanishES" : "es-ES",
+        "es-ES" : "es-ES",         "Swedish" : "sv-SE",   "sv-SE" : "sv-SE",
+        "Thai" : "th",             "th" : "th",           "Turkish" : "tr",
+        "tr" : "tr",               "Ukrainian" : "uk",    "uk" : "uk",
+        "Vietnamese" : "vi",       "vi" : "vi"
+      }
+    }
