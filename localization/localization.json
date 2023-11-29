@@ -30,8 +30,8 @@
         "threadCreateErrorDescription"          : "An error occured while creating the thread for the poll.\n\nPlease add the `MANAGE_THREADS` and the `CREATE_PUBLIC_THREADS` permission to access this feature.",
         "item"                                  : "Item(s)",
         "results"                               : "Results (Total Votes: $1)",
-        "publicPollUpdateVoteEmbedError"        : "There has been an error updating the mssage to display the new results, please note that your results have been saved.",
-        "publicPollNewVoteEmbedError"           : "There has been an error updating the mssage to display the new results, please note that your results have been saved.",
+        "publicPollUpdateVoteEmbedError"        : "There has been an error updating the message to display the new results, please note that your results have been saved.",
+        "publicPollNewVoteEmbedError"           : "There has been an error updating the message to display the new results, please note that your results have been saved.",
         "closePollEmbedError"                   : "Eror closing your poll! I could not update the message to display the final results. Please try again later or create a ticket in our support server for additional assistance.",
         "changedVote"                           : "You've changed your vote from \"$1\" to \"$2\".",
         "pollChoiceSelected"                    : "You selected \"$1\"",
@@ -48,7 +48,7 @@
         "helpTitle"                             : "Simple Poll Bot Help",
         "helpDescription"                       : "All information is avaliable on our [GitHub](https://github.com/0x29a-blink/pollbot) or the [Support Discord](https://discord.gg/VZkY8mDJGh).",
         "privacyCommandName"                    : "privacy",
-        "privacyCommandDescription"             : "A very scuffed 'privacy policy'",
+        "privacyCommandDescription"             : "Simple Poll Bot's privacy policy.",
         "privacyTitle"                          : "Privacy Policy",
         "privacyDescription"                    : "```What Information Is Stored?```messageId, pollsGuildName, pollsGuildId, pollsChannelName, pollsChannelId, pollTitle, pollDescription, pollItem, pollVoteCount, pollViewVotesFlag (public poll or not), pollVoteUserName, pollVoteUserId, pollVoteUserItem, lastInteraction```Why we store the information and how we use it.```All of the information we store is for the functionality of the bot and for future feature additions. The main use of the information stored is to validate votes between users so there's no duplication of votes in the poll. \n\nThe bot is open source and can be viewed by anyone on [the github for the bot](https://github.com/0x29a-blink/pollbot) ```How can I contact you for removal of my data?```Via our [support discord](https://discord.gg/hUge5epA) and creating a ticket there.",
         "privacyFooter"                         : "All of this data is temporary and is immediately removed upon the closing of the poll or after 1 month of poll inactivity.",
@@ -60,7 +60,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
         } ,
     "id" : {
         "languageName"                  : "Indonesian",
@@ -123,7 +124,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "da" : {
         "languageName"                  : "Danish",
@@ -186,7 +188,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "de" : {
         "languageName"                  : "German",
@@ -249,7 +252,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "es-ES" : {
         "languageName"                  : "Spanish",
@@ -312,70 +316,72 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "fr" : {
         "languageName"                  : "French",
         "nativeLanguageName"            : "Français",
-        "pollCommandName"                       : "poll",
-        "pollCommandDescription"                : "Create a new poll.",
-        "pollOptionTitleName"                   : "title",
-        "pollOptionTitleDescription"            : "Sets the title of the poll.",
-        "pollOptionDescriptionName"             : "description",
-        "pollOptionDescriptionDescription"      : "The polls description... Create a newline in the poll description by typing \\n",
-        "pollOptionItemsName"                   : "items",
-        "pollOptionItemsDescription"            : "Items to vote on. SEPARATE EACH ITEM WITH A COMMA ( , )",
-        "pollOptionPublicName"                  : "public",
-        "pollOptionPublicDescription"           : "Allows you to make the results of the poll public at all times, even before you close the poll.",
-        "pollOptionThreadName"                  : "thread",
-        "pollOptionThreadDescription"           : "Attach a thread to the poll?",
-        "closePollLabel"                        : "Close Poll",
-        "memberNoPermsAndGuildHasNoRole"        : "Sorry! You currently don't have the \"Poll Manager\" role or the `MANAGE_GUILD` permission. I attempted to create this role for you but I am lacking the `MANAGE_ROLES` permission. You will need to contact your server administrator for support. You can either ask them to give you the `MANAGE_GUILD` permission or you can ask them to give me the `MANAGE_ROLES` permission and you can execute the command again. The bot will create the \"Poll Manager\" role required and you can ask your server admin to give you it.",
-        "roleCreateReason"                      : "Automatically creating \"Poll Manager\" for bot functions.",
-        "memberNoPermsAndServerNoRoleCreated"   : "It appears you don't have the permission `MANAGE_GUILD` to create a poll, I've created the role `\"Poll Manager\"` for you to utilize instead. Simply add the role to yourself and anyone else that you want to have permissions to create and close polls.",
-        "memberNoPermsNoRole"                   : "Sorry! You don't have the `MANAGE_GUILD` permission or \"Poll Manager\" role.",
-        "pollTooManyItems"                      : "Sorry! The poll you tried to create has more than 25 items ($1) unfortunately this is an API limitation and not my own, please remove some items from the poll.",
-        "pollHasDuplicates"                     : "Sorry! You attempted to create a poll with duplicate items. Please check your command and avoid putting identical cases.\n\nex. `one,one`\n\n**NOTE**: If you create a poll like `one, one` it will be valid and upload (due to the space) I can't promise that this will produce stable results for you but if you absolutely require the same poll items that is how you can do it.",
-        "pollItemTooLong"                       : "Sorry! One of the items in your poll exceeded **100** characters please recreate the poll and use less characters on one of your poll items. This is an API limitation and not my own, please remove some items from the poll.",
-        "embedTitleTooLong"                     : "Sorry! The title of your poll exceeded **256** chracters please recreate the poll and use less characters in the title. This is an API limitation and not my own, please remove some items from the poll.",
-        "embedDescriptionTooLong"               : "Sorry! the description of your poll exceeded **4096** characters please reacreate the oikk abd yse less charactersin the description. This is an API limitation and not my own, please remove some items from the poll.",
-        "couldNotCreateMessageBody"             : "Sorry! For some reason I could not send the message for the poll. This error occurs very rarely, please create a ticket on our support server and tell us everything you can about what you did while creating the poll.",
-        "threadCreateReason"                    : "Thread created for a poll.",
-        "threadCreateErrorTitle"                : "Thread Creation Error",
-        "threadCreateErrorDescription"          : "An error occured while creating the thread for the poll.\n\nPlease add the `MANAGE_THREADS` and the `CREATE_PUBLIC_THREADS` permission to access this feature.",
-        "item"                                  : "Item(s)",
-        "results"                               : "Results (Total Votes: $1)",
-        "publicPollUpdateVoteEmbedError"        : "There has been an error updating the mssage to display the new results, please note that your results have been saved.",
-        "publicPollNewVoteEmbedError"           : "There has been an error updating the mssage to display the new results, please note that your results have been saved.",
-        "closePollEmbedError"                   : "Eror closing your poll! I could not update the message to display the final results. Please try again later or create a ticket in our support server for additional assistance.",
-        "changedVote"                           : "You've changed your vote from \"$1\" to \"$2\".",
-        "pollChoiceSelected"                    : "You selected \"$1\"",
-        "pollClosedBy"                          : "Poll closed by $1",
-        "pollCloseSucess"                       : "Closed the poll sucessfully.",
-        "noLongerExistsInDatabase"              : "Sorry the poll you are trying to interact with no longer exists in our database please delete the poll message you tried to interact with.",
-        "errorUpdatingDatabase"                 : "Sorry but there seems to have been some trouble in the database with registering your vote. Please try again or create a ticket in the SimplePollBot support server.",
-        "displayPollingDataError"               : "There was an issue somewhere displaying your polling data please reach out immediately to the SimplePollBot support server for assistance.",
-        "helpCommandName"                       : "help",
-        "helpCommandDescription"                : "Information on creating votes / helpful links.",
-        "helpLabel1"                            : "Support Discord",
+        "pollCommandName"                       : "sondage",
+        "pollCommandDescription"                : "Créer un nouveau sondage.",
+        "pollOptionTitleName"                   : "titre",
+        "pollOptionTitleDescription"            : "Définit le titre de l'enquête.",
+        "pollOptionDescriptionName"             : "Description",
+        "pollOptionDescriptionDescription"      : "La description du sondage... Créez une nouvelle ligne dans la description du sondage en tapant \\n",
+        "pollOptionItemsName"                   : "Article",
+        "pollOptionItemsDescription"            : "Article à voter. SÉPARER CHAQUE POINT PAR UNE VIRGULE ( , )",
+        "pollOptionPublicName"                  : "Public",
+        "pollOptionPublicDescription"           : "Permet de rendre les résultats du sondage publics à tout moment, même avant la clôture du sondage.",
+        "pollOptionThreadName"                  : "fil de discussion",
+        "pollOptionThreadDescription"           : "Attacher un fil de discussion au sondage ?",
+        "closePollLabel"                        : "Fermer le sondage",
+        "memberNoPermsAndGuildHasNoRole"        : "Désolé ! Vous n'avez actuellement pas le rôle \"Poll Manager\" ni l'autorisation \"MANAGER_GUILD\". J'ai essayé de créer ce rôle pour vous mais je n'ai pas la permission `MANAGE_ROLES`. Vous devrez contacter l'administrateur de votre serveur pour obtenir de l'aide. Vous pouvez soit lui demander de vous donner la permission `MANAGE_GUILD`, soit de me donner la permission `MANAGE_ROLES` et vous pourrez exécuter la commande à nouveau. Le bot créera le rôle \"Poll Manager\" requis et vous pouvez demander à l'administrateur du serveur de vous le donner.",
+        "roleCreateReason"                      : "Création automatique de \"Poll Manager\" pour les fonctions des robots.",
+        "memberNoPermsAndServerNoRoleCreated"   : "Il semble que vous n'ayez pas la permission `MANAGE_GUILD` pour créer un sondage, j'ai créé le rôle ``Gestionnaire de sondage`` pour que vous puissiez l'utiliser à la place. Ajoutez simplement le rôle à vous-même et à toute autre personne que vous souhaitez autoriser à créer et fermer des sondages.",
+        "memberNoPermsNoRole"                   : "Désolé, mais vous n'avez pas l'autorisation `MANAGE_GUILD`. Vous n'avez pas la permission `MANAGE_GUILD` ou le rôle \"Poll Manager\".",
+        "pollTooManyItems"                      : "Désolé ! Le sondage que vous avez essayé de créer comporte plus de 25 éléments (%s). Il s'agit malheureusement d'une limitation de l'API et non d'une limitation de ma part, veuillez supprimer certains éléments du sondage.",
+        "pollHasDuplicates"                     : "Désolé ! Vous avez tenté de créer un sondage avec des éléments en double. Veuillez vérifier votre commande et éviter de mettre des cas identiques. `one,one`\n**NOTE** : Si vous créez un sondage comme `un, un`, il sera valide et téléchargé (en raison de l'espace). Je ne peux pas promettre que cela produira des résultats stables pour vous, mais si vous avez absolument besoin des mêmes éléments de sondage, c'est la façon dont vous pouvez le faire.",
+        "pollItemTooLong"                       : "Désolé ! L'un des éléments de votre sondage a dépassé **100** caractères. Veuillez recréer le sondage et utiliser moins de caractères pour l'un des éléments de votre sondage. Il s'agit d'une limitation de l'API et non de mon fait. Veuillez supprimer certains éléments du sondage.",
+        "embedTitleTooLong"                     : "Désolé ! Le titre de votre sondage dépasse **256** caractères. Veuillez recréer le sondage et utiliser moins de caractères dans le titre. Il s'agit d'une limitation de l'API et non de mon fait.",
+        "embedDescriptionTooLong"               : "Désolé ! La description de votre sondage a dépassé 4096 caractères. Veuillez recréer le sondage et utiliser moins de caractères dans la description. Il s'agit d'une limitation de l'API et non de mon fait.",
+        "couldNotCreateMessageBody"             : "Désolé ! Pour une raison quelconque, je n'ai pas pu envoyer le message pour le sondage. Cette erreur se produit très rarement, veuillez créer un ticket sur notre serveur d'assistance et décrivez-nous le mieux possible ce que vous avez fait pendant la création du sondage.",
+        "threadCreateReason"                    : "Fil de discussion créé pour un sondage.",
+        "threadCreateErrorTitle"                : "Erreur de création de fil de discussion",
+        "threadCreateErrorDescription"          : "Une erreur s'est produite lors de la création du fil de discussion pour le sondage. Veuillez ajouter les permissions `MANAGE_THREADS` et `CREATE_PUBLIC_THREADS` pour accéder à cette fonctionnalité.",
+        "item"                                  : "Article(s)",
+        "results"                               : "Résultats (Votes totaux : [graphTotalVotes])",
+        "publicPollUpdateVoteEmbedError"        : "Une erreur s'est produite lors de la mise à jour du message pour afficher les nouveaux résultats. Veuillez noter que vos résultats ont été sauvegardés.",
+        "publicPollNewVoteEmbedError"           : "Une erreur s'est produite lors de la mise à jour du message pour afficher les nouveaux résultats. Veuillez noter que vos résultats ont été sauvegardés.",
+        "closePollEmbedError"                   : "Erreur lors de la clôture du sondage ! Je n'ai pas pu mettre à jour le message pour afficher les résultats finaux. Veuillez réessayer plus tard ou créer un ticket dans notre serveur de support pour une assistance supplémentaire.",
+        "changedVote"                           : "Vous avez changé votre vote de \"$1\" to \"$2\".",
+        "pollChoiceSelected"                    : "Vous sélectionné \"$1\"",
+        "pollClosedBy"                          : "Sondage fermé par $1",
+        "pollCloseSucess"                       : "Fermeture réussie du sondage.",
+        "noLongerExistsInDatabase"              : "Désolé, le sondage avec lequel vous essayez d'interagir n'existe plus dans notre base de données. Veuillez supprimer le message du sondage avec lequel vous avez essayé d'interagir.",
+        "errorUpdatingDatabase"                 : "Désolé, mais il semble qu'il y ait eu un problème dans la base de données lors de l'enregistrement de votre vote. Veuillez réessayer ou créer un ticket dans le serveur de support de SimplePollBot.",
+        "displayPollingDataError"               : "Il y a eu un problème d'affichage de vos données de sondage. Veuillez contacter immédiatement le serveur d'assistance de SimplePollBot pour obtenir de l'aide.",
+        "helpCommandName"                       : "aider",
+        "helpCommandDescription"                : "Informations sur la création de votes / liens utiles.",
+        "helpLabel1"                            : "Soutien à Discord",
         "helpLabel2"                            : "GitHub",
         "helpLabel3"                            : "Ko-Fi",
-        "helpTitle"                             : "Simple Poll Bot Help",
-        "helpDescription"                       : "All information is avaliable on our [GitHub](https://github.com/0x29a-blink/pollbot) or the [Support Discord](https://discord.gg/VZkY8mDJGh).",
-        "privacyCommandName"                    : "privacy",
-        "privacyCommandDescription"             : "A very scuffed 'privacy policy'",
-        "privacyTitle"                          : "Privacy Policy",
-        "privacyDescription"                    : "```What Information Is Stored?```messageId, pollsGuildName, pollsGuildId, pollsChannelName, pollsChannelId, pollTitle, pollDescription, pollItem, pollVoteCount, pollViewVotesFlag (public poll or not), pollVoteUserName, pollVoteUserId, pollVoteUserItem, lastInteraction```Why we store the information and how we use it.```All of the information we store is for the functionality of the bot and for future feature additions. The main use of the information stored is to validate votes between users so there's no duplication of votes in the poll. \n\nThe bot is open source and can be viewed by anyone on [the github for the bot](https://github.com/0x29a-blink/pollbot) ```How can I contact you for removal of my data?```Via our [support discord](https://discord.gg/hUge5epA) and creating a ticket there.",
-        "privacyFooter"                         : "All of this data is temporary and is immediately removed upon the closing of the poll or after 1 month of poll inactivity.",
-        "infoCommandName"                       : "info",
-        "infoCommandDescription"                : "Information and stats about Simple Poll Bot",
+        "helpTitle"                             : "Simple Poll Bot Aide",
+        "helpDescription"                       : "Toutes les informations sont disponibles sur notre site [GitHub](https://github.com/0x29a-blink/pollbot) ou la [Support Discord](https://discord.gg/VZkY8mDJGh).",
+        "privacyCommandName"                    : "confidentialité",
+        "privacyCommandDescription"             : "Simple Poll Bot's 'Politique de confidentialité'",
+        "privacyTitle"                          : "Politique de confidentialité",
+        "privacyDescription"                    : "```Quelles sont les informations stockées?```messageId, pollsGuildName, pollsGuildId, pollsChannelName, pollsChannelId, pollTitle, pollDescription, pollItem, pollVoteCount, pollViewVotesFlag (sondage public ou non), pollVoteUserName, pollVoteUserId, pollVoteUserItem, lastInteraction```Pourquoi nous conservons les informations et comment nous les utilisons.```Toutes les informations que nous stockons sont destinées à la fonctionnalité du robot et à l'ajout de nouvelles fonctionnalités. Les informations stockées servent principalement à valider les votes entre les utilisateurs afin d'éviter la duplication des votes dans le sondage. \n\n Le robot est open source et peut être visualisé sur  [the github for the bot](https://github.com/0x29a-blink/pollbot) ```Comment puis-je vous contacter pour demander la suppression de mes données?```Avec Notre [support discord](https://discord.gg/hUge5epA) et y créer un ticket.",
+        "privacyFooter"                         : "Toutes ces données sont temporaires et sont immédiatement supprimées à la clôture du sondage ou après un mois d'inactivité..",
+        "infoCommandName"                       : "Info",
+        "infoCommandDescription"                : "Informations et statistiques sur Simple Poll Bot",
         "infoTitle"                             : "Information",
-        "infoFieldTotalPollsCreated"            : "Total Polls Created",
-        "infoFieldTotalVotes"                   : "Total Votes",
-        "infoFieldApiLatency"                   : "API Latency",
-        "infoFieldGuildCount"                   : "Server Count",
-        "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldTotalPollsCreated"            : "Total des sondages créés",
+        "infoFieldTotalVotes"                   : "Votes totaux",
+        "infoFieldApiLatency"                   : "Latence de l'API",
+        "infoFieldGuildCount"                   : "Nombre de serveurs",
+        "infoFieldBotUptime"                    : "Temps de fonctionnement du bot",
+        "infoFieldServerUptime"                 : "Temps de disponibilité du serveur",
+        "translators"                           : "Simple Poll Bot's Traducteurs\n French / Français: <@338695805504454668>"
     },
     "hr" : {
         "languageName"                  : "Croatian",
@@ -438,7 +444,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "it" : {
         "languageName"                  : "Italian",
@@ -501,7 +508,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "lt" : {
         "languageName"                  : "Lithuanian",
@@ -564,7 +572,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "hu" : {
         "languageName"                  : "Hungarian",
@@ -627,7 +636,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "nl" : {
         "languageName"                  : "Dutch",
@@ -690,7 +700,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "no" : {
         "languageName"                  : "Norwegian",
@@ -753,7 +764,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "pl" : {
         "languageName"                  : "Polish",
@@ -816,7 +828,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "pt-BR" : {
         "languageName"                  : "Portuguese, Brazilian",
@@ -879,7 +892,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "ro" : {
         "languageName"                  : "Romanian, Romania",
@@ -942,7 +956,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "fi" : {
         "languageName"                  : "Finnish",
@@ -1005,7 +1020,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "sv-SE" : {
         "languageName"                  : "Swedish",
@@ -1068,7 +1084,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "vi" : {
         "languageName"                  : "Vietnamese",
@@ -1131,7 +1148,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "tr" : {
         "languageName"                  : "Turkish",
@@ -1194,7 +1212,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "cs" : {
         "languageName"                  : "Czech",
@@ -1257,7 +1276,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "el" : {
         "languageName"                  : "Greek",
@@ -1320,7 +1340,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "bg" : {
         "languageName"                  : "Bulgarian",
@@ -1383,7 +1404,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "ru" : {
         "languageName"                  : "Russian",
@@ -1446,7 +1468,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "uk" : {
         "languageName"                  : "Ukrainian",
@@ -1509,7 +1532,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "hi" : {
         "languageName"                  : "Hindi",
@@ -1572,7 +1596,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "th" : {
         "languageName"                  : "Thai",
@@ -1635,7 +1660,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "zh-CN" : {
         "languageName"                  : "Chinese, China",
@@ -1698,7 +1724,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "ja" : {
         "languageName"                  : "Japanese",
@@ -1761,7 +1788,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "zh-TW" : {
         "languageName"                  : "Chinese, Taiwan",
@@ -1824,7 +1852,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "ko" : {
         "languageName"                  : "Korean",
@@ -1887,7 +1916,8 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     },
     "en-GB" : {
         "languageName"                  : "English, UK",
@@ -1950,6 +1980,7 @@
         "infoFieldApiLatency"                   : "API Latency",
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
-        "infoFieldServerUptime"                 : "Server Uptime"
+        "infoFieldServerUptime"                 : "Server Uptime",
+        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
     }
 }
