@@ -43,6 +43,7 @@ module.exports = {
 		const embed = new EmbedBuilder()
 			.setColor('#ff6633')
 			.setTitle(locale[interaction.locale].infoTitle)
+			.setDescription(locale[interaction.locale].translators)
 			.setThumbnail('https://i.imgur.com/MsYPWMV.png')
 			.setAuthor({ name: 'blink.dclxvi', iconURL: 'https://i.imgur.com/C0ZRGdo.gif', url: 'https://twitch.tv/dotblink' })
 			.setURL('https://github.com/0x29a-blink/pollbot')
