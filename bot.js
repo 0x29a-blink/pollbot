@@ -72,7 +72,7 @@ client.on(Events.InteractionCreate, async interaction => {
 						inline: true,
 					})
 					.addFields({
-						name: locale[interact.locale].results.replace('[graphTotalVotes]', graphTotalVotes),
+						name: locale[interact.locale].results.replace('$1', graphTotalVotes),
 						value: graph,
 						inline: true,
 					});
@@ -111,7 +111,7 @@ client.on(Events.InteractionCreate, async interaction => {
 						inline: true,
 					})
 					.addFields({
-						name: locale[interact.locale].results.replace('[graphTotalVotes]', graphTotalVotes),
+						name: locale[interact.locale].results.replace('$1', graphTotalVotes),
 						value: graph,
 						inline: true,
 					});
@@ -152,7 +152,7 @@ client.on(Events.InteractionCreate, async interaction => {
 						inline: true,
 					})
 					.addFields({
-						name: locale[interact.locale].results.replace('[graphTotalVotes]', graphTotalVotes),
+						name: locale[interact.locale].results.replace('$1', graphTotalVotes),
 						value: graph,
 						inline: true,
 					})
