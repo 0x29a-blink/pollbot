@@ -120,7 +120,7 @@ module.exports = {
 
         if (pollListArr.length > 25) {
             interaction.reply({
-                    content: locale[interaction.locale].pollTooManyItems.replace('%s', pollListArr.length),
+                    content: locale[interaction.locale].pollTooManyItems.replace('$1', pollListArr.length),
                     ephemeral: true,
                 });
             console.log(`[ [1;31mPoll Create Info[0m ] ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id} tried to create a poll with too many items [${pollListArr.length}].`);
