@@ -349,7 +349,7 @@
         "threadCreateErrorTitle"                : "Erreur de création de fil de discussion",
         "threadCreateErrorDescription"          : "Une erreur s'est produite lors de la création du fil de discussion pour le sondage. Veuillez ajouter les permissions `MANAGE_THREADS` et `CREATE_PUBLIC_THREADS` pour accéder à cette fonctionnalité.",
         "item"                                  : "Article(s)",
-        "results"                               : "Résultats (Votes totaux : [graphTotalVotes])",
+        "results"                               : "Résultats (Votes totaux : $1)",
         "publicPollUpdateVoteEmbedError"        : "Une erreur s'est produite lors de la mise à jour du message pour afficher les nouveaux résultats. Veuillez noter que vos résultats ont été sauvegardés.",
         "publicPollNewVoteEmbedError"           : "Une erreur s'est produite lors de la mise à jour du message pour afficher les nouveaux résultats. Veuillez noter que vos résultats ont été sauvegardés.",
         "closePollEmbedError"                   : "Erreur lors de la clôture du sondage ! Je n'ai pas pu mettre à jour le message pour afficher les résultats finaux. Veuillez réessayer plus tard ou créer un ticket dans notre serveur de support pour une assistance supplémentaire.",
