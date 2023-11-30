@@ -74,13 +74,15 @@ module.exports = {
         const pollListArr = pollItems.split(',');
         const labelArr = pollListArr.map(x => ({ label: x, value: x, voteCount: 0 }));
 
+        console.log(`[ [1;31mPoll Create Exec[0m ] ${interaction.member.displayName}[${interaction.member.id}] ran the following command [1;46m/poll title: ${embedTitle} description: ${embedDescription} items: ${pollItems} public: ${viewVotes} thread: ${createThread}[0m in ${interaction.guild.name}[${interaction.guild.id}](${interaction.guildMemberCount})`);
+
         if (!guildHasPollManagerRole && !memberHasManageGuild && !appHasManageRoles) {
             interaction.reply({
                 content: locale[interaction.locale].memberNoPermsAndGuildHasNoRole,
                 ephemeral: true,
             })
             .catch(console.error);
-            console.log(`[ [1;31mPoll Create Info[0m ] Attempted to create the "Poll Manager" role in but has no permissions ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id}]"`);
+            console.log(`[ [1;31mPoll Create Info[0m ] Attempted to create the "Poll Manager" role in but has no permissions ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) / ${interaction.member.displayName}[${interaction.member.id}]"`);
 
             return 0;
         }
@@ -251,7 +253,7 @@ module.exports = {
                     embeds: [threadEmbed],
                     ephemeral: true,
                 });
-                console.log('[ [1;31mPoll Create Info[0m ]Couldn\'t create thread.');
+                console.log(`[ [1;31mPOLL CREATE ERROR[0m ] Couldn't create thread. ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) / ${interaction.member.displayName}[${interaction.member.id}]`);
             }
         }
     },

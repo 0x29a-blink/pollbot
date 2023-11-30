@@ -95,7 +95,7 @@ client.on(Events.InteractionCreate, async interaction => {
 						ephemeral: true,
 					})
 					.catch(console.error);
-				console.log(`[ [1;34mPoll Interact Info[0m ] saved ${interact.guild.name}[${interact.guild.id}](${interact.guild.memberCount}) ${interact.member.displayName}[${interact.member.id}]s new choice of "${firstChoice}" to "${newChoice}".`);
+				console.log(`[ [1;34mPoll Interact Info[0m ] saved ${interact.guild.name}[${interact.guild.id}](${interact.guild.memberCount}) ${interact.member.displayName}[${interact.member.id}]s new choice of "${firstChoice}" to "${newChoice}" to ${interaction.message.id}.`);
 				break;
 			}
 
@@ -135,7 +135,7 @@ client.on(Events.InteractionCreate, async interaction => {
 						ephemeral: true,
 					})
 					.catch(console.error);
-				console.log(`[ [1;34mPoll Interact Info[0m ] saved ${interact.guild.name}[${interact.guild.id}](${interact.guild.memberCount}) ${interact.member.displayName}[${interact.member.id}]s choice of "${newChoice}".`);
+				console.log(`[ [1;34mPoll Interact Info[0m ] saved ${interact.guild.name}[${interact.guild.id}](${interact.guild.memberCount}) ${interact.member.displayName}[${interact.member.id}]s choice of "${newChoice}" to ${interaction.message.id}.`);
 				break;
 			}
 
@@ -241,7 +241,7 @@ client.on(Events.InteractionCreate, async interaction => {
 					ephemeral: true,
 				})
 				.catch(console.error);
-			console.log(`[ [1;34mPoll Interact Info[0m ] saved ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id}]s new choice of "${originalChoice.rows[0].pollvoteuseritem}" to "${userChoice}".`);
+			console.log(`[ [1;34mPoll Interact Info[0m ] saved ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id}]s new choice of "${originalChoice.rows[0].pollvoteuseritem}" to "${userChoice}". to ${interaction.message.id}.`);
 
 			return 0;
 		}
@@ -282,7 +282,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				ephemeral: true,
 			})
 			.catch(console.error);
-		console.log(`[ [1;34mPoll Interact Info[0m ] saved ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id}]s choice of "${userChoice}".`);
+		console.log(`[ [1;34mPoll Interact Info[0m ] saved ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id}]s choice of "${userChoice}" to ${interaction.message.id}.`);
 	}
 
 	if (interaction.customId === 'closepoll') {
@@ -328,6 +328,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
 			return 0;
 		}
+		console.log(`[ [1;34mPoll Button Info[0m ] ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) / ${interaction.member.displayName}[${interaction.member.id}] closed the poll ${interaction.message.id}.`);
 	}
 });
 
