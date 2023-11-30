@@ -33,6 +33,7 @@ module.exports = {
             interaction.reply({
                 embeds: [embed],
             }).then(() => {
+                if (stdout == 'Already up to date.') return 0;
                     try {
                         return process.exit(1);
                     } catch (err) {
