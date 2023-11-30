@@ -1,5 +1,6 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const { EmbedBuilder } = require('discord.js');
+const exec = require('child_process').exec;
 
 module.exports = {
 
@@ -31,7 +32,7 @@ module.exports = {
         });
 
         try {
-            process.exit(1);
+            exec('pm2 restart 0');
         } catch (err) {
             return interaction.reply({
                 content: 'There was an error restarting the bot. Please go restart the process manually.',
