@@ -40,7 +40,7 @@ module.exports = {
 		const totalPolls = await pool.query('SELECT pollsCreated FROM botInfo WHERE name = \'main\''),
 			totalVotes = await pool.query('SELECT votesMade FROM botInfo WHERE name = \'main\''),
 			guildCount = await interaction.client.shard.fetchClientValues('guilds.cache.size').then(results => {return `${results.reduce((acc, gC) => acc + gC, 0)}`;}).catch(console.error),
-			uptimes = (await interaction.client.shard.fetchClientValues('uptime')).map(item => formatDuration(item, 'miliseconds')).join('\n');
+			uptimes = await interaction.client.shard.fetchClientValues('uptime');
 
 		const embed = new EmbedBuilder()
 			.setColor('#ff6633')
@@ -72,7 +72,7 @@ module.exports = {
 			})
 			.addFields({
 				name: locale[interaction.locale].infoFieldBotUptime,
-				value: `${uptimes}`,
+				value: `${uptimes.map((item, index) => `Shard #${index + 1}: ${formatDuration(item, 'miliseconds')}`).join('\n\n')}`,
 				inline: true,
 			})
 			.addFields({
