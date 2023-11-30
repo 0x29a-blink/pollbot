@@ -61,11 +61,6 @@ module.exports = {
 				inline: true,
 			})
 			.addFields({
-				name: locale[interaction.locale].infoFieldApiLatency,
-				value: `${Math.round(interaction.client.ws.ping)}`,
-				inline: true,
-			})
-			.addFields({
 				name: locale[interaction.locale].infoFieldGuildCount,
 				value: `${guildCount}`,
 				inline: true,
@@ -78,6 +73,11 @@ module.exports = {
 			.addFields({
 				name: locale[interaction.locale].infoFieldServerUptime,
 				value: `${formatDuration(os.uptime(), 'seconds')}`,
+				inline: true,
+			})
+			.addFields({
+				name: locale[interaction.locale].infoFieldApiLatency,
+				value: `${Math.round(interaction.client.ws.ping)}`,
 				inline: true,
 			})
 
