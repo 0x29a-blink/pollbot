@@ -39,7 +39,7 @@ module.exports = {
 	async execute(interaction) {
 		const totalPolls = await pool.query('SELECT pollsCreated FROM botInfo WHERE name = \'main\''),
 			totalVotes = await pool.query('SELECT votesMade FROM botInfo WHERE name = \'main\''),
-			count = await interaction.client.shard.fetchClientValues('guilds.cache.size').then(results => {return `${results.reduce((acc, guildCount) => acc + guildCount, 0)}`;}).catch(console.error);
+			guildCount = await interaction.client.shard.fetchClientValues('guilds.cache.size').then(results => {return `${results.reduce((acc, gC) => acc + gC, 0)}`;}).catch(console.error);
 
 		const embed = new EmbedBuilder()
 			.setColor('#ff6633')
@@ -66,7 +66,7 @@ module.exports = {
 			})
 			.addFields({
 				name: locale[interaction.locale].infoFieldGuildCount,
-				value: `${count}`,
+				value: `${guildCount}`,
 				inline: true,
 			})
 			.addFields({

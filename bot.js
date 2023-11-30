@@ -38,6 +38,8 @@ for (const file of eventFiles) {
 
 client.on(Events.InteractionCreate, async interaction => {
 
+	// add implementation for monthly poll too-old clearing.
+
 	async function displayPollingData(scenario, firstChoice, newChoice, interact) {
 		const result = await pool.query('SELECT * FROM polls WHERE messageId = $1 AND pollVoteUserId IS NULL ORDER BY pollVoteCount DESC', [interact.message.id]),
 			pollItemLoop = [],
