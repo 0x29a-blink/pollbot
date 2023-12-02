@@ -2,44 +2,83 @@
     "en-US" : {
         "languageName"                  : "English, US",
         "nativeLanguageName"            : "English, US",
+
+                                                // do not captilize or use characters such as /    if language requires a space substitute it with a _ 
         "pollCommandName"                       : "poll",
         "pollCommandDescription"                : "Create a new poll.",
+
+                                                // do not captilize or use characters such as /    if language requires a space substitute it with a _ 
         "pollOptionTitleName"                   : "title",
         "pollOptionTitleDescription"            : "Sets the title of the poll.",
+
+                                                // do not captilize or use characters such as /    if language requires a space substitute it with a _ 
         "pollOptionDescriptionName"             : "description",
+        
+                                                // PLEASE DO NOT EDIT \\n
         "pollOptionDescriptionDescription"      : "The polls description... Create a newline in the poll description by typing \\n",
+
+                                                // do not captilize or use characters such as /    if language requires a space substitute it with a _ 
         "pollOptionItemsName"                   : "items",
         "pollOptionItemsDescription"            : "Items to vote on. SEPARATE EACH ITEM WITH A COMMA ( , )",
+
+                                                // do not captilize or use characters such as /    if language requires a space substitute it with a _ 
         "pollOptionPublicName"                  : "public",
         "pollOptionPublicDescription"           : "Allows you to make the results of the poll public at all times, even before you close the poll.",
+
+                                                // do not captilize or use characters such as /    if language requires a space substitute it with a _ 
         "pollOptionThreadName"                  : "thread",
         "pollOptionThreadDescription"           : "Attach a thread to the poll?",
         "closePollLabel"                        : "Close Poll",
+
+                                                // PLEASE DO NOT EDIT \"Poll Manager\"  `MANAGE_ROLES`  `MANAGE_GUILD`
         "memberNoPermsAndGuildHasNoRole"        : "Sorry! You currently don't have the \"Poll Manager\" role or the `MANAGE_GUILD` permission. I attempted to create this role for you but I am lacking the `MANAGE_ROLES` permission. You will need to contact your server administrator for support. You can either ask them to give you the `MANAGE_GUILD` permission or you can ask them to give me the `MANAGE_ROLES` permission and you can execute the command again. The bot will create the \"Poll Manager\" role required and you can ask your server admin to give you it.",
+                                                
+                                                // PLEASE DO NOT EDIT \"Poll Manager\"
         "roleCreateReason"                      : "Automatically creating \"Poll Manager\" for bot functions.",
+                                                
+                                                // PLEASE DO NOT EDIT \"Poll Manager\"  `MANAGE_GUILD`
         "memberNoPermsAndServerNoRoleCreated"   : "It appears you don't have the permission `MANAGE_GUILD` to create a poll, I've created the role `\"Poll Manager\"` for you to utilize instead. Simply add the role to yourself and anyone else that you want to have permissions to create and close polls.",
+                                                
+                                                // PLEASE DO NOT EDIT \"Poll Manager\"  `MANAGE_GUILD`
         "memberNoPermsNoRole"                   : "Sorry! You don't have the `MANAGE_GUILD` permission or \"Poll Manager\" role.",
+                                                
+                                                // PLEASE DO NOT EDIT ($1)
         "pollTooManyItems"                      : "Sorry! The poll you tried to create has more than 25 items ($1) unfortunately this is an API limitation and not my own, please remove some items from the poll.",
+                                                
+                                                // PLEASE DO NOT EDIT \n\n                                                                                                             V - NO SPACE                                     V - SPACE
         "pollHasDuplicates"                     : "Sorry! You attempted to create a poll with duplicate items. Please check your command and avoid putting identical cases.\n\nex. `one,one`\n\n**NOTE**: If you create a poll like `one, one` it will be valid and upload (due to the space) I can't promise that this will produce stable results for you but if you absolutely require the same poll items that is how you can do it.",
         "pollItemTooLong"                       : "Sorry! One of the items in your poll exceeded **100** characters please recreate the poll and use less characters on one of your poll items. This is an API limitation and not my own, please remove some items from the poll.",
-        "pollItemTooShort"                      : "Sorry! One of the items in your poll has no characters. Please make sure to not include trailing commas for your items. This is an API limitation and not my own, please remove some items from the poll.",        "embedTitleTooLong"                     : "Sorry! The title of your poll exceeded **256** chracters please recreate the poll and use less characters in the title. This is an API limitation and not my own",
+        "pollItemTooShort"                      : "Sorry! One of the items in your poll has no characters. Please make sure to not include trailing commas for your items. This is an API limitation and not my own, please remove some items from the poll.",        
+        "embedTitleTooLong"                     : "Sorry! The title of your poll exceeded **256** chracters please recreate the poll and use less characters in the title. This is an API limitation and not my own",
         "embedDescriptionTooLong"               : "Sorry! the description of your poll exceeded **4096** characters please recreate the poll and use less characters in the description. This is an API limitation and not my own.",
         "couldNotCreateMessageBody"             : "Sorry! For some reason I could not send the message for the poll. This error occurs very rarely, please create a ticket on our support server and tell us everything you can about what you did while creating the poll.",
         "threadCreateReason"                    : "Thread created for a poll.",
         "threadCreateErrorTitle"                : "Thread Creation Error",
+
+                                                // PLEASE DO NOT EDIT \n\n  `MANAGE_THREADS`    `CREATE_PRIVATE_THREADS`    `CREATE_PUBLIC_THREADS`
         "threadCreateErrorDescription"          : "An error occured while creating the thread for the poll.\n\nPlease add the `MANAGE_THREADS`, `CREATE_PRIVATE_THREADS` and the `CREATE_PUBLIC_THREADS` permission to access this feature.",
         "item"                                  : "Item(s)",
+
+                                                // PLEASE DO NOT EDIT ($1)
         "results"                               : "Results (Total Votes: $1)",
         "publicPollUpdateVoteEmbedError"        : "There has been an error updating the message to display the new results, please note that your results have been saved.",
         "publicPollNewVoteEmbedError"           : "There has been an error updating the message to display the new results, please note that your results have been saved.",
         "closePollEmbedError"                   : "Eror closing your poll! I could not update the message to display the final results. Please try again later or create a ticket in our support server for additional assistance.",
+
+                                                // PLEASE DO NOT EDIT \"$1\"    \"$2\"
         "changedVote"                           : "You've changed your vote from \"$1\" to \"$2\".",
+
+                                                // PLEASE DO NOT EDIT \"$1\"
         "pollChoiceSelected"                    : "You selected \"$1\"",
+                                            
+                                                // PLEASE DO NOT EDIT $1
         "pollClosedBy"                          : "Poll closed by $1",
         "pollCloseSucess"                       : "Closed the poll sucessfully.",
         "noLongerExistsInDatabase"              : "Sorry the poll you are trying to interact with no longer exists in our database please delete the poll message you tried to interact with.",
         "errorUpdatingDatabase"                 : "Sorry but there seems to have been some trouble in the database with registering your vote. Please try again or create a ticket in the SimplePollBot support server.",
         "displayPollingDataError"               : "There was an issue somewhere displaying your polling data please reach out immediately to the SimplePollBot support server for assistance.",
+
+                                                // do not captilize or use characters such as /    if language requires a space substitute it with a _  
         "helpCommandName"                       : "help",
         "helpCommandDescription"                : "Information on creating votes / helpful links.",
         "helpLabel1"                            : "Support Discord",
@@ -47,11 +86,15 @@
         "helpLabel3"                            : "Ko-Fi",
         "helpTitle"                             : "Simple Poll Bot Help",
         "helpDescription"                       : "All information is avaliable on our [GitHub](https://github.com/0x29a-blink/pollbot) or the [Support Discord](https://discord.gg/VZkY8mDJGh).",
+
+                                                // do not captilize or use characters such as /    if language requires a space substitute it with a _ 
         "privacyCommandName"                    : "privacy",
         "privacyCommandDescription"             : "Simple Poll Bot's privacy policy.",
         "privacyTitle"                          : "Privacy Policy",
         "privacyDescription"                    : "```What Information Is Stored?```messageId, pollsGuildName, pollsGuildId, pollsChannelName, pollsChannelId, pollTitle, pollDescription, pollItem, pollVoteCount, pollViewVotesFlag (public poll or not), pollVoteUserName, pollVoteUserId, pollVoteUserItem, lastInteraction```Why we store the information and how we use it.```All of the information we store is for the functionality of the bot and for future feature additions. The main use of the information stored is to validate votes between users so there's no duplication of votes in the poll. \n\nThe bot is open source and can be viewed by anyone on [the github for the bot](https://github.com/0x29a-blink/pollbot) ```How can I contact you for removal of my data?```Via our [support discord](https://discord.gg/hUge5epA) and creating a ticket there.",
         "privacyFooter"                         : "All of this data is temporary and is immediately removed upon the closing of the poll or after 1 month of poll inactivity.",
+
+                                                // do not captilize or use characters such as /    if language requires a space substitute it with a _ 
         "infoCommandName"                       : "info",
         "infoCommandDescription"                : "Information and stats about Simple Poll Bot",
         "infoTitle"                             : "Information",
@@ -61,6 +104,8 @@
         "infoFieldGuildCount"                   : "Server Count",
         "infoFieldBotUptime"                    : "Bot Uptime",
         "infoFieldServerUptime"                 : "Server Uptime",
-        "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
-        }
+
+                                                // PLEASE DO NOT EDIT $1
+        "translators"                           : "Simple Poll Bot's Translators$1"
+    }
 }
