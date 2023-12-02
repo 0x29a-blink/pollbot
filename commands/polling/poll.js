@@ -158,6 +158,8 @@ module.exports = {
                 ephemeral: true,
             });
             console.log(`[ [1;31mPoll Create Info[0m ] ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id} tried to create a poll item with too few characters.`);
+
+            return 0;
         }
         if (embedTitle.length > 256) {
             interaction.reply({
