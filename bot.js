@@ -37,6 +37,10 @@ for (const file of eventFiles) {
 }
 
 client.on(Events.InteractionCreate, async interaction => {
+	function getLocalization(property) {
+		const selectedLocale = locale[interaction.locale] || locale['en-US'];
+		return selectedLocale[property] || locale['en-US'][property];
+	}
 
 	// add implementation for monthly poll too-old clearing.
 
@@ -199,7 +203,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
 		if (!pollExistsInDatabase.rows[0].exists === true) {
 			interaction.reply({
-					content: locale[interaction.locale].noLongerExistsInDatabase,
+					content: getLocalization('noLongerExistsInDatabase'),
 					ephemeral: true,
 				})
 				.catch(console.error);
@@ -216,7 +220,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				await pool.query('UPDATE polls SET lastInteraction = $1', [moment().format('MM-DD-YYYY HH:mm:ss')]);
 			} catch (error) {
 				interaction.reply({
-					content: locale[interaction.locale].errorUpdatingDatabase,
+					content: getLocalization('errorUpdatingDatabase'),
 					ephemeral: true,
 				});
 				console.error(`[ [1;31mPOLL INTERACT ERROR[0m ] Database error in the update user option section.\n${error}\n [1;35mERROR END[0m`);
@@ -228,7 +232,7 @@ client.on(Events.InteractionCreate, async interaction => {
 					await displayPollingData('publicPollUpdateVote', originalChoice.rows[0].pollvoteuseritem, userChoice, interaction);
 				} catch (error) {
 					interaction.reply({
-						content: locale[interaction.locale].errorUpdatingDatabase,
+						content: getLocalization('errorUpdatingDatabase'),
 						ephemeral: true,
 					});
 					console.error(`[ [1;31mDISPLAY POLLING DATA ERROR[0m ]\n${error}\n [1;35mERROR END[0m`);
@@ -238,7 +242,7 @@ client.on(Events.InteractionCreate, async interaction => {
 			}
 
 			await interaction.reply({
-					content: locale[interaction.locale].changedVote.replace(/\$1/g, originalChoice.rows[0].pollvoteuseritem).replace(/\$2/g, userChoice),
+					content: getLocalization('changedVote').replace(/\$1/g, originalChoice.rows[0].pollvoteuseritem).replace(/\$2/g, userChoice),
 					fetchReply: true,
 					ephemeral: true,
 				})
@@ -257,7 +261,7 @@ client.on(Events.InteractionCreate, async interaction => {
 			await pool.query('UPDATE botInfo SET votesMade = votesMade + 1 WHERE name=\'main\'');
 		} catch (error) {
 			interaction.reply({
-				content: locale[interaction.locale].errorUpdatingDatabase,
+				content: getLocalization('errorUpdatingDatabase'),
 				ephemeral: true,
 			});
 			console.error(`[ [1;31mPOLL INTERACT ERROR[0m ] Database error in the create user option section.\n${error}\n [1;35mERROR END[0m`);
@@ -270,7 +274,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				await displayPollingData('publicPollNewVote', null, userChoice, interaction);
 			} catch (error) {
 				interaction.reply({
-					content: locale[interaction.locale].errorUpdatingDatabase,
+					content: getLocalization('errorUpdatingDatabase'),
 					ephemeral: true,
 				});
 				console.error(`[ [1;31mDISPLAY POLLING DATA ERROR[0m ]\n${error}\n [1;35mERROR END[0m`);
@@ -279,7 +283,7 @@ client.on(Events.InteractionCreate, async interaction => {
 			return 0;
 		}
 		await interaction.reply({
-				content: locale[interaction.locale].pollChoiceSelected.replace('$1', [userChoice]),
+				content: getLocalization('pollChoiceSelected').replace('$1', [userChoice]),
 				fetchReply: true,
 				ephemeral: true,
 			})
@@ -292,7 +296,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
 		if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild) && !interaction.member.roles.cache.some(role => role.name === 'Poll Manager')) {
 			interaction.reply({
-					content: locale[interaction.locale].memberNoPermsNoRole,
+					content: getLocalization('memberNoPermsNoRole'),
 					ephemeral: true,
 				})
 				.catch(console.error);
@@ -303,7 +307,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
 		if (!pollExistsInDatabase.rows[0].exists === true) {
 			interaction.reply({
-					content: locale[interaction.locale].noLongerExistsInDatabase,
+					content: getLocalization('noLongerExistsInDatabase'),
 					ephemeral: true,
 				})
 				.catch(console.error);
@@ -323,7 +327,7 @@ client.on(Events.InteractionCreate, async interaction => {
 			pool.query('DELETE FROM polls WHERE messageId = $1', [interaction.message.id]);
 		} catch (error) {
 			interaction.reply({
-				content: locale[interaction.locale].errorUpdatingDatabase,
+				content: getLocalization('errorUpdatingDatabase'),
 				ephemeral: true,
 			});
 			console.error(`[ [1;31mDISPLAY POLLING DATA ERROR[0m ]\n${error}\n [1;35mERROR END[0m`);

@@ -12,28 +12,32 @@ module.exports = {
 		.setDescription('Information on creating votes / helpful links.')
 		.setDescriptionLocalizations(createLocalizations('helpCommandDescription')),
 	async execute(interaction) {
+		function getLocalization(property) {
+            const selectedLocale = locale[interaction.locale] || locale['en-US'];
+            return selectedLocale[property] || locale['en-US'][property];
+        }
 		const button = new ActionRowBuilder()
 			.addComponents(
 				new ButtonBuilder()
-				.setLabel(locale[interaction.locale].helpLabel1)
+				.setLabel(getLocalization('helpLabel1'))
 				.setURL('https://discord.gg/hUge5epA')
 				.setStyle('Link'),
 				new ButtonBuilder()
-				.setLabel(locale[interaction.locale].helpLabel2)
+				.setLabel(getLocalization('helpLabel2'))
 				.setURL('https://github.com/0x29a-blink/pollbot')
 				.setStyle('Link'),
 
 				new ButtonBuilder()
-				.setLabel(locale[interaction.locale].helpLabel3)
+				.setLabel(getLocalization('helpLabel3'))
 				.setURL('https://ko-fi.com/0x29a')
 				.setStyle('Link'),
 			);
 		const embed = new EmbedBuilder()
 			.setColor('#ff6633')
-			.setTitle(locale[interaction.locale].helpTitle)
+			.setTitle(getLocalization('helpTitle'))
 			.setThumbnail('https://i.imgur.com/MsYPWMV.png')
 			.setAuthor({ name: 'blink.dclxvi', iconURL: 'https://i.imgur.com/C0ZRGdo.gif', url: 'https://twitch.tv/dotblink' })
-			.setDescription(locale[interaction.locale].helpDescription);
+			.setDescription(getLocalization('helpDescription'));
 		return interaction.reply({
 			embeds: [embed],
 			components: [button],

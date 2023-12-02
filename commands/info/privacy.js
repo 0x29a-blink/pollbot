@@ -13,13 +13,17 @@ module.exports = {
 		.setDescription('privacy stuff')
         .setDescriptionLocalizations(createLocalizations('privacyCommandDescription')),
 	async execute(interaction) {
+		function getLocalization(property) {
+            const selectedLocale = locale[interaction.locale] || locale['en-US'];
+            return selectedLocale[property] || locale['en-US'][property];
+        }
 		const embed = new EmbedBuilder()
 			.setColor('#ff6633')
-			.setTitle(locale[interaction.locale].privacyTitle)
+			.setTitle(getLocalization('privacyTitle'))
 			.setThumbnail('https://i.imgur.com/MsYPWMV.png')
 			.setAuthor({ name: 'blink.dclxvi', iconURL: 'https://i.imgur.com/C0ZRGdo.gif', url: 'https://twitch.tv/dotblink' })
-			.setDescription(locale[interaction.locale].privacyDescription)
-			.setFooter({ text: locale[interaction.locale].privacyFooter });
+			.setDescription(getLocalization('privacyDescription'))
+			.setFooter({ text: getLocalization('privacyFooter') });
 		return interaction.reply({
 			embeds: [embed],
 		});

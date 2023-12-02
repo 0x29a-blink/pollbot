@@ -37,6 +37,10 @@ module.exports = {
 		.setDescription('Information and stats about Simple Poll Bot')
 		.setDescriptionLocalizations(createLocalizations('infoCommandDescription')),
 	async execute(interaction) {
+		function getLocalization(property) {
+            const selectedLocale = locale[interaction.locale] || locale['en-US'];
+            return selectedLocale[property] || locale['en-US'][property];
+        }
 		const totalPolls = await pool.query('SELECT pollsCreated FROM botInfo WHERE name = \'main\''),
 			totalVotes = await pool.query('SELECT votesMade FROM botInfo WHERE name = \'main\''),
 			guildCount = await interaction.client.shard.fetchClientValues('guilds.cache.size').then(results => {return `${results.reduce((acc, gC) => acc + gC, 0)}`;}).catch(console.error),
@@ -44,39 +48,39 @@ module.exports = {
 
 		const embed = new EmbedBuilder()
 			.setColor('#ff6633')
-			.setTitle(locale[interaction.locale].infoTitle)
-			.setDescription(locale[interaction.locale].translators)
+			.setTitle(getLocalization('infoTitle'))
+			.setDescription(getLocalization('translators'))
 			.setThumbnail('https://i.imgur.com/MsYPWMV.png')
 			.setAuthor({ name: 'blink.dclxvi', iconURL: 'https://i.imgur.com/C0ZRGdo.gif', url: 'https://twitch.tv/dotblink' })
 			.setURL('https://github.com/0x29a-blink/pollbot')
 
 			.addFields({
-				name: locale[interaction.locale].infoFieldTotalPollsCreated,
+				name: getLocalization('infoFieldTotalPollsCreated'),
 				value: `${JSON.stringify(totalPolls.rows[0].pollscreated)}`,
 				inline: true,
 			})
 			.addFields({
-				name: locale[interaction.locale].infoFieldTotalVotes,
+				name: getLocalization('infoFieldTotalVotes'),
 				value: `${JSON.stringify(totalVotes.rows[0].votesmade)}`,
 				inline: true,
 			})
 			.addFields({
-				name: locale[interaction.locale].infoFieldGuildCount,
+				name: getLocalization('infoFieldGuildCount'),
 				value: `${guildCount}`,
 				inline: true,
 			})
 			.addFields({
-				name: locale[interaction.locale].infoFieldBotUptime,
+				name: getLocalization('infoFieldBotUptime'),
 				value: `${uptimes.map((item, index) => `Shard #${index + 1}: ${formatDuration(item, 'miliseconds')}`).join('\n\n')}`,
 				inline: true,
 			})
 			.addFields({
-				name: locale[interaction.locale].infoFieldServerUptime,
+				name: getLocalization('infoFieldServerUptime'),
 				value: `${formatDuration(os.uptime(), 'seconds')}`,
 				inline: true,
 			})
 			.addFields({
-				name: locale[interaction.locale].infoFieldApiLatency,
+				name: getLocalization('infoFieldApiLatency'),
 				value: `${Math.round(interaction.client.ws.ping)}`,
 				inline: true,
 			})
