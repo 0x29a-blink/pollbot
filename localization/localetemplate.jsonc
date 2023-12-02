@@ -1,4 +1,5 @@
 {
+    // you only need to edit languageName and nativeLanguageName I'll manually add the language code
     "en-US" : {
         "languageName"                  : "English, US",
         "nativeLanguageName"            : "English, US",
