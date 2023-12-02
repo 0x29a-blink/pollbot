@@ -73,12 +73,12 @@ client.on(Events.InteractionCreate, async interaction => {
 					.setDescription(`${interact.message.embeds[0].description}`)
 					.setURL('https://top.gg/bot/911731627498041374')
 					.addFields({
-						name: locale[interact.locale].item,
+						name: getLocalization('item'),
 						value: pollItem,
 						inline: true,
 					})
 					.addFields({
-						name: locale[interact.locale].results.replace('$1', graphTotalVotes),
+						name: getLocalization('results').replace('$1', graphTotalVotes),
 						value: graph,
 						inline: true,
 					});
@@ -89,14 +89,14 @@ client.on(Events.InteractionCreate, async interaction => {
 					});
 				} catch (error) {
 					interact.reply({
-						content: locale[interact.locale].publicPollUpdateVoteEmbedError,
+						content: getLocalization('publicPollUpdateVoteEmbedError'),
 						ephemeral: true,
 					});
 					console.error(`[ [1;31mUPDATE POLL ERROR[0m ] There was an issue sending the publicPollUpdateVote embed.\n ${error}`);
 				}
 
 				await interact.followUp({
-						content: locale[interact.locale].changedVote.replace(/\$1/g, firstChoice).replace(/\$2/g, newChoice),
+						content: getLocalization('changedVote').replace(/\$1/g, firstChoice).replace(/\$2/g, newChoice),
 						fetchReply: true,
 						ephemeral: true,
 					})
@@ -112,12 +112,12 @@ client.on(Events.InteractionCreate, async interaction => {
 					.setDescription(`${interact.message.embeds[0].description}`)
 					.setURL('https://top.gg/bot/911731627498041374')
 					.addFields({
-						name: locale[interact.locale].item,
+						name: getLocalization('item'),
 						value: pollItem,
 						inline: true,
 					})
 					.addFields({
-						name: locale[interact.locale].results.replace('$1', graphTotalVotes),
+						name: getLocalization('results').replace('$1', graphTotalVotes),
 						value: graph,
 						inline: true,
 					});
@@ -128,7 +128,7 @@ client.on(Events.InteractionCreate, async interaction => {
 					});
 				} catch (error) {
 					interact.reply({
-						content: locale[interact.locale].publicPollNewVoteEmbedError,
+						content: getLocalization('publicPollNewVoteEmbedError'),
 						ephemeral: true,
 					});
 
@@ -136,7 +136,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				}
 
 				await interact.followUp({
-						content: locale[interact.locale].pollChoiceSelected.replace('$1', newChoice),
+						content: getLocalization('pollChoiceSelected').replace('$1', newChoice),
 						fetchReply: true,
 						ephemeral: true,
 					})
@@ -153,17 +153,17 @@ client.on(Events.InteractionCreate, async interaction => {
 					.setDescription(`${interact.message.embeds[0].description}`)
 					.setURL('https://top.gg/bot/911731627498041374')
 					.addFields({
-						name: locale[interact.locale].item,
+						name: getLocalization('item'),
 						value: pollItem,
 						inline: true,
 					})
 					.addFields({
-						name: locale[interact.locale].results.replace('$1', graphTotalVotes),
+						name: getLocalization('results').replace('$1', graphTotalVotes),
 						value: graph,
 						inline: true,
 					})
 					.setFooter({
-						text: locale[interact.locale].pollClosedBy.replace('$1', interact.member.displayName),
+						text: getLocalization('pollClosedBy').replace('$1', interact.member.displayName),
 					})
 					.setTimestamp();
 
@@ -174,7 +174,7 @@ client.on(Events.InteractionCreate, async interaction => {
 					});
 				} catch (error) {
 					interact.reply({
-						content: locale[interact.locale].pollCloseEmbedError,
+						content: getLocalization('pollCloseEmbedError'),
 						ephemeral: true,
 					});
 
@@ -184,7 +184,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				}
 
 				await interact.followUp({
-						content: locale[interact.locale].pollCloseSucess,
+						content: getLocalization('pollCloseSucess'),
 						fetchReply: true,
 						ephemeral: true,
 					})
