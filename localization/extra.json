@@ -63,6 +63,22 @@
         "infoFieldServerUptime"                 : "Server Uptime",
         "translators"                           : "Simple Poll Bot's Translators\n French / Français: <@338695805504454668>"
         } ,
+    "id" : {
+        "languageName"                  : "Indonesian",
+        "nativeLanguageName"            : "Bahasa Indonesia"
+    },
+    "da" : {
+        "languageName"                  : "Danish",
+        "nativeLanguageName"            : "Dansk"
+    },
+    "de" : {
+        "languageName"                  : "German",
+        "nativeLanguageName"            : "Deutsch"
+    },
+    "es-ES" : {
+        "languageName"                  : "Spanish",
+        "nativeLanguageName"            : "Español"
+    },
     "fr" : {
         "languageName"                  : "French",
         "nativeLanguageName"            : "Français",
@@ -126,5 +142,105 @@
         "infoFieldBotUptime"                    : "Temps de fonctionnement du bot",
         "infoFieldServerUptime"                 : "Temps de disponibilité du serveur",
         "translators"                           : "Simple Poll Bot's Traducteurs\n French / Français: <@338695805504454668>"
+    },
+    "hr" : {
+        "languageName"                  : "Croatian",
+        "nativeLanguageName"            : "Hrvatski"
+    },
+    "it" : {
+        "languageName"                  : "Italian",
+        "nativeLanguageName"            : "Italiano"
+    },
+    "lt" : {
+        "languageName"                  : "Lithuanian",
+        "nativeLanguageName"            : "Lietuviškai"
+    },
+    "hu" : {
+        "languageName"                  : "Hungarian",
+        "nativeLanguageName"            : "Magyar"
+    },
+    "nl" : {
+        "languageName"                  : "Dutch",
+        "nativeLanguageName"            : "Nederlands"
+    },
+    "no" : {
+        "languageName"                  : "Norwegian",
+        "nativeLanguageName"            : "Norsk"
+    },
+    "pl" : {
+        "languageName"                  : "Polish",
+        "nativeLanguageName"            : "Polski"
+    },
+    "pt-BR" : {
+        "languageName"                  : "Portuguese, Brazilian",
+        "nativeLanguageName"            : "Português do Brasil"
+    },
+    "ro" : {
+        "languageName"                  : "Romanian, Romania",
+        "nativeLanguageName"            : "Română"
+    },
+    "fi" : {
+        "languageName"                  : "Finnish",
+        "nativeLanguageName"            : "Suomi"
+    },
+    "sv-SE" : {
+        "languageName"                  : "Swedish",
+        "nativeLanguageName"            : "Svenska"
+    },
+    "vi" : {
+        "languageName"                  : "Vietnamese",
+        "nativeLanguageName"            : "Tiếng Việt"
+    },
+    "tr" : {
+        "languageName"                  : "Turkish",
+        "nativeLanguageName"            : "Türkçe"
+    },
+    "cs" : {
+        "languageName"                  : "Czech",
+        "nativeLanguageName"            : "Čeština"
+    },
+    "el" : {
+        "languageName"                  : "Greek",
+        "nativeLanguageName"            : "Ελληνικά"
+    },
+    "bg" : {
+        "languageName"                  : "Bulgarian",
+        "nativeLanguageName"            : "български"
+    },
+    "ru" : {
+        "languageName"                  : "Russian",
+        "nativeLanguageName"            : "Pусский"
+    },
+    "uk" : {
+        "languageName"                  : "Ukrainian",
+        "nativeLanguageName"            : "Українська"
+    },
+    "hi" : {
+        "languageName"                  : "Hindi",
+        "nativeLanguageName"            : "हिन्दी"
+    },
+    "th" : {
+        "languageName"                  : "Thai",
+        "nativeLanguageName"            : "ไทย"
+    },
+    "zh-CN" : {
+        "languageName"                  : "Chinese, China",
+        "nativeLanguageName"            : "中文"
+    },
+    "ja" : {
+        "languageName"                  : "Japanese",
+        "nativeLanguageName"            : "日本語"
+    },
+    "zh-TW" : {
+        "languageName"                  : "Chinese, Taiwan",
+        "nativeLanguageName"            : "繁體中文"
+    },
+    "ko" : {
+        "languageName"                  : "Korean",
+        "nativeLanguageName"            : "한국어"
+    },
+    "en-GB" : {
+        "languageName"                  : "English, UK",
+        "nativeLanguageName"            : "English, UK"
     }
 }
