@@ -152,7 +152,7 @@ module.exports = {
 
             return 0;
         }
-        if (pollListArr.some(i => i.length < 1) === true) {
+        if (pollListArr.some(i => i.replace(/\s/g, '').length < 1) === true) {
             interaction.reply({
                 content: getLocalization('pollItemTooShort'),
                 ephemeral: true,
