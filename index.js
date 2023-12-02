@@ -9,7 +9,7 @@ manager.on('shardCreate', shard => console.log(`Launched shard #${shard.id}`));
 manager.spawn();
 
 poster.on('posted', (stats) => {
-    console.log('[ [1;34mTOP.GG STATS[0m ] \n' + JSON.stringify(stats) + '\n[ [1;35mEND[0m ]');
+    console.log('[ [1;34mTOP.GG STATS[0m ] ' + JSON.stringify(stats));
 });
 
 poster.on('err', (err) => {
