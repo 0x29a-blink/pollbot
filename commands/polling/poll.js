@@ -50,12 +50,16 @@ module.exports = {
             .setRequired(false)),
 
     async execute(interaction) {
+        function getLocalization(property) {
+            const selectedLocale = locale[interaction.locale] || locale['en-US'];
+            return selectedLocale[property] || locale['en-US'][property];
+        }
 
         const button = new ActionRowBuilder()
             .addComponents(
                 new ButtonBuilder()
                 .setCustomId('closepoll')
-                .setLabel(locale[interaction.locale].closePollLabel)
+                .setLabel(getLocalization('closePollLabel'))
                 .setStyle('Danger'),
             );
         const pollItems = interaction.options.getString('items');
@@ -70,6 +74,7 @@ module.exports = {
         const appHasManageRoles = interaction.channel.permissionsFor(interaction.applicationId).has(PermissionsBitField.Flags.ManageRoles);
         const appHasManageThreads = interaction.channel.permissionsFor(interaction.applicationId).has(PermissionsBitField.Flags.ManageThreads);
         const appHasCreatePublicThreads = interaction.channel.permissionsFor(interaction.applicationId).has(PermissionsBitField.Flags.CreatePublicThreads);
+        const appHasCreatePrivateThreads = interaction.channel.permissionsFor(interaction.applicationId).has(PermissionsBitField.Flags.CreatePrivateThreads);
         const guildHasPollManagerRole = interaction.guild.roles.cache.find(role => role.name == pollManager);
         const pollListArr = pollItems.split(',');
         const labelArr = pollListArr.map(x => ({ label: x, value: x, voteCount: 0 }));
@@ -78,7 +83,7 @@ module.exports = {
 
         if (!guildHasPollManagerRole && !memberHasManageGuild && !appHasManageRoles) {
             interaction.reply({
-                content: locale[interaction.locale].memberNoPermsAndGuildHasNoRole,
+                content: getLocalization('memberNoPermsAndGuildHasNoRole'),
                 ephemeral: true,
             })
             .catch(console.error);
@@ -91,10 +96,10 @@ module.exports = {
             interaction.guild.roles.create({
                 name: pollManager,
                 color: '#ff6633',
-                reason: locale[interaction.locale].roleCreateReason,
+                reason: getLocalization('roleCreateReason'),
             }).catch(console.error);
             interaction.reply({
-                content: locale[interaction.locale].memberNoPermsAndServerNoRoleCreated,
+                content: getLocalization('memberNoPermsAndServerNoRoleCreated'),
                 ephemeral: true,
             })
             .catch(console.error);
@@ -105,7 +110,7 @@ module.exports = {
 
         if (!memberHasManageGuild && !memberHasRole) {
             interaction.reply({
-                content: locale[interaction.locale].memberNoPermsNoRole,
+                content: getLocalization('memberNoPermsNoRole'),
                 ephemeral: true,
             })
             .catch(console.error);
@@ -122,7 +127,7 @@ module.exports = {
 
         if (pollListArr.length > 25) {
             interaction.reply({
-                    content: locale[interaction.locale].pollTooManyItems.replace('$1', pollListArr.length),
+                    content: getLocalization('pollTooManyItems').replace('$1', pollListArr.length),
                     ephemeral: true,
                 });
             console.log(`[ [1;31mPoll Create Info[0m ] ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id} tried to create a poll with too many items [${pollListArr.length}].`);
@@ -131,7 +136,7 @@ module.exports = {
         }
         if (findDuplicates(pollListArr) === true) {
             interaction.reply({
-                content: locale[interaction.locale].pollHasDuplicates,
+                content: getLocalization('pollHasDuplicates'),
                 ephemeral: true,
             });
             console.log(`[ [1;31mPoll Create Info[0m ] ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id} created a poll with duplicate items [${pollListArr}]`);
@@ -140,16 +145,23 @@ module.exports = {
         }
         if (pollListArr.some(i => i.length > 100) === true) {
             interaction.reply({
-                content: locale[interaction.locale].pollItemTooLong,
+                content: getLocalization('pollItemTooLong'),
                 ephemeral: true,
             });
             console.log(`[ [1;31mPoll Create Info[0m ] ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id} tried to create a poll item with too many characters.`);
 
             return 0;
         }
+        if (pollListArr.some(i => i.length < 1) === true) {
+            interaction.reply({
+                content: getLocalization('pollItemTooShort'),
+                ephemeral: true,
+            });
+            console.log(`[ [1;31mPoll Create Info[0m ] ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id} tried to create a poll item with too few characters.`);
+        }
         if (embedTitle.length > 256) {
             interaction.reply({
-                content: locale[interaction.locale].embedTitleTooLong,
+                content: getLocalization('embedTitleTooLong'),
                 ephemeral: true,
             });
             console.log(`[ [1;31mPoll Create Info[0m ] ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id} tried to create a poll embed title with too many characters [${embedTitle.length}]`);
@@ -158,7 +170,7 @@ module.exports = {
         }
         if (embedDescription.length > 4096) {
             interaction.reply({
-                content: locale[interaction.locale].embedDescriptionTooLong,
+                content: getLocalization('embedDescriptionTooLong'),
                 ephemeral: true,
             });
             console.log(`[ [1;31mPoll Create Info[0m ] ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id} tried to create a poll embed description with too many characters [${embedDescription.length}]`);
@@ -186,7 +198,7 @@ module.exports = {
         } catch (error) {
             console.error(`[ [1;31mPOLL CREATE ERROR[0m ] Could not send reply to user.\n${error}\n [1;35mERROR END[0m`);
             return interaction.reply({
-                content: locale[interaction.locale].couldNotCreateMessageBody,
+                content: getLocalization('couldNotCreateMessageBody'),
                 ephemeral: true,
             });
         }
@@ -235,18 +247,18 @@ module.exports = {
         }
 
         if (createThread == true) {
-            if (appHasManageThreads && appHasCreatePublicThreads) {
+            if (appHasManageThreads && appHasCreatePublicThreads && appHasCreatePrivateThreads) {
                 await interaction.channel.threads.create({
                     startMessage: message.id,
                     name: `${embedTitle}`,
                     autoArchiveDuration: 1440,
-                    reason: locale[interaction.locale].threadCreateReason,
+                    reason: getLocalization('threadCreateReason'),
                 });
             } else {
                 const threadEmbed = new EmbedBuilder()
                     .setColor('#ff6633')
-                    .setTitle(locale[interaction.locale].threadCreateErrorTitle)
-                    .setDescription(locale[interaction.locale].threadCreateErrorDescription)
+                    .setTitle(getLocalization('threadCreateErrorTitle'))
+                    .setDescription(getLocalization('threadCreateErrorDescription'))
                     .setImage('https://support.discord.com/hc/article_attachments/4406694690711/image1.png')
                     .setTimestamp();
                 await interaction.followUp({
