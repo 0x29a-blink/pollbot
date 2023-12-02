@@ -214,6 +214,13 @@ client.on(Events.InteractionCreate, async interaction => {
 		if (userHasVoted.rows[0].exists === true) {
 			const originalChoice = await pool.query(`SELECT pollVoteUserItem FROM polls WHERE messageId=${interaction.message.id} AND pollVoteUserId=${interaction.member.id}`);
 
+			if (userChoice == originalChoice.rows[0].pollvoteuseritem) {
+				return interaction.reply({
+					content: getLocalization('pollChoiceSelected').replace('$1', userChoice),
+					ephemeral: true,
+				});
+			}
+
 			try {
 				await pool.query('UPDATE polls SET pollVoteCount = CASE WHEN pollItem = $1 THEN pollVoteCount + 1 WHEN pollItem = $2 THEN pollVoteCount - 1 END WHERE pollItem IN ($1, $2);', [userChoice, originalChoice.rows[0].pollvoteuseritem]);
 				await pool.query('UPDATE polls SET pollVoteUserItem = $1 WHERE pollVoteUserId = $2;', [userChoice, interaction.member.id]);
