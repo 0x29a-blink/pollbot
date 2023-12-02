@@ -49,7 +49,7 @@ module.exports = {
 		const embed = new EmbedBuilder()
 			.setColor('#ff6633')
 			.setTitle(getLocalization('infoTitle'))
-			.setDescription(getLocalization('translators'))
+			.setDescription(getLocalization('translators').replace('$1', '\nFrench / Français: <@338695805504454668>\n Polish / Polski: <@343825878448340994>'))
 			.setThumbnail('https://i.imgur.com/MsYPWMV.png')
 			.setAuthor({ name: 'blink.dclxvi', iconURL: 'https://i.imgur.com/C0ZRGdo.gif', url: 'https://twitch.tv/dotblink' })
 			.setURL('https://github.com/0x29a-blink/pollbot')
