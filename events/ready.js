@@ -1,9 +1,13 @@
-const { Events } = require('discord.js');
+const {
+	Events,
+} = require('discord.js');
+const chalk = require('chalk'),
+	log = console.log;
 
 module.exports = {
 	name: Events.ClientReady,
 	once: true,
 	execute(client) {
-		console.log(`Ready! Logged in as ${client.user.tag}`);
+		log(chalk`{green ${client.user.id} Ready.}`);
 	},
 };

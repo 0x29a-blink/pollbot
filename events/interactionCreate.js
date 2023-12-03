@@ -1,4 +1,8 @@
-const { Events } = require('discord.js');
+const {
+	Events,
+} = require('discord.js');
+const chalk = require('chalk'),
+	logerr = console.error;
 
 module.exports = {
 	name: Events.InteractionCreate,
@@ -15,8 +19,8 @@ module.exports = {
 		try {
 			await command.execute(interaction);
 		} catch (error) {
-			console.error(`Error executing ${interaction.commandName}`);
-			console.error(error);
+			logerr(chalk`{red Error Executing ${interaction.commandName}}`);
+			logerr(error);
 		}
 	},
 };

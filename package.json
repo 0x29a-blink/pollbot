@@ -25,6 +25,7 @@
   },
   "homepage": "https://github.com/0x29a-blink/pollbot#readme",
   "dependencies": {
+    "chalk": "^4.1.2",
     "discord.js": "^14.14.1",
     "dotenv": "^16.3.1",
     "moment": "^2.29.4",

@@ -1,7 +1,15 @@
-const { Events, EmbedBuilder } = require('discord.js');
-const moment = require('moment');
-const { query } = require('../db.js');
-const locale = require('../localization/localization.json');
+const {
+	Events,
+	EmbedBuilder,
+} = require('discord.js');
+const {
+	query,
+} = require('../db.js');
+const locale = require('../localization/localization.json'),
+	moment = require('moment'),
+	chalk = require('chalk'),
+	log = console.log,
+	logerr = console.error;
 
 module.exports = {
 	name: Events.InteractionCreate,
@@ -15,30 +23,30 @@ module.exports = {
 
 		const pollExistsInDatabase = await query(`SELECT EXISTS(SELECT messageId FROM polls WHERE messageId=${interaction.message.id})`);
 		if (!pollExistsInDatabase.rows[0].exists === true) {
-			interaction.reply({
-					content: getLocalization('noLongerExistsInDatabase'),
-					ephemeral: true,
-				})
-				.catch(console.error);
-
-			return 0;
+			return interaction.reply({
+				content: getLocalization('noLongerExistsInDatabase'),
+				ephemeral: true,
+			}).catch(err => {
+				logerr(chalk`{red [ INTERACTION REPLY ERROR ]} {gray pollUpdateVote.js property: noLongerExistsInDatabase}\n${err}\n{red [ END ]}`);
+			});
 		}
 
 		const userHasVoted = await query(`SELECT EXISTS(SELECT pollVoteUserId FROM polls WHERE messageId=${interaction.message.id} AND pollVoteUserId=${interaction.member.id})`);
 		if (userHasVoted.rows[0].exists === false) return 0;
 
-
+		await interaction.deferUpdate();
 		const userChoice = interaction.values[0];
 		const originalChoice = await query(`SELECT pollVoteUserItem FROM polls WHERE messageId=${interaction.message.id} AND pollVoteUserId=${interaction.member.id}`);
 
 		if (userChoice == originalChoice.rows[0].pollvoteuseritem) {
-			return interaction.reply({
+			return interaction.followUp({
 				content: getLocalization('pollChoiceSelected').replace('$1', userChoice),
 				ephemeral: true,
+			}).catch(err => {
+				logerr(chalk`{red [ INTERACTION FOLLOW UP ERROR ]} {gray pollUpdateVote.js property: pollChoiceSelected}\n${err}\n{red [ END ]}`);
 			});
 		}
 
-		await interaction.deferUpdate();
 
 		try {
 			await query('UPDATE polls SET pollVoteCount = CASE WHEN pollItem = $1 THEN pollVoteCount + 1 WHEN pollItem = $2 THEN pollVoteCount - 1 END WHERE pollItem IN ($1, $2);', [userChoice, originalChoice.rows[0].pollvoteuseritem]);
@@ -48,8 +56,10 @@ module.exports = {
 			interaction.followUp({
 				content: getLocalization('errorUpdatingDatabase'),
 				ephemeral: true,
+			}).catch(err => {
+				logerr(chalk`{red [ INTERACTION FOLLOW UP ERROR ]} {gray pollUpdateVote.js property: errorUpdatingDatabase}\n${err}\n{red [ END ]}`);
 			});
-			console.error(`[ [1;31mPOLL INTERACT ERROR[0m ] Database error in the update user option section.\n${error}\n [1;35mERROR END[0m`);
+			logerr(chalk`{red [ POLL UPDATE VOTE DATABASE ERROR ]} {gray ./events/pollUpdateVote.js}\n${error}\n{red [ END ]}`);
 
 			return 0;
 		}
@@ -58,12 +68,14 @@ module.exports = {
 		const pollIsPublic = await query(`SELECT pollViewVotesFlag FROM polls WHERE messageId=${interaction.message.id} LIMIT 1`);
 		if (pollIsPublic.rows[0].pollviewvotesflag === false) {
 			await interaction.followUp({
-					content: getLocalization('changedVote').replace(/\$1/g, await originalChoice.rows[0].pollvoteuseritem).replace(/\$2/g, userChoice),
-					fetchReply: true,
-					ephemeral: true,
-				})
-				.catch(console.error);
-			console.log(`[ [1;34mPoll Interact Info[0m ] saved ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id}]s new choice of "${await originalChoice.rows[0].pollvoteuseritem}" to "${userChoice}". to ${interaction.message.id}.`);
+				content: getLocalization('changedVote').replace(/\$1/g, await originalChoice.rows[0].pollvoteuseritem).replace(/\$2/g, userChoice),
+				fetchReply: true,
+				ephemeral: true,
+			}).catch(err => {
+				logerr(chalk`{red [ INTERACTION FOLLOW UP ERROR ]} {gray pollUpdateVote.js property: changedVote}\n${err}\n{red [ END ]}`);
+			});
+
+			log(chalk`{blue [ PUBLIC POLL UPDATE VOTE ]} saved Server: {gray ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount})} Member: {gray ${interaction.member.displayName}[${interaction.member.id}]s} new choice of "{gray ${await originalChoice.rows[0].pollvoteuseritem}}" to "{gray ${userChoice}}" to {gray ${interaction.message.id}}`);
 
 			return 0;
 		}
@@ -113,15 +125,19 @@ module.exports = {
 			interaction.followUp({
 				content: getLocalization('publicPollUpdateVoteEmbedError'),
 				ephemeral: true,
+			}).catch(err => {
+				logerr(chalk`{red [ INTERACTION FOLLOW UP ERROR ]} {gray pollUpdateVote.js property: publicPollUpdateVoteEmbedError}\n${err}\n{red [ END ]}`);
 			});
-			console.error(`[ [1;31mUPDATE POLL ERROR[0m ] There was an issue sending the publicPollUpdateVote embed.\n ${error}`);
+			logerr(chalk`{red [ EDIT REPLY ERROR ]}\n${error}\n{red [ END ]}`);
 		}
 
 		await interaction.followUp({
-				content: getLocalization('changedVote').replace(/\$1/g, originalChoice.rows[0].pollvoteuseritem).replace(/\$2/g, userChoice),
-				ephemeral: true,
-			})
-			.catch(console.error);
-		console.log(`[ [1;34mPoll Interact Info[0m ] saved ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id}]s new choice of "${originalChoice.rows[0].pollvoteuseritem}" to "${userChoice}" to ${interaction.message.id}.`);
+			content: getLocalization('changedVote').replace(/\$1/g, originalChoice.rows[0].pollvoteuseritem).replace(/\$2/g, userChoice),
+			ephemeral: true,
+		}).catch(err => {
+			logerr(chalk`{red [ INTERACTION FOLLOW UP ERROR ]} {gray pollUpdateVote.js property: changedVote}\n${err}\n{red [ END ]}`);
+		});
+
+		log(chalk`{blue [ PUBLIC POLL UPDATE VOTE ]} saved Server: {gray ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount})} Member: {gray ${interaction.member.displayName}[${interaction.member.id}]s} new choice of "{gray ${await originalChoice.rows[0].pollvoteuseritem}}" to "{gray ${userChoice}}" to {gray ${interaction.message.id}}`);
 	},
 };

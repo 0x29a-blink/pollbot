@@ -1,6 +1,15 @@
-const { Events, EmbedBuilder, PermissionsBitField } = require('discord.js');
-const { query } = require('../db.js');
-const locale = require('../localization/localization.json');
+const {
+	Events,
+	EmbedBuilder,
+	PermissionsBitField,
+} = require('discord.js');
+const {
+	query,
+} = require('../db.js');
+const locale = require('../localization/localization.json'),
+	chalk = require('chalk'),
+	log = console.log,
+	logerr = console.error;
 
 module.exports = {
 	name: Events.InteractionCreate,
@@ -14,21 +23,23 @@ module.exports = {
 
 			if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild) && !interaction.member.roles.cache.some(role => role.name === 'Poll Manager')) {
 				interaction.reply({
-						content: getLocalization('memberNoPermsNoRole'),
-						ephemeral: true,
-					})
-					.catch(console.error);
-				console.log(`[ [1;34mPoll Interact Info[0m ] ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id}] tried to close the poll "${interaction.message.id}"`);
+					content: getLocalization('memberNoPermsNoRole'),
+					ephemeral: true,
+				}).catch(err => {
+					logerr(chalk`{red [ INTERACTION REPLY ERROR ]} {gray pollClose.js property: memberNoPermsNoRole}\n${err}\n{red [ END ]}`);
+				});
+				log(chalk`{yellow [ CLOSE POLL ATTEMPT ]} Server: {gray ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount})} Member: {gray ${interaction.member.displayName}[${interaction.member.id}]} tried to close the poll {gray ${interaction.message.id}}`);
 
 				return 0;
 			}
 
 			if (!pollExistsInDatabase.rows[0].exists === true) {
 				interaction.reply({
-						content: getLocalization('noLongerExistsInDatabase'),
-						ephemeral: true,
-					})
-					.catch(console.error);
+					content: getLocalization('noLongerExistsInDatabase'),
+					ephemeral: true,
+				}).catch(err => {
+					logerr(chalk`{red [ INTERACTION REPLY ERROR ]} {gray pollClose.js property: noLongerExistsInDatabase}\n${err}\n{red [ END ]}`);
+				});
 
 				return 0;
 			}
@@ -83,19 +94,22 @@ module.exports = {
 					interaction.reply({
 						content: getLocalization('pollCloseEmbedError'),
 						ephemeral: true,
+					}).catch(err => {
+						logerr(chalk`{red [ INTERACTION REPLY ERROR ]} {gray pollClose.js property: pollCloseEmbedError}\n${err}\n{red [ END ]}`);
 					});
 
-					console.error(`[ [1;31mUPDATE POLL ERROR[0m ] There was an issue sending the closePoll embed.\n ${error}`);
+					logerr(chalk`{red [ POLL CLOSE EMBED ERROR ]}\n${error}\n{red [ END ]}`);
 
 					return 0;
 				}
 
 				await interaction.followUp({
-						content: getLocalization('pollCloseSucess'),
-						fetchReply: true,
-						ephemeral: true,
-					})
-					.catch(console.error);
+					content: getLocalization('pollCloseSucess'),
+					fetchReply: true,
+					ephemeral: true,
+				}).catch(err => {
+					logerr(chalk`{red [ INTERACTION FOLLOW UP ERROR ]} {gray pollClose.js property: pollCloseSucess}\n${err}\n{red [ END ]}`);
+				});
 			} catch (error) {
 				console.error(error);
 
@@ -105,15 +119,17 @@ module.exports = {
 			try {
 				query('DELETE FROM polls WHERE messageId = $1', [interaction.message.id]);
 			} catch (error) {
-				interaction.reply({
+				interaction.followUp({
 					content: getLocalization('errorUpdatingDatabase'),
 					ephemeral: true,
+				}).catch(err => {
+					logerr(chalk`{red [ INTERACTION FOLLOW UP ERROR ]} {gray pollClose.js property: errorUpdatingDatabase}\n${err}\n{red [ END ]}`);
 				});
-				console.error(`[ [1;31mDISPLAY POLLING DATA ERROR[0m ]\n${error}\n [1;35mERROR END[0m`);
+				logerr(chalk`{red [ COULD NOT DETE POLL DATA ]}\n${error}\n{red [ END ]}`);
 
 				return 0;
 			}
-			console.log(`[ [1;34mPoll Button Info[0m ] ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) / ${interaction.member.displayName}[${interaction.member.id}] closed the poll ${interaction.message.id}.`);
+			log(chalk`{blue [ CLOSE POLL ]} Server: {gray ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount})} Member: {gray ${interaction.member.displayName}[${interaction.member.id}]} closed the poll {gray ${interaction.message.id}}`);
 		}
 	},
 };

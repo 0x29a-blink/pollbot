@@ -1,17 +1,26 @@
 require('dotenv').config();
-const { ShardingManager } = require('discord.js');
-const { AutoPoster } = require('topgg-autoposter');
+const {
+	ShardingManager,
+} = require('discord.js');
+const {
+	AutoPoster,
+} = require('topgg-autoposter');
+const chalk = require('chalk'),
+	log = console.log,
+	logerr = console.error;
 
-const manager = new ShardingManager('./bot.js', { token: process.env.discord_token });
+const manager = new ShardingManager('./bot.js', {
+	token: process.env.discord_token,
+});
 const poster = AutoPoster(process.env.topgg_token, manager);
 
-manager.on('shardCreate', shard => console.log(`Launched shard #${shard.id}`));
+manager.on('shardCreate', shard => log(chalk`{green Launched shard #${shard.id}}`));
 manager.spawn();
 
 poster.on('posted', (stats) => {
-    console.log('[ [1;34mTOP.GG STATS[0m ] ' + JSON.stringify(stats));
+	log(chalk`{green [ TOP.GG STATS ] ${JSON.stringify(stats)}}`);
 });
 
 poster.on('err', (err) => {
-    console.log('[ [1;31mTOP.GG STATS[0m ] \n' + JSON.stringify(err) + '\n[ [1;35mERROR END[0m ]');
+	logerr(chalk`{red [ TOP.GG STATS ERROR ]}\n${JSON.stringify(err)}\n{red [ END ]}`);
 });

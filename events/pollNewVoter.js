@@ -1,8 +1,15 @@
-const { Events, EmbedBuilder } = require('discord.js');
-const moment = require('moment');
-const { query } = require('../db.js');
-const locale = require('../localization/localization.json');
-
+const {
+	Events,
+	EmbedBuilder,
+} = require('discord.js');
+const {
+	query,
+} = require('../db.js');
+const locale = require('../localization/localization.json'),
+	moment = require('moment'),
+	chalk = require('chalk'),
+	log = console.log,
+	logerr = console.error;
 
 module.exports = {
 	name: Events.InteractionCreate,
@@ -11,17 +18,18 @@ module.exports = {
 			const selectedLocale = locale[interaction.locale] || locale['en-US'];
 			return selectedLocale[property] || locale['en-US'][property];
 		}
+
+
 		if (interaction.customId != 'poll') return 0;
 
 		const pollExistsInDatabase = await query(`SELECT EXISTS(SELECT messageId FROM polls WHERE messageId=${interaction.message.id})`);
 		if (!pollExistsInDatabase.rows[0].exists === true) {
-			interaction.reply({
-					content: getLocalization('noLongerExistsInDatabase'),
-					ephemeral: true,
-				})
-				.catch(console.error);
-
-			return 0;
+			return interaction.reply({
+				content: getLocalization('noLongerExistsInDatabase'),
+				ephemeral: true,
+			}).catch(err => {
+				logerr(chalk`{red [ INTERACTION REPLY ERROR ]} {gray pollNewVoter.js property: noLongerExistsInDatabase}\n${err}\n{red [ END ]}`);
+			});
 		}
 
 		const userHasVoted = await query(`SELECT EXISTS(SELECT pollVoteUserId FROM polls WHERE messageId=${interaction.message.id} AND pollVoteUserId=${interaction.member.id})`);
@@ -39,8 +47,10 @@ module.exports = {
 			await interaction.followUp({
 				content: getLocalization('errorUpdatingDatabase'),
 				ephemeral: true,
+			}).catch(err => {
+				logerr(chalk`{red [ INTERACTION FOLLOW UP ERROR ]} {gray pollNewVoter.js property: errorUpdatingDatabase}\n${err}\n{red [ END ]}`);
 			});
-			console.error(`[ [1;31mPOLL INTERACTION DATABASE ERROR[0m ] Create user option section. (pollNewVoter.js LN: 50)\n${error}\n [1;35mERROR END[0m`);
+			logerr(chalk`{red [ POLL NEW VOTER DATABASE ERROR ]} {gray ./events/pollNewVoter.js}\n${error}\n{red [ END ]}`);
 
 			return 0;
 		}
@@ -51,14 +61,13 @@ module.exports = {
 				content: getLocalization('pollChoiceSelected').replace('$1', [userChoice]),
 				ephemeral: true,
 			}).catch(err => {
-				console.error('Could not send the interaction.followUp for the non-public new user vote. Err: ' + err);
+				logerr(chalk`{red [ INTERACTION FOLLOW UP ERROR ]} {gray pollNewVoter.js property: pollChoiceSelected}\n${err}\n{red [ END ]}`);
 			});
-			console.log(`[ [1;34mPoll Interact Info[0m ] saved ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id}]s choice of "${userChoice}" to ${interaction.message.id}. [1;31mNot Public Poll[0m`);
-
+			log(chalk`{blue [ NON-PUBLIC POLL NEW VOTER ]} saved Server: {gray ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount})} Member: {gray ${interaction.member.displayName}[${interaction.member.id}]s} choice of "{gray ${userChoice}}" to {gray ${interaction.message.id}}`);
 			return 0;
 		}
 
-		console.log(`[ [1;34mPoll Interact Info[0m ] saved ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount}) ${interaction.member.displayName}[${interaction.member.id}]s choice of "${userChoice}" to ${interaction.message.id}. [1;31mPublic Poll[0m`);
+		log(chalk`{blue [ PUBLIC POLL NEW VOTER ]} saved Server: {gray ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount})} Member: {gray ${interaction.member.displayName}[${interaction.member.id}]s} choice of "{gray ${userChoice}}" to {gray ${interaction.message.id}}`);
 		const result = await query('SELECT * FROM polls WHERE messageId = $1 AND pollVoteUserId IS NULL ORDER BY pollVoteCount DESC', [interaction.message.id]);
 
 		const pollItemLoop = [],
@@ -104,14 +113,17 @@ module.exports = {
 			await interaction.followUp({
 				content: getLocalization('publicPollUpdateVoteEmbedError'),
 				ephemeral: true,
+			}).catch(err => {
+				logerr(chalk`{red [ INTERACTION FOLLOW UP ERROR ]} {gray pollNewVoter.js property: publicPollUpdateVoteEmbedError}\n${err}\n{red [ END ]}`);
 			});
-
-			console.error(`[ [1;31mUPDATE POLL ERROR[0m ] There was an issue sending the publicPollNewVoteEmbed embed.\n ${error}\n[ [1;31mEND[0m ]`);
+			logerr(chalk`{red [ EDIT REPLY ERROR ]}\n${error}\n{red [ END ]}`);
 		}
 
 		await interaction.followUp({
 			content: getLocalization('pollChoiceSelected').replace('$1', userChoice),
 			ephemeral: true,
+		}).catch(err => {
+			logerr(chalk`{red [ INTERACTION FOLLOW UP ERROR ]} {gray pollNewVoter.js property: pollChoiceSelected}\n${err}\n{red [ END ]}`);
 		});
 	},
 };
