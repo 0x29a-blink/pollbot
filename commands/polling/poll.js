@@ -1,6 +1,6 @@
 const { ActionRowBuilder, ButtonBuilder, EmbedBuilder, SlashCommandBuilder, StringSelectMenuBuilder, PermissionsBitField } = require('discord.js');
 const locale = require('../../localization/localization.json');
-const pool = require('../../db.js');
+const { query } = require('../../db.js');
 const moment = require('moment');
 
 
@@ -120,7 +120,7 @@ module.exports = {
         }
         // Update the pollsCreated table.
         try {
-            await pool.query('UPDATE botInfo SET pollsCreated = pollsCreated + 1 WHERE name = \'main\';');
+            await query('UPDATE botInfo SET pollsCreated = pollsCreated + 1 WHERE name = \'main\';');
         } catch (error) {
             console.error(`[ [1;31mPOLL CREATE ERROR[0m ] Database error in updating pollsCreated.\n${error}\n [1;35mERROR END[0m`);
         }
@@ -235,7 +235,7 @@ module.exports = {
         */
         for (const item of pollListArr) {
             try {
-                await pool.query(`INSERT INTO polls (messageId, pollGuildName, pollGuildId, pollChannelName, pollChannelId, pollTitle, pollDescription, pollItem, pollViewVotesFlag, lastInteraction) VALUES(${message.id}, $1, ${interaction.guild.id}, $2, ${interaction.channel.id}, $3, $4, $5, ${viewVotes}, '${moment().format('MM-DD-YYYY HH:mm:ss')}')`, [interaction.guild.name, interaction.channel.name, embedTitle, embedDescription, item]);
+                await query(`INSERT INTO polls (messageId, pollGuildName, pollGuildId, pollChannelName, pollChannelId, pollTitle, pollDescription, pollItem, pollViewVotesFlag, lastInteraction) VALUES(${message.id}, $1, ${interaction.guild.id}, $2, ${interaction.channel.id}, $3, $4, $5, ${viewVotes}, '${moment().format('MM-DD-YYYY HH:mm:ss')}')`, [interaction.guild.name, interaction.channel.name, embedTitle, embedDescription, item]);
             } catch (error) {
                 console.error(`[ [1;31mPOLL CREATE ERROR[0m ] Could not insert new poll items into database.\n${error}\n [1;35mERROR END[0m`);
 

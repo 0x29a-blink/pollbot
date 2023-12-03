@@ -1,7 +1,7 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const { EmbedBuilder } = require('discord.js');
 const locale = require('../../localization/localization.json');
-const pool = require('../../db.js');
+const { query } = require('../../db.js');
 const os = require('os');
 const moment = require('moment');
 
@@ -41,8 +41,8 @@ module.exports = {
             const selectedLocale = locale[interaction.locale] || locale['en-US'];
             return selectedLocale[property] || locale['en-US'][property];
         }
-		const totalPolls = await pool.query('SELECT pollsCreated FROM botInfo WHERE name = \'main\''),
-			totalVotes = await pool.query('SELECT votesMade FROM botInfo WHERE name = \'main\''),
+		const totalPolls = await query('SELECT pollsCreated FROM botInfo WHERE name = \'main\''),
+			totalVotes = await query('SELECT votesMade FROM botInfo WHERE name = \'main\''),
 			guildCount = await interaction.client.shard.fetchClientValues('guilds.cache.size').then(results => {return `${results.reduce((acc, gC) => acc + gC, 0)}`;}).catch(console.error),
 			uptimes = await interaction.client.shard.fetchClientValues('uptime');
 
