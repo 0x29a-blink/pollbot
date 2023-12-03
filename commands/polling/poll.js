@@ -79,7 +79,7 @@ module.exports = {
         const pollListArr = pollItems.split(',');
         const labelArr = pollListArr.map(x => ({ label: x, value: x, voteCount: 0 }));
 
-        console.log(`[ [1;31mPoll Create Exec[0m ] ${interaction.member.displayName}[${interaction.member.id}] ran the following command [1;46m/poll title: ${embedTitle} description: ${embedDescription} items: ${pollItems} public: ${viewVotes} thread: ${createThread}[0m in ${interaction.guild.name}[${interaction.guild.id}](${interaction.guildMemberCount})`);
+        console.log(`[ [1;31mPoll Create Exec[0m ] ${interaction.member.displayName}[${interaction.member.id}] ran the following command [1;46m/poll title: ${embedTitle} description: ${embedDescription.replaceAll('\n', '\\n')} items: ${pollItems} public: ${viewVotes} thread: ${createThread}[0m in ${interaction.guild.name}[${interaction.guild.id}](${interaction.guildMemberCount})`);
 
         if (!guildHasPollManagerRole && !memberHasManageGuild && !appHasManageRoles) {
             interaction.reply({
