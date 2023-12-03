@@ -108,7 +108,6 @@ client.on(Events.InteractionCreate, async interaction => {
 					}
 
 					case scenario = 'publicPollNewVote': {
-						console.log(result);
 						const publicPollNewVoteEmbed = new EmbedBuilder()
 							.setColor('#ff6633')
 							.setTitle(`${interact.message.embeds[0].title}`)
