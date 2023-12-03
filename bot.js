@@ -39,159 +39,165 @@ for (const file of eventFiles) {
 client.on(Events.InteractionCreate, async interaction => {
 	function getLocalization(property) {
 		const selectedLocale = locale[interaction.locale] || locale['en-US'];
+		console.log(selectedLocale[property]);
 		return selectedLocale[property] || locale['en-US'][property];
 	}
 
 	// add implementation for monthly poll too-old clearing.
 
 	async function displayPollingData(scenario, firstChoice, newChoice, interact) {
-		const result = await pool.query('SELECT * FROM polls WHERE messageId = $1 AND pollVoteUserId IS NULL ORDER BY pollVoteCount DESC', [interact.message.id]),
-			pollItemLoop = [],
-			graphLoop = [];
-		let graphTotalVotes = 0;
+			try {
+				const result = await pool.query('SELECT * FROM polls WHERE messageId = $1 AND pollVoteUserId IS NULL ORDER BY pollVoteCount DESC', [interact.message.id]),
+					pollItemLoop = [],
+					graphLoop = [];
+				let graphTotalVotes = 0;
 
-		for (let i = 0; i < result.rows.length; i++) {
-			pollItemLoop.push(`${result.rows[i].pollitem}`);
-			graphTotalVotes += parseInt(result.rows[i].pollvotecount);
-		}
-
-		for (let i = 0; i < result.rows.length; i++) {
-			const dots = '▮'.repeat(Math.round((100 * result.rows[i].pollvotecount / graphTotalVotes) / 10)),
-				left = 10 - (Math.round((100 * result.rows[i].pollvotecount / graphTotalVotes) / 10)),
-				empty = '▯'.repeat(left);
-			graphLoop.push(`[${dots}${empty}] (${result.rows[i].pollvotecount}) ${(100 * result.rows[i].pollvotecount / graphTotalVotes).toFixed(2)}%`);
-		}
-
-		const pollItem = pollItemLoop.toString().split(',').join('\r\n'),
-			graph = graphLoop.toString().split(',').join('\r\n');
-
-		switch (scenario) {
-			case scenario = 'publicPollUpdateVote': {
-				const publicPollUpdateVoteEmbed = new EmbedBuilder()
-					.setColor('#ff6633')
-					.setTitle(`${interact.message.embeds[0].title}`)
-					.setDescription(`${interact.message.embeds[0].description}`)
-					.setURL('https://top.gg/bot/911731627498041374')
-					.addFields({
-						name: getLocalization('item'),
-						value: pollItem,
-						inline: true,
-					})
-					.addFields({
-						name: getLocalization('results').replace('$1', graphTotalVotes),
-						value: graph,
-						inline: true,
-					});
-
-				try {
-					await interact.update({
-						embeds: [publicPollUpdateVoteEmbed],
-					});
-				} catch (error) {
-					interact.reply({
-						content: getLocalization('publicPollUpdateVoteEmbedError'),
-						ephemeral: true,
-					});
-					console.error(`[ [1;31mUPDATE POLL ERROR[0m ] There was an issue sending the publicPollUpdateVote embed.\n ${error}`);
+				for (let i = 0; i < result.rows.length; i++) {
+					pollItemLoop.push(`${result.rows[i].pollitem}`);
+					graphTotalVotes += parseInt(result.rows[i].pollvotecount);
 				}
 
-				await interact.followUp({
-						content: getLocalization('changedVote').replace(/\$1/g, firstChoice).replace(/\$2/g, newChoice),
-						fetchReply: true,
-						ephemeral: true,
-					})
-					.catch(console.error);
-				console.log(`[ [1;34mPoll Interact Info[0m ] saved ${interact.guild.name}[${interact.guild.id}](${interact.guild.memberCount}) ${interact.member.displayName}[${interact.member.id}]s new choice of "${firstChoice}" to "${newChoice}" to ${interaction.message.id}.`);
-				break;
-			}
-
-			case scenario = 'publicPollNewVote': {
-				const publicPollNewVoteEmbed = new EmbedBuilder()
-					.setColor('#ff6633')
-					.setTitle(`${interact.message.embeds[0].title}`)
-					.setDescription(`${interact.message.embeds[0].description}`)
-					.setURL('https://top.gg/bot/911731627498041374')
-					.addFields({
-						name: getLocalization('item'),
-						value: pollItem,
-						inline: true,
-					})
-					.addFields({
-						name: getLocalization('results').replace('$1', graphTotalVotes),
-						value: graph,
-						inline: true,
-					});
-
-				try {
-					await interact.update({
-						embeds: [publicPollNewVoteEmbed],
-					});
-				} catch (error) {
-					interact.reply({
-						content: getLocalization('publicPollNewVoteEmbedError'),
-						ephemeral: true,
-					});
-
-					console.error(`[ [1;31mUPDATE POLL ERROR[0m ] There was an issue sending the publicPollNewVote embed.\n ${error}`);
+				for (let i = 0; i < result.rows.length; i++) {
+					const dots = '▮'.repeat(Math.round((100 * result.rows[i].pollvotecount / graphTotalVotes) / 10)),
+						left = 10 - (Math.round((100 * result.rows[i].pollvotecount / graphTotalVotes) / 10)),
+						empty = '▯'.repeat(left);
+					graphLoop.push(`[${dots}${empty}] (${result.rows[i].pollvotecount}) ${(100 * result.rows[i].pollvotecount / graphTotalVotes).toFixed(2)}%`);
 				}
 
-				await interact.followUp({
-						content: getLocalization('pollChoiceSelected').replace('$1', newChoice),
-						fetchReply: true,
-						ephemeral: true,
-					})
-					.catch(console.error);
-				console.log(`[ [1;34mPoll Interact Info[0m ] saved ${interact.guild.name}[${interact.guild.id}](${interact.guild.memberCount}) ${interact.member.displayName}[${interact.member.id}]s choice of "${newChoice}" to ${interaction.message.id}.`);
-				break;
-			}
+				const pollItem = pollItemLoop.toString().split(',').join('\r\n'),
+					graph = graphLoop.toString().split(',').join('\r\n');
 
-			case scenario = 'closePoll': {
+				switch (scenario) {
+					case scenario = 'publicPollUpdateVote': {
+						const publicPollUpdateVoteEmbed = new EmbedBuilder()
+							.setColor('#ff6633')
+							.setTitle(`${interact.message.embeds[0].title}`)
+							.setDescription(`${interact.message.embeds[0].description}`)
+							.setURL('https://top.gg/bot/911731627498041374')
+							.addFields({
+								name: getLocalization('item'),
+								value: pollItem,
+								inline: true,
+							})
+							.addFields({
+								name: getLocalization('results').replace('$1', graphTotalVotes),
+								value: graph,
+								inline: true,
+							});
 
-				const closePollEmbed = new EmbedBuilder()
-					.setColor('#ff6633')
-					.setTitle(`${interact.message.embeds[0].title}`)
-					.setDescription(`${interact.message.embeds[0].description}`)
-					.setURL('https://top.gg/bot/911731627498041374')
-					.addFields({
-						name: getLocalization('item'),
-						value: pollItem,
-						inline: true,
-					})
-					.addFields({
-						name: getLocalization('results').replace('$1', graphTotalVotes),
-						value: graph,
-						inline: true,
-					})
-					.setFooter({
-						text: getLocalization('pollClosedBy').replace('$1', interact.member.displayName),
-					})
-					.setTimestamp();
+						try {
+							await interact.update({
+								embeds: [publicPollUpdateVoteEmbed],
+							});
+						} catch (error) {
+							interact.reply({
+								content: getLocalization('publicPollUpdateVoteEmbedError'),
+								ephemeral: true,
+							});
+							console.error(`[ [1;31mUPDATE POLL ERROR[0m ] There was an issue sending the publicPollUpdateVote embed.\n ${error}`);
+						}
 
-				try {
-					await interact.update({
-						embeds: [closePollEmbed],
-						components: [],
-					});
-				} catch (error) {
-					interact.reply({
-						content: getLocalization('pollCloseEmbedError'),
-						ephemeral: true,
-					});
+						await interact.followUp({
+								content: getLocalization('changedVote').replace(/\$1/g, firstChoice).replace(/\$2/g, newChoice),
+								fetchReply: true,
+								ephemeral: true,
+							})
+							.catch(console.error);
+						console.log(`[ [1;34mPoll Interact Info[0m ] saved ${interact.guild.name}[${interact.guild.id}](${interact.guild.memberCount}) ${interact.member.displayName}[${interact.member.id}]s new choice of "${firstChoice}" to "${newChoice}" to ${interaction.message.id}.`);
+						break;
+					}
 
-					console.error(`[ [1;31mUPDATE POLL ERROR[0m ] There was an issue sending the closePoll embed.\n ${error}`);
+					case scenario = 'publicPollNewVote': {
+						console.log(result);
+						const publicPollNewVoteEmbed = new EmbedBuilder()
+							.setColor('#ff6633')
+							.setTitle(`${interact.message.embeds[0].title}`)
+							.setDescription(`${interact.message.embeds[0].description}`)
+							.setURL('https://top.gg/bot/911731627498041374')
+							.addFields({
+								name: getLocalization('item'),
+								value: pollItem,
+								inline: true,
+							})
+							.addFields({
+								name: getLocalization('results').replace('$1', graphTotalVotes),
+								value: graph,
+								inline: true,
+							});
 
-					return 0;
+						try {
+							await interact.update({
+								embeds: [publicPollNewVoteEmbed],
+							});
+						} catch (error) {
+							interact.reply({
+								content: getLocalization('publicPollNewVoteEmbedError'),
+								ephemeral: true,
+							});
+
+							console.error(`[ [1;31mUPDATE POLL ERROR[0m ] There was an issue sending the publicPollNewVote embed.\n ${error}`);
+						}
+
+						await interact.followUp({
+								content: getLocalization('pollChoiceSelected').replace('$1', newChoice),
+								fetchReply: true,
+								ephemeral: true,
+							})
+							.catch(console.error);
+						console.log(`[ [1;34mPoll Interact Info[0m ] saved ${interact.guild.name}[${interact.guild.id}](${interact.guild.memberCount}) ${interact.member.displayName}[${interact.member.id}]s choice of "${newChoice}" to ${interaction.message.id}.`);
+						break;
+					}
+
+					case scenario = 'closePoll': {
+
+						const closePollEmbed = new EmbedBuilder()
+							.setColor('#ff6633')
+							.setTitle(`${interact.message.embeds[0].title}`)
+							.setDescription(`${interact.message.embeds[0].description}`)
+							.setURL('https://top.gg/bot/911731627498041374')
+							.addFields({
+								name: getLocalization('item'),
+								value: pollItem,
+								inline: true,
+							})
+							.addFields({
+								name: getLocalization('results').replace('$1', graphTotalVotes),
+								value: graph,
+								inline: true,
+							})
+							.setFooter({
+								text: getLocalization('pollClosedBy').replace('$1', interact.member.displayName),
+							})
+							.setTimestamp();
+
+						try {
+							await interact.update({
+								embeds: [closePollEmbed],
+								components: [],
+							});
+						} catch (error) {
+							interact.reply({
+								content: getLocalization('pollCloseEmbedError'),
+								ephemeral: true,
+							});
+
+							console.error(`[ [1;31mUPDATE POLL ERROR[0m ] There was an issue sending the closePoll embed.\n ${error}`);
+
+							return 0;
+						}
+
+						await interact.followUp({
+								content: getLocalization('pollCloseSucess'),
+								fetchReply: true,
+								ephemeral: true,
+							})
+							.catch(console.error);
+						break;
+					}
 				}
-
-				await interact.followUp({
-						content: getLocalization('pollCloseSucess'),
-						fetchReply: true,
-						ephemeral: true,
-					})
-					.catch(console.error);
-				break;
+			} catch (error) {
+				console.error('[ [1;31mFUNCTION ERROR (async function displayPollingData)[0m ]', error);
 			}
-		}
 	}
 
 	if (interaction.customId === 'poll') {
