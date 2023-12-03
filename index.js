@@ -14,7 +14,7 @@ const manager = new ShardingManager('./bot.js', {
 });
 const poster = AutoPoster(process.env.topgg_token, manager);
 
-manager.on('shardCreate', shard => log(chalk`{green Launched shard #${shard.id}}`));
+manager.on('shardCreate', shard => log(chalk`{green Launched Shard #${shard.id + 1}}`));
 manager.spawn();
 
 poster.on('posted', (stats) => {
