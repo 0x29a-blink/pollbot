@@ -89,7 +89,7 @@ module.exports = {
 		const appHasCreatePublicThreads = interaction.channel.permissionsFor(interaction.applicationId).has(PermissionsBitField.Flags.CreatePublicThreads);
 		const appHasCreatePrivateThreads = interaction.channel.permissionsFor(interaction.applicationId).has(PermissionsBitField.Flags.CreatePrivateThreads);
 		const guildHasPollManagerRole = interaction.guild.roles.cache.find(role => role.name == pollManager);
-		const pollListArr = pollItems.split(',');
+		const pollListArr = pollItems.split(',').map(item => item.trim());
 		const labelArr = pollListArr.map(x => ({
 			label: x,
 			value: x,
