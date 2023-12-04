@@ -36,7 +36,9 @@ module.exports = {
 		if (userHasVoted.rows[0].exists === true) return 0;
 
 		const userChoice = interaction.values[0];
-		await interaction.deferUpdate();
+		await interaction.deferUpdate().catch(err => {
+			logerr(chalk`{red [ DEFER UPDATE ERROR ]} {gray pollUpdateVote.js}\n${err}\n{red [ END ]}`);
+		});
 
 		try {
 			await query('INSERT INTO polls (messageId, pollVoteUserName, pollVoteUserId, pollVoteUserItem) VALUES($1, $2, $3, $4)', [interaction.message.id, interaction.member.displayName, interaction.member.id, userChoice]);
