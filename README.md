@@ -1,4 +1,4 @@
-# [Simple Poll Bot](https://discord.com/api/oauth2/authorize?client_id=911731627498041374&permissions=191462108352&scope=applications.commands%20bot) 
+# [Simple Poll Bot](https://discord.com/application-directory/911731627498041374) 
 > All questions regarding the bot should be redirected to our **[support discord server](https://discord.gg/VZkY8mDJGh)**. A poll bot for discord fully utilizes slash commands with interaction menus for choice selection, no more searching for that one emoji to select an item in your polling.
 - A fully slash command-based bot, no more remembering some random prefix.
 - Upwards to 25 items per poll this is a [DiscordAPI limitation (field: options?*)](https://discord.com/developers/docs/interactions/message-components#select-menu-object-select-menu-structure) not my own which is better than the reaction bot polls that are limited to 20 items!!
@@ -16,9 +16,10 @@
 ![](https://i.imgur.com/x3CSpoP.gif)
 
 ## Invite The Bot
-Invite the bot using [this](https://discord.com/api/oauth2/authorize?client_id=911731627498041374&permissions=191462108352&scope=applications.commands%20bot) link.
+Invite the bot using [this](https://discord.com/api/oauth2/authorize?client_id=911731627498041374&permissions=534992380992&scope=bot+applications.commands) link.
 
-https://discord.com/api/oauth2/authorize?client_id=911731627498041374&permissions=191462108352&scope=applications.commands%20bot
+Our app directory page.
+https://discord.com/application-directory/911731627498041374
 
 ## Create a Poll
 Polls are created using the `/poll` command. The command **requires** 4 input fields
