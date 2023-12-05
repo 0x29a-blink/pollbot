@@ -57,7 +57,7 @@ module.exports = {
 			return 0;
 		}
 
-		const pollIsPublic = await query(`SELECT pollViewVotesFlag FROM polls WHERE messageId=${interaction.message.id} LIMIT 1`);
+		const pollIsPublic = await query(`SELECT pollViewVotesFlag FROM polls WHERE messageId=${interaction.message.id} AND pollVoteUserId IS NULL LIMIT 1`);
 		if (pollIsPublic.rows[0].pollviewvotesflag === false) {
 			await interaction.followUp({
 				content: getLocalization('pollChoiceSelected').replace('$1', [userChoice]),
