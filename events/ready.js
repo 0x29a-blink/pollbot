@@ -16,6 +16,7 @@ const chalk = require('chalk'),
 				id: guild.id,
 				memberCount: guild.memberCount,
 			}));
+			tableData.sort((a, b) => b.memberCount - a.memberCount);
 			logtable(tableData, ['name', 'id', 'memberCount']);
 		},
 	};
