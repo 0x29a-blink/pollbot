@@ -60,7 +60,8 @@ module.exports = {
 			.setNameLocalizations(createLocalizations('pollOptionThreadName'))
 			.setDescription('Attach a thread to the poll?')
 			.setDescriptionLocalizations(createLocalizations('pollOptionThreadDescription'))
-			.setRequired(false)),
+			.setRequired(false))
+		.setDMPermission(false),
 
 	async execute(interaction) {
 		function getLocalization(property) {
