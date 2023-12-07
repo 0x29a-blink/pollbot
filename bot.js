@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { Client, Collection, GatewayIntentBits } = require('discord.js');
-const { chalk, log } = require('./logger');
+const { chalk, log } = require('./util/logger');
 const fs = require('node:fs'),
 	path = require('node:path');
 
