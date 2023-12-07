@@ -56,10 +56,11 @@ module.exports = {
 				}
 
 				for (let i = 0; i < result.rows.length; i++) {
-					const dots = '▮'.repeat(Math.round((100 * result.rows[i].pollvotecount / graphTotalVotes) / 10)),
-						left = 10 - (Math.round((100 * result.rows[i].pollvotecount / graphTotalVotes) / 10)),
+					const percentage = (100 * result.rows[i].pollvotecount / graphTotalVotes),
+						dots = '▮'.repeat(Math.round(percentage / 10)),
+						left = Math.max(0, 10 - Math.round(percentage / 10)),
 						empty = '▯'.repeat(left);
-					graphLoop.push(`[${dots}${empty}] (${result.rows[i].pollvotecount}) ${(100 * result.rows[i].pollvotecount / graphTotalVotes).toFixed(2)}%`);
+					graphLoop.push(`[${dots}${empty}] (${result.rows[i].pollvotecount}) ${percentage.toFixed(2)}%`);
 				}
 
 				const pollItem = pollItemLoop.toString().split(',').join('\r\n'),
