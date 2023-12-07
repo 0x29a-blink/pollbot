@@ -1,13 +1,8 @@
 require('dotenv').config();
-const {
-	Client,
-	Collection,
-	GatewayIntentBits,
-} = require('discord.js');
+const { Client, Collection, GatewayIntentBits } = require('discord.js');
+const { chalk, log } = require('./logger');
 const fs = require('node:fs'),
-	path = require('node:path'),
-	chalk = require('chalk'),
-	log = console.log;
+	path = require('node:path');
 
 const client = new Client({
 	intents: [GatewayIntentBits.Guilds],

@@ -1,13 +1,7 @@
 require('dotenv').config();
-const {
-	ShardingManager,
-} = require('discord.js');
-const {
-	AutoPoster,
-} = require('topgg-autoposter');
-const chalk = require('chalk'),
-	log = console.log,
-	logerr = console.error;
+const { ShardingManager } = require('discord.js');
+const { AutoPoster } = require('topgg-autoposter');
+const { chalk, log, logerr } = require('./logger');
 
 const manager = new ShardingManager('./bot.js', {
 	token: process.env.discord_token,

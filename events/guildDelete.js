@@ -1,5 +1,4 @@
-const chalk = require('chalk'),
-	log = console.log;
+const { chalk, log } = require('../util/logger');
 
 module.exports = {
 	name: 'guildDelete',

@@ -1,9 +1,5 @@
-const {
-	Events,
-} = require('discord.js');
-const chalk = require('chalk'),
-	log = console.log,
-	logtable = console.table;
+const { Events } = require('discord.js');
+const { chalk, log, logtable } = require('../util/logger');
 
 	module.exports = {
 		name: Events.ClientReady,

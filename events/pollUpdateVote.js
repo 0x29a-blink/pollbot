@@ -1,19 +1,12 @@
-const {
-	Events,
-	EmbedBuilder,
-} = require('discord.js');
-const {
-	query,
-} = require('../db.js');
-const locale = require('../localization/localization.json'),
-	moment = require('moment'),
-	chalk = require('chalk'),
-	log = console.log,
-	logerr = console.error;
+const { Events, EmbedBuilder } = require('discord.js');
+const { chalk, log, logerr } = require('../util/logger');
+const { query } = require('../db.js');
+const moment = require('moment');
 
 module.exports = {
 	name: Events.InteractionCreate,
 	async execute(interaction) {
+		const locale = require('../localization/localization.json');
 		function getLocalization(property) {
 			const selectedLocale = locale[interaction.locale] || locale['en-US'];
 			return selectedLocale[property] || locale['en-US'][property];

@@ -1,8 +1,5 @@
-const {
-	Events,
-} = require('discord.js');
-const chalk = require('chalk'),
-	logerr = console.error;
+const { Events } = require('discord.js');
+const { chalk, logerr } = require('../util/logger');
 
 module.exports = {
 	name: Events.InteractionCreate,

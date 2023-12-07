@@ -1,21 +1,9 @@
-const {
-	ActionRowBuilder,
-	ButtonBuilder,
-	EmbedBuilder,
-	SlashCommandBuilder,
-	StringSelectMenuBuilder,
-	PermissionsBitField,
-} = require('discord.js');
-const {
-	query,
-} = require('../../db.js');
-const locale = require('../../localization/localization.json');
+const { ActionRowBuilder, ButtonBuilder, EmbedBuilder, SlashCommandBuilder, StringSelectMenuBuilder, PermissionsBitField } = require('discord.js');
+const { chalk, log, logerr } = require('../../util/logger');
+const { query } = require('../../db.js');
 const moment = require('moment');
-const chalk = require('chalk'),
-	log = console.log,
-	logerr = console.error;
 
-
+const locale = require('../../localization/localization.json');
 function createLocalizations(property) {
 	return Object.fromEntries(Object.entries(locale).map(([key, value]) => [key, value[property]]));
 }

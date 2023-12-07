@@ -1,10 +1,10 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const { EmbedBuilder } = require('discord.js');
-const locale = require('../../localization/localization.json');
 const { query } = require('../../db.js');
 const os = require('os');
 const moment = require('moment');
 
+const locale = require('../../localization/localization.json');
 function createLocalizations(property) {
   return Object.fromEntries(Object.entries(locale).map(([key, value]) => [key, value[property]]));
 }
