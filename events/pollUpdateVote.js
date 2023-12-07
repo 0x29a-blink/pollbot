@@ -142,6 +142,6 @@ module.exports = {
 			logerr(chalk`{red [ INTERACTION FOLLOW UP ERROR ]} {gray pollUpdateVote.js property: changedVote}\n${err}\n{red [ END ]}`);
 		});
 
-		log(chalk`{blue [ PUBLIC POLL UPDATE VOTE ]} saved Server: {gray ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount})} Member: {gray ${interaction.member.displayName}[${interaction.member.id}]s} new choice of "{gray ${await originalChoice.rows[0].pollvoteuseritem}}" to "{gray ${userChoice}}" to {gray ${interaction.message.id}}`);
+		log(chalk`{blue [ NON-PUBLIC POLL UPDATE VOTE ]} saved Server: {gray ${interaction.guild.name}[${interaction.guild.id}](${interaction.guild.memberCount})} Member: {gray ${interaction.member.displayName}[${interaction.member.id}]s} new choice of "{gray ${await originalChoice.rows[0].pollvoteuseritem}}" to "{gray ${userChoice}}" to {gray ${interaction.message.id}}`);
 	},
 };
