@@ -83,8 +83,9 @@ module.exports = {
 
 		for (let i = 0; i < result.rows.length; i++) {
 			const percentage = (100 * result.rows[i].pollvotecount / graphTotalVotes),
-				dots = '▮'.repeat(Math.round(percentage / 10)),
-				left = Math.max(0, 10 - Math.round(percentage / 10)),
+				dotsCount = Math.max(0, Math.round(percentage / 10)),
+				dots = '▮'.repeat(dotsCount),
+				left = Math.max(0, 10 - dotsCount),
 				empty = '▯'.repeat(left);
 			graphLoop.push(`[${dots}${empty}] (${result.rows[i].pollvotecount}) ${percentage.toFixed(2)}%`);
 		}
