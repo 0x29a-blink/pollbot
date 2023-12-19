@@ -3,7 +3,7 @@ const { ShardingManager } = require('discord.js');
 const { AutoPoster } = require('topgg-autoposter');
 const { chalk, log, logerr } = require('./util/logger');
 
-const manager = new ShardingManager('./bot.js', {
+const manager = new ShardingManager('./src/bot.js', {
 	token: process.env.discord_token,
 });
 const poster = AutoPoster(process.env.topgg_token, manager);

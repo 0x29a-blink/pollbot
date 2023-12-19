@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const { EmbedBuilder } = require('discord.js');
-const { query } = require('../../db.js');
+const { query } = require('../../util/database');
 const os = require('os');
 const moment = require('moment');
 

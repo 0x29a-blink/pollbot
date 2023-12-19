@@ -2,7 +2,7 @@
   "name": "simple-poll-bot",
   "version": "1.0.0",
   "description": "A simple poll bot made for discord using discord.js v14",
-  "main": "index.js",
+  "main": "./src/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },

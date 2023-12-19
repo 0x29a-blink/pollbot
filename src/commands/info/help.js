@@ -1,6 +1,5 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const { ActionRowBuilder, EmbedBuilder, ButtonBuilder } = require('discord.js');
-
 const locale = require('../../localization/localization.json');
 function createLocalizations(property) {
 	return Object.fromEntries(Object.entries(locale).map(([key, value]) => [key, value[property]]));

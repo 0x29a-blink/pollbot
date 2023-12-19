@@ -1,6 +1,6 @@
 const { ActionRowBuilder, ButtonBuilder, EmbedBuilder, SlashCommandBuilder, StringSelectMenuBuilder, PermissionsBitField } = require('discord.js');
 const { chalk, log, logerr } = require('../../util/logger');
-const { query } = require('../../db.js');
+const { query } = require('../../util/database');
 const moment = require('moment');
 
 const locale = require('../../localization/localization.json');

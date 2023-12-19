@@ -1,6 +1,6 @@
 const { Events, EmbedBuilder, PermissionsBitField } = require('discord.js');
 const { chalk, log, logerr } = require('../util/logger');
-const { query } = require('../db.js');
+const { query } = require('../util/database');
 
 module.exports = {
 	name: Events.InteractionCreate,
