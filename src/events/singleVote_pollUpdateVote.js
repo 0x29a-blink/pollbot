@@ -14,9 +14,13 @@ module.exports = {
 
 		if (interaction.customId != 'poll') return 0;
 
+		await interaction.deferUpdate().catch(err => {
+			logerr(chalk`{red [ DEFER UPDATE ERROR ]} {gray pollUpdateVote.js}\n${err}\n{red [ END ]}`);
+		});
+
 		const pollExistsInDatabase = await query(`SELECT EXISTS(SELECT messageId FROM polls WHERE messageId=${interaction.message.id})`);
 		if (!pollExistsInDatabase.rows[0].exists === true) {
-			return interaction.reply({
+			return interaction.followUp({
 				content: getLocalization('noLongerExistsInDatabase'),
 				ephemeral: true,
 			}).catch(err => {
@@ -27,9 +31,7 @@ module.exports = {
 		const userHasVoted = await query(`SELECT EXISTS(SELECT pollVoteUserId FROM polls WHERE messageId=${interaction.message.id} AND pollVoteUserId=${interaction.member.id})`);
 		if (userHasVoted.rows[0].exists === false) return 0;
 
-		await interaction.deferUpdate().catch(err => {
-			logerr(chalk`{red [ DEFER UPDATE ERROR ]} {gray pollUpdateVote.js}\n${err}\n{red [ END ]}`);
-		});
+
 		const userChoice = interaction.values[0];
 		const originalChoice = await query(`SELECT pollVoteUserItem FROM polls WHERE messageId=${interaction.message.id} AND pollVoteUserId=${interaction.member.id}`);
 
