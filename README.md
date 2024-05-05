@@ -1,3 +1,6 @@
+5,000 servers, 2,500,000+ votes, 50,000+ polls later and Simple Poll Bot has been discontinued. Thank you for using and supporting this small project through the past few years. The project has been discontinued due to [Discord's official polling implementation](https://support.discord.com/hc/en-us/articles/22163184112407-Polls-FAQ). It includes all of the current and planned features the bot had and is the recommended to use over setting up this bot on your own. Once more, thank you :)
+
+
 # [Simple Poll Bot](https://discord.com/application-directory/911731627498041374) 
 > All questions regarding the bot should be redirected to our **[support discord server](https://discord.gg/VZkY8mDJGh)**. A poll bot for discord fully utilizes slash commands with interaction menus for choice selection, no more searching for that one emoji to select an item in your polling.
 - A fully slash command-based bot, no more remembering some random prefix.
