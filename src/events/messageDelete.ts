@@ -1,5 +1,6 @@
 import { Events, Message, PartialMessage } from 'discord.js';
 import { supabase } from '../lib/db';
+import { logger } from '../lib/logger';
 
 export default {
     name: Events.MessageDelete,
@@ -17,11 +18,7 @@ export default {
             .eq('message_id', messageId);
 
         if (error) {
-            console.error(`[Persistence] Failed to delete poll data for message ${messageId}:`, error);
-        } else {
-            // We could log success if we knew it was actually a poll, but delete is idempotent effectively
-            // To be more verbose, we could select first, but that implies extra API call.
-            // console.log(`[Persistence] Checked/Deleted poll data for message ${messageId}`);
+            logger.error(`[Persistence] Failed to delete poll data for message ${messageId}:`, error);
         }
     },
 };

@@ -24,22 +24,31 @@ const rest = new REST().setToken(process.env.DISCORD_TOKEN!);
 
 (async () => {
     try {
-        console.log(`Started refreshing ${commands.length} application (/) commands.`);
+        const isDev = process.env.DEV_ONLY_MODE === 'true';
+        console.log(`Started refreshing ${commands.length} application (/) commands. Mode: ${isDev ? 'DEV (Guild Only)' : 'GLOBAL'}`);
 
         const clientId = process.env.DISCORD_CLIENT_ID;
         if (!clientId) throw new Error("DISCORD_CLIENT_ID is missing in .env");
 
-        // Global deployment (updates can take up to an hour)
-        // For development, Guild deployment is faster:
-        // await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commands });
+        if (isDev) {
+            const guildId = process.env.DEV_GUILD_ID;
+            if (!guildId) throw new Error("DEV_GUILD_ID is missing in .env but DEV_ONLY_MODE is true");
 
-        // Using Global for generic usage:
-        await rest.put(
-            Routes.applicationCommands(clientId),
-            { body: commands },
-        );
+            // Deploy to specific guild
+            await rest.put(
+                Routes.applicationGuildCommands(clientId, guildId),
+                { body: commands },
+            );
+            console.log(`Successfully reloaded ${commands.length} application (/) commands for Guild ${guildId}.`);
+        } else {
+            // Global deployment
+            await rest.put(
+                Routes.applicationCommands(clientId),
+                { body: commands },
+            );
+            console.log(`Successfully reloaded ${commands.length} application (/) commands GLOBALLY.`);
+        }
 
-        console.log(`Successfully reloaded ${commands.length} application (/) commands.`);
     } catch (error) {
         console.error(error);
     }

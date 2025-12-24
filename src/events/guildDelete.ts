@@ -1,12 +1,13 @@
 import { Events, Guild } from 'discord.js';
 import { supabase } from '../lib/db';
+import { logger } from '../lib/logger';
 
 export default {
     name: Events.GuildDelete,
     async execute(guild: Guild) {
         if (!process.env.SUPABASE_URL) return;
 
-        console.log(`[Persistence] Left guild ${guild.id}. Cleaning up poll data...`);
+        logger.info(`[Persistence] Left guild ${guild.id}. Cleaning up poll data...`);
 
         const { error } = await supabase
             .from('polls')
@@ -14,9 +15,9 @@ export default {
             .eq('guild_id', guild.id);
 
         if (error) {
-            console.error(`[Persistence] Failed to delete polls for guild ${guild.id}:`, error);
+            logger.error(`[Persistence] Failed to delete polls for guild ${guild.id}:`, error);
         } else {
-            console.log(`[Persistence] Cleared all polls for guild ${guild.id}`);
+            logger.info(`[Persistence] Cleared all polls for guild ${guild.id}`);
         }
     },
 };
