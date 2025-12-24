@@ -92,7 +92,7 @@ export default {
             return interaction.reply({ content: `The following items exceed 100 characters:\n${invalidItems.join('\n')}`, flags: MessageFlags.Ephemeral });
         }
 
-        await interaction.deferReply({ ephemeral: false });
+        await interaction.deferReply();
 
         try {
             // 3. Render Poll Image (Playwright)

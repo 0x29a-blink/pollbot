@@ -28,7 +28,7 @@ export default {
             return interaction.reply({ content: 'Invalid poll ID or link provided.', flags: MessageFlags.Ephemeral });
         }
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         await PollManager.setPollStatus(interaction, pollId, true);
     }

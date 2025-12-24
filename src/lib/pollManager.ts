@@ -14,18 +14,24 @@ export class PollManager {
                 .single();
 
             if (pollError || !pollData) {
+                if (interaction.deferred || interaction.replied) {
+                    return interaction.editReply({ content: 'Poll not found in database.' });
+                }
                 return interaction.reply({ content: 'Poll not found in database.', flags: MessageFlags.Ephemeral });
             }
 
             // 2. Auth Check
-            const userId = interaction.user.id;
             const member = interaction.member as GuildMember;
             const isAdmin = member?.permissions.has(PermissionsBitField.Flags.ManageGuild);
             const isPollManager = member?.roles.cache.some(r => r.name === 'Poll Manager');
-            const isCreator = pollData.creator_id === userId;
 
-            if (!isCreator && !isAdmin && !isPollManager) {
-                return interaction.reply({ content: 'Only the creator or a Poll Manager can manage this poll.', flags: MessageFlags.Ephemeral });
+            if (!isAdmin && !isPollManager) {
+                const errorMsg = 'You need \'Manage Guild\' permissions or the \'Poll Manager\' role to manage this poll.\n' +
+                    'You can ask a server admin to run `/pollmanager create` and then `/pollmanager assign` to give you the role.';
+                if (interaction.deferred || interaction.replied) {
+                    return interaction.editReply({ content: errorMsg });
+                }
+                return interaction.reply({ content: errorMsg, flags: MessageFlags.Ephemeral });
             }
 
             // 3. Update Database
@@ -36,6 +42,9 @@ export class PollManager {
 
             if (updateError) {
                 logger.error('Failed to update poll state:', updateError);
+                if (interaction.deferred || interaction.replied) {
+                    return interaction.editReply({ content: 'Failed to update poll state.' });
+                }
                 return interaction.reply({ content: 'Failed to update poll state.', flags: MessageFlags.Ephemeral });
             }
 
@@ -94,15 +103,6 @@ export class PollManager {
 
                 // Check Guild Settings for Buttons
                 if (pollData.settings.allow_close) {
-                    // We should verify if guild settings override this?
-                    // The user requested: "add server config options... so the user can opt to have the buttons"
-                    // So we should verify guild_settings too.
-                    // But strictly, pollData.settings.allow_close was set at creation.
-                    // A global toggle might imply overriding even existing polls?
-                    // Usually config applies to NEW polls or we check config here LIVE.
-                    // Let's check config LIVE if possible, or stick to poll settings.
-                    // Ideally, check `guild_settings` here.
-
                     const { data: guildSettings } = await supabase
                         .from('guild_settings')
                         .select('allow_poll_buttons')
@@ -140,15 +140,7 @@ export class PollManager {
                 }
             }
 
-            // If called from a Button, we update the message directly via interaction.update if we can?
-            // BUT this shared function might be called from Slash Command (/close).
-            // Slash Command: interaction.editReply (if deferred) or interaction.reply.
-            // But we need to update the ORIGINAL poll message, NOT the interaction reply!
-            // The `interaction` passed here is the Command interaction or Button interaction.
-
-            // If ButtonInteraction: `interaction.message` is the poll message.
-            // If ChatInputCommandInteraction: We have `pollId` (messageId). We need to fetch the message.
-
+            // Input check for poll interaction type
             let messageToEdit;
             if (interaction.isButton()) {
                 messageToEdit = interaction.message;
@@ -167,17 +159,14 @@ export class PollManager {
                     components: components
                 });
             } else {
+                if (interaction.deferred || interaction.replied) {
+                    return interaction.editReply({ content: 'Could not find the poll message to update.' });
+                }
                 return interaction.reply({ content: 'Could not find the poll message to update.', flags: MessageFlags.Ephemeral });
             }
 
             // Interaction Response
             if (interaction.isButton()) {
-                // We typically use update() or deferUpdate() for buttons if we edited the message already?
-                // Actually `message.edit` works.
-                // We should just followUp.
-                // Or `interaction.update` if we didn't use `message.edit`.
-                // Since we used `message.edit`, we should `deferUpdate` or `reply`.
-                // Let's assume we reply to confirm action.
                 try {
                     if (!interaction.replied && !interaction.deferred) {
                         await interaction.reply({ content: active ? 'Poll Reopened!' : 'Poll Closed!', flags: MessageFlags.Ephemeral });
@@ -198,7 +187,11 @@ export class PollManager {
             logger.error('Error in PollManager:', err);
             // Try to notify user
             try {
-                if (!interaction.replied) await interaction.reply({ content: 'An error occurred.', flags: MessageFlags.Ephemeral });
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.editReply({ content: 'An error occurred.' });
+                } else {
+                    await interaction.reply({ content: 'An error occurred.', flags: MessageFlags.Ephemeral });
+                }
             } catch { }
         }
     }
