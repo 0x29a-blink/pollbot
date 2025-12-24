@@ -31,7 +31,23 @@ export default {
             }
 
             try {
-                // 1. Record Vote
+                // Defer immediately to prevent timeout on slow DB ops
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+                // 1. Check for Existing Vote
+                const { data: existingVote } = await supabase
+                    .from('votes')
+                    .select('option_index')
+                    .eq('poll_id', pollId)
+                    .eq('user_id', userId)
+                    .single();
+
+                if (existingVote && existingVote.option_index === selectedIndex) {
+                    await interaction.editReply({ content: 'You have already voted for this option.' });
+                    return;
+                }
+
+                // 2. Record Vote (Delete old, insert new)
                 const { error: deleteError } = await supabase
                     .from('votes')
                     .delete()
@@ -40,7 +56,8 @@ export default {
 
                 if (deleteError) {
                     logger.error('Vote Delete Error:', deleteError);
-                    return interaction.reply({ content: 'Failed to record your vote. Please try again.', flags: MessageFlags.Ephemeral });
+                    await interaction.editReply({ content: 'Failed to record your vote. Please try again.' });
+                    return;
                 }
 
                 const { error: insertError } = await supabase
@@ -65,14 +82,17 @@ export default {
                             );
 
                         // Disable the component to prevent further spam
-                        await interaction.update({
+                        await interaction.message.edit({
                             components: [disabledRow]
                         });
+
+                        await interaction.editReply({ content: 'This poll is no longer valid.' });
                         return;
                     }
 
                     logger.error('Vote Insert Error:', insertError);
-                    return interaction.reply({ content: 'Failed to record your vote. Please try again.', flags: MessageFlags.Ephemeral });
+                    await interaction.editReply({ content: 'Failed to record your vote. Please try again.' });
+                    return;
                 }
 
                 // 2. Fetch Poll Settings & Data to see if we should update UI
@@ -84,71 +104,91 @@ export default {
 
                 if (pollError || !pollData) {
                     // Poll might have been deleted but message remains?
-                    return interaction.reply({ content: 'This poll no longer exists in the database.', flags: MessageFlags.Ephemeral });
+                    await interaction.editReply({ content: 'This poll no longer exists in the database.' });
+                    return;
                 }
 
                 if (!pollData.active) {
-                    return interaction.reply({ content: 'This poll is closed.', flags: MessageFlags.Ephemeral });
+                    await interaction.editReply({ content: 'This poll is closed.' });
+                    return;
                 }
 
-                // 3. Acknowledge the vote immediately (ephemeral)
-                await interaction.reply({ content: `You voted for **${pollData.options[selectedIndex]}**!`, flags: MessageFlags.Ephemeral });
+                // 3. Acknowledge the vote
+                await interaction.editReply({ content: `You voted for **${pollData.options[selectedIndex]}**!` });
 
-                // 4. If Public, Update the Poll Image
-                // We do this AFTER replying to not block the user interaction response (avoid "This interaction failed")
-                if (pollData.settings.public) {
-                    // Fetch Vote Counts
-                    // We need counts for ALL options.
-                    // Group by option_index.
-                    const { data: voteCounts, error: countError } = await supabase
-                        .from('votes')
-                        .select('option_index')
-                        .eq('poll_id', pollId);
+                // 4. Update the Poll Image (Always, to show updated Total Votes or Breakdown)
+                // Fetch Vote Counts
+                const { data: voteCounts, error: countError } = await supabase
+                    .from('votes')
+                    .select('option_index')
+                    .eq('poll_id', pollId);
 
-                    if (!countError && voteCounts) {
-                        // Aggregate
-                        const counts = new Array(pollData.options.length).fill(0);
-                        voteCounts.forEach((v: any) => {
-                            if (v.option_index >= 0 && v.option_index < counts.length) {
-                                counts[v.option_index]++;
-                            }
-                        });
-                        const totalVotes = voteCounts.length;
+                if (!countError && voteCounts) {
+                    // Calculate Total Votes
+                    const totalVotes = voteCounts.length;
 
-                        // Fetch Creator Tag
-                        let creatorTag = "Unknown User";
-                        try {
-                            const user = await interaction.client.users.fetch(pollData.creator_id);
-                            creatorTag = user.tag;
-                        } catch (e) {
-                            logger.warn(`Failed to fetch creator ${pollData.creator_id}`, e);
+                    // Calculate Breakdown (only needed if public, but useful to have)
+                    const counts = new Array(pollData.options.length).fill(0);
+                    voteCounts.forEach((v: any) => {
+                        if (v.option_index >= 0 && v.option_index < counts.length) {
+                            counts[v.option_index]++;
                         }
+                    });
 
-                        // Re-render
-                        const imageBuffer = await Renderer.renderPoll({
-                            title: pollData.title,
-                            description: pollData.description,
-                            options: pollData.options,
-                            votes: counts,
-                            totalVotes: totalVotes,
-                            creator: creatorTag,
-                            closed: false
-                        });
-
-                        // Let's create an attachment
-                        const attachment = new AttachmentBuilder(imageBuffer, { name: 'poll.png' });
-
-                        await interaction.message.edit({
-                            files: [attachment],
-                        });
+                    // Fetch Creator Tag
+                    let creatorTag = "Unknown User";
+                    try {
+                        const user = await interaction.client.users.fetch(pollData.creator_id);
+                        creatorTag = user.tag;
+                    } catch (e) {
+                        logger.warn(`Failed to fetch creator ${pollData.creator_id}`, e);
                     }
+
+                    // Re-render
+                    const resolvedTitle = await PollManager.resolveMentions(pollData.title, interaction.guild);
+                    const resolvedDescription = await PollManager.resolveMentions(pollData.description, interaction.guild);
+                    const resolvedOptions = await Promise.all(
+                        pollData.options.map(async (opt: string) => await PollManager.resolveMentions(opt, interaction.guild))
+                    );
+
+                    // Determine if we show the bar graph
+                    // Show if Public == true
+                    const showVotes = pollData.settings.public;
+
+                    const renderOptions: any = {
+                        title: resolvedTitle,
+                        description: resolvedDescription,
+                        options: resolvedOptions,
+                        totalVotes: totalVotes,
+                        creator: creatorTag,
+                        closed: false
+                    };
+
+                    if (showVotes) {
+                        renderOptions.votes = counts;
+                    }
+
+                    const imageBuffer = await Renderer.renderPoll(renderOptions);
+
+                    // Let's create an attachment
+                    const attachment = new AttachmentBuilder(imageBuffer, { name: 'poll.png' });
+
+                    await interaction.message.edit({
+                        files: [attachment],
+                    });
                 }
 
             } catch (err) {
                 logger.error('Voting Logic Error:', err);
-                if (!interaction.replied) {
-                    await interaction.followUp({ content: 'An error occurred while voting.', flags: MessageFlags.Ephemeral });
-                }
+                // If anything blew up, try to notify
+                try {
+                    if (interaction.deferred && !interaction.replied) {
+                        await interaction.editReply({ content: 'An error occurred while voting.' });
+                    } else if (!interaction.replied) {
+                        // Should not happen if we deferred at start, but safety net
+                        await interaction.reply({ content: 'An error occurred while voting.', flags: MessageFlags.Ephemeral });
+                    }
+                } catch { /* ignore if we can't even reply */ }
             }
             return;
         }

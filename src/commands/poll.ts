@@ -2,6 +2,7 @@ import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, Permiss
 import { supabase } from '../lib/db';
 import { Renderer } from '../lib/renderer';
 import { logger } from '../lib/logger';
+import { PollManager } from '../lib/pollManager';
 
 export default {
     data: new SlashCommandBuilder()
@@ -96,10 +97,14 @@ export default {
 
         try {
             // 3. Render Poll Image (Playwright)
+            const resolvedTitle = await PollManager.resolveMentions(title, interaction.guild);
+            const resolvedDescription = await PollManager.resolveMentions(description, interaction.guild);
+            const resolvedItems = await Promise.all(items.map(async (item) => await PollManager.resolveMentions(item, interaction.guild)));
+
             const imageBuffer = await Renderer.renderPoll({
-                title,
-                description,
-                options: items,
+                title: resolvedTitle,
+                description: resolvedDescription,
+                options: resolvedItems,
                 creator: interaction.user.tag
             });
 

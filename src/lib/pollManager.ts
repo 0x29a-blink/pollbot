@@ -1,4 +1,4 @@
-import { Interaction, ButtonBuilder, ButtonStyle, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, MessageFlags, AttachmentBuilder, GuildMember, PermissionsBitField, ChatInputCommandInteraction, ButtonInteraction } from 'discord.js';
+import { Interaction, ButtonBuilder, ButtonStyle, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, MessageFlags, AttachmentBuilder, GuildMember, PermissionsBitField, ChatInputCommandInteraction, ButtonInteraction, Guild } from 'discord.js';
 import { supabase } from './db';
 import { Renderer } from './renderer';
 import { logger } from './logger';
@@ -71,15 +71,28 @@ export class PollManager {
                 logger.warn(`Failed to fetch creator ${pollData.creator_id}`, e);
             }
 
-            const imageBuffer = await Renderer.renderPoll({
-                title: pollData.title,
-                description: pollData.description,
-                options: pollData.options,
-                votes: counts,
+            const resolvedTitle = await PollManager.resolveMentions(pollData.title, interaction.guild);
+            const resolvedDescription = await PollManager.resolveMentions(pollData.description, interaction.guild);
+            const resolvedOptions = await Promise.all(
+                pollData.options.map(async (opt: string) => await PollManager.resolveMentions(opt, interaction.guild))
+            );
+
+            const showVotes = !active || (pollData.settings && pollData.settings.public);
+
+            const renderOptions: any = {
+                title: resolvedTitle,
+                description: resolvedDescription,
+                options: resolvedOptions,
                 totalVotes: totalVotes,
                 creator: creatorTag,
                 closed: !active
-            });
+            };
+
+            if (showVotes) {
+                renderOptions.votes = counts;
+            }
+
+            const imageBuffer = await Renderer.renderPoll(renderOptions);
 
             const attachment = new AttachmentBuilder(imageBuffer, { name: 'poll.png' });
 
@@ -194,5 +207,75 @@ export class PollManager {
                 }
             } catch { }
         }
+    }
+
+    static async resolveMentions(text: string, guild: Guild | null): Promise<string> {
+        if (!text || !guild) return text;
+
+        const userMatches = [...text.matchAll(/<@!?(\d+)>/g)];
+        const roleMatches = [...text.matchAll(/<@&(\d+)>/g)];
+        const channelMatches = [...text.matchAll(/<#(\d+)>/g)];
+
+        const replacements = new Map<string, string>();
+
+        // Users
+        for (const match of userMatches) {
+            const fullMatch = match[0];
+            const id = match[1];
+            if (!fullMatch || !id) continue;
+
+            if (!replacements.has(fullMatch)) {
+                try {
+                    const member = await guild.members.fetch(id).catch(() => null);
+                    if (member) {
+                        replacements.set(fullMatch, `@${member.displayName}`);
+                    } else {
+                        // Fallback to username if not in guild
+                        const user = await guild.client.users.fetch(id).catch(() => null);
+                        if (user) {
+                            replacements.set(fullMatch, `@${user.username}`);
+                        }
+                    }
+                } catch { }
+            }
+        }
+
+        // Roles
+        for (const match of roleMatches) {
+            const fullMatch = match[0];
+            const id = match[1];
+            if (!fullMatch || !id) continue;
+
+            if (!replacements.has(fullMatch)) {
+                try {
+                    const role = await guild.roles.fetch(id).catch(() => null);
+                    if (role) {
+                        replacements.set(fullMatch, `@${role.name}`);
+                    }
+                } catch { }
+            }
+        }
+
+        // Channels
+        for (const match of channelMatches) {
+            const fullMatch = match[0];
+            const id = match[1];
+            if (!fullMatch || !id) continue;
+
+            if (!replacements.has(fullMatch)) {
+                try {
+                    const channel = await guild.channels.fetch(id).catch(() => null);
+                    if (channel) {
+                        replacements.set(fullMatch, `#${channel.name}`);
+                    }
+                } catch { }
+            }
+        }
+
+        let newText = text;
+        for (const [key, value] of replacements) {
+            newText = newText.split(key).join(value);
+        }
+        return newText;
     }
 }
