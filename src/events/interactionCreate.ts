@@ -123,6 +123,7 @@ export default {
                 // 3. Acknowledge the vote
                 const votedOptions = selectedIndices.map(i => pollData.options[i]).join(', ');
                 await interaction.editReply({ content: `You voted for **${votedOptions}**!` });
+                logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} voted on poll ${pollId} with the following item: ${votedOptions}`);
 
                 // 4. Update the Poll Image (Always, to show updated Total Votes or Breakdown)
                 // Fetch Vote Counts

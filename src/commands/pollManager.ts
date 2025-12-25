@@ -1,4 +1,5 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionsBitField, PermissionFlagsBits, MessageFlags, GuildMember, Role, Colors } from 'discord.js';
+import { logger } from '../lib/logger';
 
 export default {
     data: new SlashCommandBuilder()
@@ -52,6 +53,7 @@ export default {
                     reason: 'Created via /pollManager command for PollBot management'
                 });
 
+                logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} executed command /pollmanager create`);
                 return interaction.reply({ content: `Successfully created the ${role.toString()} role.`, flags: MessageFlags.Ephemeral });
             }
 
@@ -68,6 +70,7 @@ export default {
                 }
 
                 await targetUser.roles.add(role);
+                logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} executed command /pollmanager assign with parameters "user:${targetUser.user.tag}"`);
                 return interaction.reply({ content: `Assigned ${role.toString()} role to ${targetUser.toString()}.`, flags: MessageFlags.Ephemeral });
             }
 
@@ -84,6 +87,7 @@ export default {
                 }
 
                 await targetUser.roles.remove(role);
+                logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} executed command /pollmanager remove with parameters "user:${targetUser.user.tag}"`);
                 return interaction.reply({ content: `Removed ${role.toString()} role from ${targetUser.toString()}.`, flags: MessageFlags.Ephemeral });
             }
 

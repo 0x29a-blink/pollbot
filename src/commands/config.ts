@@ -51,6 +51,7 @@ export default {
                 content: I18n.t(successKey, interaction.locale),
                 flags: MessageFlags.Ephemeral
             });
+            logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} executed command /config poll-buttons with parameters "enabled:${enabled}"`);
         }
     }
 };

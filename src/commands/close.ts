@@ -1,6 +1,7 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionsBitField, MessageFlags, GuildMember } from 'discord.js';
 import { PollManager } from '../lib/pollManager';
 import { I18n } from '../lib/i18n';
+import { logger } from '../lib/logger';
 
 export default {
     data: new SlashCommandBuilder()
@@ -34,5 +35,6 @@ export default {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         await PollManager.setPollStatus(interaction, pollId, false);
+        logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} executed command /close with parameters "poll:${pollId}"`);
     }
 };

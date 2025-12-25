@@ -9,6 +9,16 @@ export interface RenderOptions {
     creator: string;
 }
 
+export interface StatsRenderOptions {
+    totalPolls: number;
+    totalVotes: number;
+    activeServers: number;
+    uptime: string;
+    shards: number;
+    cpuLoad: number; // 0-100
+    memoryUsage: number; // 0-100
+}
+
 export class Renderer {
     static async renderPoll(data: RenderOptions & { closed?: boolean }): Promise<Buffer> {
         const page = await browserPool.getPage();
@@ -246,6 +256,231 @@ export class Renderer {
             await page.close();
         }
     }
+
+    static async renderStats(data: StatsRenderOptions): Promise<Buffer> {
+        const page = await browserPool.getPage();
+
+        try {
+            const html = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {
+                        font-family: 'Inter', sans-serif;
+                        background-color: #111214; /* Darker background */
+                        color: #ffffff;
+                        margin: 0;
+                        padding: 0;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        min-height: 100vh;
+                        width: 700px;
+                    }
+                    .stats-card {
+                        background: #1e1f22; /* Card background */
+                        padding: 40px;
+                        border-radius: 12px;
+                        width: 100%;
+                        box-sizing: border-box;
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+                    }
+                    .header-title {
+                        font-family: 'Inter', sans-serif; /* Ensure bold font */
+                        font-size: 42px;
+                        font-weight: 900;
+                        text-transform: uppercase;
+                        letter-spacing: 2px;
+                        margin-bottom: 8px;
+                        text-align: center;
+                    }
+                    .header-subtitle {
+                        font-size: 16px;
+                        color: #949ba4;
+                        text-transform: uppercase;
+                        letter-spacing: 1px;
+                        margin-bottom: 30px;
+                        font-weight: 500;
+                    }
+                    
+                    .top-stats {
+                        display: flex;
+                        gap: 60px;
+                        margin-bottom: 30px;
+                    }
+                    .mini-stat {
+                        text-align: center;
+                    }
+                    .mini-label {
+                        color: #949ba4;
+                        font-size: 13px;
+                        font-weight: 700;
+                        text-transform: uppercase;
+                        margin-bottom: 6px;
+                    }
+                    .mini-value {
+                        font-family: monospace;
+                        font-size: 18px;
+                        font-weight: 700;
+                        color: #ffffff;
+                    }
+                    
+                    /* New Layout: Active Servers Top Center */
+                    .highlight-stat {
+                        text-align: center;
+                        margin-bottom: 30px;
+                    }
+                    .highlight-label {
+                        color: #5865F2;
+                        font-size: 16px;
+                        font-weight: 800;
+                        text-transform: uppercase;
+                        margin-bottom: 4px;
+                    }
+                    .highlight-value {
+                        font-size: 72px; /* Huge */
+                        font-weight: 800;
+                        line-height: 1;
+                        color: #ffffff;
+                    }
+
+                    .main-stats-grid {
+                        display: grid;
+                        grid-template-columns: 1fr 1fr;
+                        gap: 60px;
+                        width: 100%;
+                        margin-bottom: 40px;
+                        justify-items: center; /* Center items in grid */
+                    }
+                    .big-stat {
+                        text-align: center;
+                    }
+                    .big-label {
+                       color: #23A559; /* Green for these */
+                        font-size: 15px;
+                        font-weight: 800;
+                        text-transform: uppercase;
+                        margin-bottom: 8px;
+                    }
+                    .big-label.blue { color: #5865F2; }
+
+                    .big-value {
+                        font-size: 48px;
+                        font-weight: 800;
+                        line-height: 1;
+                    }
+
+                    .bars-container {
+                        width: 100%;
+                        background: #111214;
+                        padding: 20px;
+                        border-radius: 8px;
+                    }
+                    .bar-row {
+                        margin-bottom: 16px;
+                    }
+                    .bar-row:last-child { margin-bottom: 0; }
+                    
+                    .bar-header {
+                        display: flex;
+                        justify-content: space-between;
+                        margin-bottom: 8px;
+                        font-size: 12px;
+                        font-weight: 700;
+                        color: #949ba4;
+                        text-transform: uppercase;
+                    }
+                    .bar-track {
+                        height: 8px;
+                        background: #2b2d31;
+                        border-radius: 4px;
+                        overflow: hidden;
+                    }
+                    .bar-fill {
+                        height: 100%;
+                        background: #5865F2; /* Blurple default */
+                        border-radius: 4px;
+                    }
+                    .bar-fill.yellow { background: #FEE75C; } 
+                    
+                    /* Google Fonts */
+                    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&display=swap');
+                </style>
+            </head>
+            <body>
+                <div class="stats-card">
+                    <div class="header-title">PollBot</div>
+                    <div class="header-subtitle">System Analytics</div>
+
+                    <div class="top-stats">
+                        <div class="mini-stat">
+                            <div class="mini-label">Uptime:</div>
+                            <div class="mini-value">${data.uptime}</div>
+                        </div>
+                        <div class="mini-stat">
+                            <div class="mini-label">Shards:</div>
+                            <div class="mini-value">${data.shards}</div>
+                        </div>
+                    </div>
+                
+                    <!-- Active Servers (Peak) -->
+                    <div class="highlight-stat">
+                        <div class="highlight-label">Active Servers</div>
+                        <div class="highlight-value">${data.activeServers}</div>
+                    </div>
+
+                    <!-- Polls & Votes Side by Side -->
+                    <div class="main-stats-grid">
+                        <div class="big-stat">
+                            <div class="big-label">Total Polls</div>
+                            <div class="big-value">${data.totalPolls}</div>
+                        </div>
+                        <div class="big-stat">
+                            <div class="big-label blue">Total Votes</div>
+                            <div class="big-value">${data.totalVotes}</div>
+                        </div>
+                    </div>
+
+                    <div class="bars-container">
+                        <div class="bar-row">
+                            <div class="bar-header">
+                                <span>CPU Load</span>
+                                <span>${data.cpuLoad.toFixed(1)}%</span>
+                            </div>
+                            <div class="bar-track">
+                                <div class="bar-fill" style="width: ${Math.min(data.cpuLoad, 100)}%;"></div>
+                            </div>
+                        </div>
+                        <div class="bar-row">
+                            <div class="bar-header">
+                                <span>Memory Usage</span>
+                                <span>${data.memoryUsage.toFixed(1)}%</span>
+                            </div>
+                            <div class="bar-track">
+                                <div class="bar-fill yellow" style="width: ${Math.min(data.memoryUsage, 100)}%;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </body>
+            </html>
+            `;
+
+            await page.setContent(html);
+            const element = await page.$('.stats-card');
+            if (!element) throw new Error('Could not find stats-card element');
+            const buffer = await element.screenshot({ type: 'png' });
+            return buffer;
+
+        } finally {
+            await page.close();
+        }
+    }
+
 }
 
 // Basic HTML escape to prevent injection

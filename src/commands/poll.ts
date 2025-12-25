@@ -241,6 +241,8 @@ export default {
                         content: I18n.t('messages.poll.db_fail', interaction.locale),
                         flags: MessageFlags.Ephemeral
                     });
+                } else {
+                    logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} created a poll with the following parameters "/poll title:${title} items:${items.join(', ')} max_votes:${maxVotes} min_votes:${minVotes} public:${isPublic} thread:${createThread} close_button:${allowClose}"`);
                 }
             } else {
                 logger.warn('Skipping DB save (no credentials)');
