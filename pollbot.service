@@ -1,0 +1,15 @@
+[Unit]
+Description=PollBot Discord Bot
+After=network.target
+
+[Service]
+Type=simple
+User=blink
+WorkingDirectory=/home/blink/dev/pollbot
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
