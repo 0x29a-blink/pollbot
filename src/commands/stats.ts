@@ -1,6 +1,7 @@
 import { SlashCommandBuilder, AttachmentBuilder } from 'discord.js';
 import { supabase } from '../lib/db';
 import { Renderer } from '../lib/renderer';
+import { I18n } from '../lib/i18n';
 import os from 'os';
 
 export default {
@@ -79,14 +80,43 @@ export default {
             const usedMem = totalMem - freeMem;
             const memUsage = (usedMem / totalMem) * 100;
 
+
+
+            // Localization
+            let locale = interaction.locale;
+            if (interaction.inGuild()) {
+                const { data: guildSettings } = await supabase
+                    .from('guild_settings')
+                    .select('locale')
+                    .eq('guild_id', interaction.guildId)
+                    .single();
+
+                if (guildSettings && guildSettings.locale) {
+                    locale = guildSettings.locale;
+                }
+            }
+
+            const labels = {
+                title: I18n.t('stats.title', locale),
+                subtitle: I18n.t('stats.subtitle', locale),
+                uptime: I18n.t('stats.uptime', locale),
+                shards: I18n.t('stats.shards', locale),
+                activeServers: I18n.t('stats.active_servers', locale),
+                totalVotes: I18n.t('stats.total_votes', locale),
+                totalPolls: I18n.t('stats.total_polls', locale),
+                cpuLoad: I18n.t('stats.cpu_load', locale),
+                memoryUsage: I18n.t('stats.memory_usage', locale)
+            };
+
             const buffer = await Renderer.renderStats({
                 totalPolls,
                 totalVotes,
-                activeServers,
+                activeServers, // This is now peak active servers logic from previous step + current fallback
                 uptime: uptimeString,
                 shards,
                 cpuLoad,
-                memoryUsage: memUsage
+                memoryUsage: memUsage,
+                labels
             });
 
             const attachment = new AttachmentBuilder(buffer, { name: 'stats.png' });

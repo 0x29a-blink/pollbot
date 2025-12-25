@@ -35,6 +35,7 @@ CREATE INDEX IF NOT EXISTS idx_votes_poll_id ON votes(poll_id);
 CREATE TABLE IF NOT EXISTS guild_settings (
     guild_id TEXT PRIMARY KEY,
     allow_poll_buttons BOOLEAN DEFAULT TRUE,
+    locale TEXT,
     created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );

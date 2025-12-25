@@ -58,6 +58,10 @@ export class I18n {
 
     // Helper for Discord command localizations
     // Returns { "es-ES": "translation", ... }
+    static getAvailableLocales(): string[] {
+        return Object.keys(this.locales);
+    }
+
     static getLocalizations(key: string): Record<string, string> {
         const localizations: Record<string, string> = {};
         for (const locale of Object.keys(this.locales)) {

@@ -96,7 +96,16 @@
         "config": {
             "update_fail": "Failed to update settings.",
             "update_success_enabled": "Poll buttons have been **ENABLED** for this server.",
-            "update_success_disabled": "Poll buttons have been **DISABLED** for this server."
+            "update_success_disabled": "Poll buttons have been **DISABLED** for this server.",
+            "invalid_locale": "Invalid locale. Available: {{available}}",
+            "locale_success": "Locale set to {{lang}}."
+        },
+        "renderer": {
+            "closed": "CLOSED",
+            "final_results": "Final Results",
+            "created_by": "Created by",
+            "votes_lower": "votes",
+            "total_votes_lower": "total votes"
         },
         "manager": {
             "poll_not_found": "Poll not found in database.",
@@ -112,5 +121,16 @@
             "reopen_button": "Reopen Poll",
             "invalid_id": "Invalid poll ID or link provided."
         }
+    },
+    "stats": {
+        "title": "PollBot",
+        "subtitle": "System Analytics",
+        "uptime": "Uptime",
+        "shards": "Shards",
+        "active_servers": "Active Servers",
+        "total_votes": "Total Votes",
+        "total_polls": "Total Polls",
+        "cpu_load": "CPU Load",
+        "memory_usage": "Memory Usage"
     }
 }

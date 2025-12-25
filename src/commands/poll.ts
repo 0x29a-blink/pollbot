@@ -74,14 +74,17 @@ export default {
 
         // Fetch Guild Settings
         let serverAllowsButtons = true;
+        let serverLocale = 'en'; // Default to English if not set or not in guild
+
         if (interaction.inGuild()) {
             const { data: guildSettings } = await supabase
                 .from('guild_settings')
-                .select('allow_poll_buttons')
+                .select('allow_poll_buttons, locale')
                 .eq('guild_id', interaction.guildId)
                 .single();
             if (guildSettings) {
                 serverAllowsButtons = guildSettings.allow_poll_buttons;
+                if (guildSettings.locale) serverLocale = guildSettings.locale;
             }
         }
 
@@ -164,7 +167,8 @@ export default {
                 title: resolvedTitle,
                 description: resolvedDescription,
                 options: resolvedItems,
-                creator: interaction.user.tag
+                creator: interaction.user.tag,
+                locale: serverLocale
             });
 
             const attachment = new AttachmentBuilder(imageBuffer, { name: 'poll.png' });
@@ -175,7 +179,7 @@ export default {
             // Row 1: Select Menu
             const selectMenu = new StringSelectMenuBuilder()
                 .setCustomId('poll_vote')
-                .setPlaceholder(I18n.t('messages.manager.select_placeholder', interaction.locale))
+                .setPlaceholder(I18n.t('messages.manager.select_placeholder', serverLocale)) // Use Server Locale
                 .setMinValues(minVotes)
                 .setMaxValues(maxVotes)
                 .addOptions(
@@ -183,7 +187,7 @@ export default {
                         new StringSelectMenuOptionBuilder()
                             .setLabel(item.substring(0, 100))
                             .setValue(index.toString())
-                            .setDescription(I18n.t('messages.manager.vote_option_desc', interaction.locale, { index: index + 1 }))
+                            .setDescription(I18n.t('messages.manager.vote_option_desc', serverLocale, { index: index + 1 })) // Use Server Locale
                     )
                 );
 
@@ -193,7 +197,7 @@ export default {
             if (allowClose) {
                 const closeButton = new ButtonBuilder()
                     .setCustomId('poll_close')
-                    .setLabel(I18n.t('messages.manager.close_button', interaction.locale))
+                    .setLabel(I18n.t('messages.manager.close_button', serverLocale)) // Use Server Locale
                     .setStyle(ButtonStyle.Danger)
                     .setEmoji('🔒');
 

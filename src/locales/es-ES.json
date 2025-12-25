@@ -96,7 +96,9 @@
         "config": {
             "update_fail": "Falló la actualización de la configuración.",
             "update_success_enabled": "Los botones de encuesta han sido **HABILITADOS** para este servidor.",
-            "update_success_disabled": "Los botones de encuesta han sido **DESHABILITADOS** para este servidor."
+            "update_success_disabled": "Los botones de encuesta han sido **DESHABILITADOS** para este servidor.",
+            "invalid_locale": "Localización inválida. Disponibles: {{available}}",
+            "locale_success": "Localización establecida a {{lang}}."
         },
         "manager": {
             "poll_not_found": "Encuesta no encontrada en la base de datos.",
@@ -111,6 +113,24 @@
             "close_button": "Cerrar Encuesta",
             "reopen_button": "Reabrir Encuesta",
             "invalid_id": "ID de encuesta o enlace inválido proporcionado."
+        },
+        "renderer": {
+            "closed": "CERRADO",
+            "final_results": "Resultados Finales",
+            "created_by": "Creado por",
+            "votes_lower": "votos",
+            "total_votes_lower": "votos totales"
         }
+    },
+    "stats": {
+        "title": "PollBot",
+        "subtitle": "Analíticas del Sistema",
+        "uptime": "Tiempo Activo",
+        "shards": "Fragmentos",
+        "active_servers": "Servidores Activos",
+        "total_votes": "Votos Totales",
+        "total_polls": "Encuestas Totales",
+        "cpu_load": "Carga CPU",
+        "memory_usage": "Uso Memoria"
     }
 }

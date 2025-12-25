@@ -1,4 +1,5 @@
 import { browserPool } from './browserPool';
+import { I18n } from './i18n';
 
 export interface RenderOptions {
     title: string;
@@ -7,6 +8,7 @@ export interface RenderOptions {
     votes?: number[]; // Array of vote counts corresponding to options
     totalVotes?: number;
     creator: string;
+    locale?: string;
 }
 
 export interface StatsRenderOptions {
@@ -17,6 +19,17 @@ export interface StatsRenderOptions {
     shards: number;
     cpuLoad: number; // 0-100
     memoryUsage: number; // 0-100
+    labels: {
+        title: string;
+        subtitle: string;
+        uptime: string;
+        shards: string;
+        activeServers: string;
+        totalVotes: string;
+        totalPolls: string;
+        cpuLoad: string;
+        memoryUsage: string;
+    };
 }
 
 export class Renderer {
@@ -195,7 +208,7 @@ export class Renderer {
                             <h1 class="title">${escapeHtml(data.title)}</h1>
                             <div class="description">${escapeHtml(data.description)}</div>
                         </div>
-                        ${data.closed ? '<div class="status-badge">CLOSED</div>' : ''}
+                        ${data.closed ? `<div class="status-badge">${I18n.t('messages.renderer.closed', data.locale || 'en')}</div>` : ''}
                     </div>
                     
                     <div class="divider"></div>
@@ -221,7 +234,7 @@ export class Renderer {
                                     </div>
                                     ${data.votes ? `
                                     <div class="option-right">
-                                        ${votes} votes ${percentageString ? `(${percentageString})` : ''}
+                                        ${votes} ${I18n.t('messages.renderer.votes_lower', data.locale || 'en')} ${percentageString ? `(${percentageString})` : ''}
                                     </div>
                                     ` : ''}
                                 </div>
@@ -232,8 +245,8 @@ export class Renderer {
 
                     <div class="footer">
                         <div class="footer-icon"></div>
-                        Created by ${escapeHtml(data.creator)} ${data.totalVotes ? `• ${data.totalVotes} total votes` : ''}
-                        ${data.closed ? '• Final Results' : ''}
+                        ${I18n.t('messages.renderer.created_by', data.locale || 'en')} ${escapeHtml(data.creator)} ${data.totalVotes ? `• ${data.totalVotes} ${I18n.t('messages.renderer.total_votes_lower', data.locale || 'en')}` : ''}
+                        ${data.closed ? `• ${I18n.t('messages.renderer.final_results', data.locale || 'en')}` : ''}
                     </div>
                 </div>
             </body>
@@ -413,34 +426,34 @@ export class Renderer {
             </head>
             <body>
                 <div class="stats-card">
-                    <div class="header-title">PollBot</div>
-                    <div class="header-subtitle">System Analytics</div>
+                    <div class="header-title">${escapeHtml(data.labels.title)}</div>
+                    <div class="header-subtitle">${escapeHtml(data.labels.subtitle)}</div>
 
                     <div class="top-stats">
                         <div class="mini-stat">
-                            <div class="mini-label">Uptime:</div>
+                            <div class="mini-label">${escapeHtml(data.labels.uptime)}:</div>
                             <div class="mini-value">${data.uptime}</div>
                         </div>
                         <div class="mini-stat">
-                            <div class="mini-label">Shards:</div>
+                            <div class="mini-label">${escapeHtml(data.labels.shards)}:</div>
                             <div class="mini-value">${data.shards}</div>
                         </div>
                     </div>
                 
                     <!-- Active Servers (Peak) -->
                     <div class="highlight-stat">
-                        <div class="highlight-label">Active Servers</div>
+                        <div class="highlight-label">${escapeHtml(data.labels.activeServers)}</div>
                         <div class="highlight-value">${data.activeServers}</div>
                     </div>
 
                     <!-- Polls & Votes Side by Side -->
                     <div class="main-stats-grid">
                         <div class="big-stat">
-                            <div class="big-label">Total Polls</div>
+                            <div class="big-label">${escapeHtml(data.labels.totalPolls)}</div>
                             <div class="big-value">${data.totalPolls}</div>
                         </div>
                         <div class="big-stat">
-                            <div class="big-label blue">Total Votes</div>
+                            <div class="big-label blue">${escapeHtml(data.labels.totalVotes)}</div>
                             <div class="big-value">${data.totalVotes}</div>
                         </div>
                     </div>
@@ -448,7 +461,7 @@ export class Renderer {
                     <div class="bars-container">
                         <div class="bar-row">
                             <div class="bar-header">
-                                <span>CPU Load</span>
+                                <span>${escapeHtml(data.labels.cpuLoad)}</span>
                                 <span>${data.cpuLoad.toFixed(1)}%</span>
                             </div>
                             <div class="bar-track">
@@ -457,7 +470,7 @@ export class Renderer {
                         </div>
                         <div class="bar-row">
                             <div class="bar-header">
-                                <span>Memory Usage</span>
+                                <span>${escapeHtml(data.labels.memoryUsage)}</span>
                                 <span>${data.memoryUsage.toFixed(1)}%</span>
                             </div>
                             <div class="bar-track">

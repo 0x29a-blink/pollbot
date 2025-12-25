@@ -20,6 +20,25 @@ export default {
             return;
         }
 
+        // Handle Autocomplete
+        if (interaction.isAutocomplete()) {
+            const client = interaction.client as ExtendedClient;
+            const command = client.commands.get(interaction.commandName);
+
+            if (!command) {
+                return;
+            }
+
+            try {
+                if (command.autocomplete) {
+                    await command.autocomplete(interaction);
+                }
+            } catch (error) {
+                logger.error(`Error executing autocomplete for ${interaction.commandName}`, error);
+            }
+            return;
+        }
+
         // Handle Select Menus (Voting)
         if (interaction.isStringSelectMenu() && interaction.customId === 'poll_vote') {
             const pollId = interaction.message.id;
@@ -164,13 +183,27 @@ export default {
                     // Show if Public == true
                     const showVotes = pollData.settings.public;
 
+                    // Fetch server locale
+                    let serverLocale = 'en';
+                    if (interaction.guildId) {
+                        const { data: guildSettings } = await supabase
+                            .from('guild_settings')
+                            .select('locale')
+                            .eq('guild_id', interaction.guildId)
+                            .single();
+                        if (guildSettings?.locale) {
+                            serverLocale = guildSettings.locale;
+                        }
+                    }
+
                     const renderOptions: any = {
                         title: resolvedTitle,
                         description: resolvedDescription,
                         options: resolvedOptions,
                         totalVotes: totalVotes,
                         creator: creatorTag,
-                        closed: false
+                        closed: false,
+                        locale: serverLocale // Pass Server Locale
                     };
 
                     if (showVotes) {

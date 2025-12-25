@@ -22,7 +22,7 @@ export class PollManager {
                 return interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
             }
 
-            // 2. Auth Check
+            // 2. Auth Check & Locale Fetch
             const member = interaction.member as GuildMember;
             const isAdmin = member?.permissions.has(PermissionsBitField.Flags.ManageGuild);
             const isPollManager = member?.roles.cache.some(r => r.name === 'Poll Manager');
@@ -35,6 +35,23 @@ export class PollManager {
                 return interaction.reply({ content: errorMsg, flags: MessageFlags.Ephemeral });
             }
 
+            // Fetch Guild Settings for Buttons & Locale
+            let serverLocale = 'en';
+            let showButtons = true;
+
+            if (interaction.inGuild()) {
+                const { data: guildSettings } = await supabase
+                    .from('guild_settings')
+                    .select('allow_poll_buttons, locale')
+                    .eq('guild_id', interaction.guildId)
+                    .single();
+
+                if (guildSettings) {
+                    showButtons = guildSettings.allow_poll_buttons;
+                    if (guildSettings.locale) serverLocale = guildSettings.locale;
+                }
+            }
+
             // 3. Update Database
             const { error: updateError } = await supabase
                 .from('polls')
@@ -43,6 +60,7 @@ export class PollManager {
 
             if (updateError) {
                 logger.error('Failed to update poll state:', updateError);
+                // Use server locale for response if possible, or interaction
                 const msg = I18n.t('messages.manager.update_state_fail', interaction.locale);
                 if (interaction.deferred || interaction.replied) {
                     return interaction.editReply({ content: msg });
@@ -65,7 +83,7 @@ export class PollManager {
             const totalVotes = voteCounts ? voteCounts.length : 0;
 
             // Fetch Creator Tag
-            let creatorTag = I18n.t('messages.manager.unknown_user', interaction.locale);
+            let creatorTag = I18n.t('messages.manager.unknown_user', serverLocale); // Use Server Locale
             try {
                 const user = await interaction.client.users.fetch(pollData.creator_id);
                 creatorTag = user.tag;
@@ -87,7 +105,8 @@ export class PollManager {
                 options: resolvedOptions,
                 totalVotes: totalVotes,
                 creator: creatorTag,
-                closed: !active
+                closed: !active,
+                locale: serverLocale // Pass Server Locale
             };
 
             if (showVotes) {
@@ -108,7 +127,7 @@ export class PollManager {
 
                 const selectMenu = new StringSelectMenuBuilder()
                     .setCustomId('poll_vote')
-                    .setPlaceholder(I18n.t('messages.manager.select_placeholder', interaction.locale))
+                    .setPlaceholder(I18n.t('messages.manager.select_placeholder', serverLocale)) // Use Server Locale
                     .setMinValues(minVotes)
                     .setMaxValues(maxVotes)
                     .addOptions(
@@ -116,25 +135,17 @@ export class PollManager {
                             new StringSelectMenuOptionBuilder()
                                 .setLabel(item.substring(0, 100))
                                 .setValue(index.toString())
-                                .setDescription(I18n.t('messages.manager.vote_option_desc', interaction.locale, { index: index + 1 }))
+                                .setDescription(I18n.t('messages.manager.vote_option_desc', serverLocale, { index: index + 1 })) // Use Server Locale
                         )
                     );
                 components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu));
 
                 // Check Guild Settings for Buttons
                 if (pollData.settings.allow_close) {
-                    const { data: guildSettings } = await supabase
-                        .from('guild_settings')
-                        .select('allow_poll_buttons')
-                        .eq('guild_id', interaction.guildId)
-                        .single();
-
-                    const showButton = guildSettings?.allow_poll_buttons ?? true; // Default true
-
-                    if (showButton) {
+                    if (showButtons) {
                         const closeButton = new ButtonBuilder()
                             .setCustomId('poll_close')
-                            .setLabel(I18n.t('messages.manager.close_button', interaction.locale))
+                            .setLabel(I18n.t('messages.manager.close_button', serverLocale)) // Use Server Locale
                             .setStyle(ButtonStyle.Danger)
                             .setEmoji('🔒');
                         components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(closeButton));
@@ -142,18 +153,10 @@ export class PollManager {
                 }
             } else {
                 // CLOSED: Reopen Button (if enabled)
-                const { data: guildSettings } = await supabase
-                    .from('guild_settings')
-                    .select('allow_poll_buttons')
-                    .eq('guild_id', interaction.guildId)
-                    .single();
-
-                const showButton = guildSettings?.allow_poll_buttons ?? true;
-
-                if (showButton) {
+                if (showButtons) {
                     const reopenButton = new ButtonBuilder()
                         .setCustomId('poll_reopen')
-                        .setLabel(I18n.t('messages.manager.reopen_button', interaction.locale))
+                        .setLabel(I18n.t('messages.manager.reopen_button', serverLocale)) // Use Server Locale
                         .setStyle(ButtonStyle.Success)
                         .setEmoji('🔓');
                     components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(reopenButton));
