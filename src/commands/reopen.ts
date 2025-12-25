@@ -1,5 +1,6 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionsBitField, MessageFlags, GuildMember } from 'discord.js';
 import { PollManager } from '../lib/pollManager';
+import { I18n } from '../lib/i18n';
 
 export default {
     data: new SlashCommandBuilder()
@@ -12,7 +13,7 @@ export default {
         ),
     async execute(interaction: ChatInputCommandInteraction) {
         if (!interaction.inGuild()) {
-            return interaction.reply({ content: 'This command can only be used in a server.', flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: I18n.t('messages.common.guild_only', interaction.locale), flags: MessageFlags.Ephemeral });
         }
 
         const pollInput = interaction.options.getString('poll', true);
@@ -25,7 +26,7 @@ export default {
         }
 
         if (!/^\d+$/.test(pollId)) {
-            return interaction.reply({ content: 'Invalid poll ID or link provided.', flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: I18n.t('messages.manager.invalid_id', interaction.locale), flags: MessageFlags.Ephemeral });
         }
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });

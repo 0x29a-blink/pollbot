@@ -1,0 +1,116 @@
+{
+    "commands": {
+        "poll": {
+            "name": "encuesta",
+            "description": "Crear una nueva encuesta",
+            "options": {
+                "title": {
+                    "name": "titulo",
+                    "description": "El título para la encuesta (max 256 caracteres)"
+                },
+                "items": {
+                    "name": "opciones",
+                    "description": "Opciones separadas por coma (max 25)"
+                },
+                "max_votes": {
+                    "name": "votos_maximos",
+                    "description": "Número máximo de opciones que un usuario puede seleccionar (defecto: 1)"
+                },
+                "min_votes": {
+                    "name": "votos_minimos",
+                    "description": "Número mínimo de opciones que un usuario debe seleccionar (defecto: 1)"
+                },
+                "description": {
+                    "name": "descripcion",
+                    "description": "La descripción para la encuesta (uase \\n para nueva línea)"
+                },
+                "public": {
+                    "name": "publica",
+                    "description": "Si se deben mostrar los votos actuales (defecto: verdadero)"
+                },
+                "close_button": {
+                    "name": "boton_cerrar",
+                    "description": "Si añadir un botón de Cerrar Encuesta"
+                },
+                "thread": {
+                    "name": "hilo",
+                    "description": "Si adjuntar un hilo a la encuesta"
+                }
+            }
+        },
+        "config": {
+            "name": "configuracion",
+            "description": "Configurar ajustes del Poll Bot para este servidor",
+            "subcommands": {
+                "poll-buttons": {
+                    "name": "botones_encuesta",
+                    "description": "Habilitar o deshabilitar botones de encuesta (Cerrar/Reabrir)",
+                    "options": {
+                        "enabled": {
+                            "name": "habilitado",
+                            "description": "Si habilitar botones de encuesta"
+                        }
+                    }
+                }
+            }
+        },
+        "close": {
+            "name": "cerrar",
+            "description": "Cerrar una encuesta activa",
+            "options": {
+                "poll": {
+                    "name": "encuesta",
+                    "description": "Enlace del mensaje o ID de la encuesta"
+                }
+            }
+        },
+        "reopen": {
+            "name": "reabrir",
+            "description": "Reabrir una encuesta cerrada",
+            "options": {
+                "poll": {
+                    "name": "encuesta",
+                    "description": "Enlace del mensaje o ID de la encuesta"
+                }
+            }
+        }
+    },
+    "messages": {
+        "common": {
+            "error": "Ocurrió un error.",
+            "guild_only": "Este comando solo se puede usar en un servidor.",
+            "no_permission": "Necesitas el permiso \"Administrar servidor\" para usar este comando."
+        },
+        "poll": {
+            "title_too_long": "¡El título es demasiado largo! ({{length}}/256 caracteres)",
+            "description_too_long": "¡La descripción es demasiado larga! ({{length}}/4096 caracteres)",
+            "items_required": "Debes proporcionar al menos una opción válida.",
+            "items_too_many": "¡Demasiadas opciones! Proporcionaste {{count}}, el máximo es 25.",
+            "max_votes_exceeded": "No puedes establecer votos máximos ({{max}}) mayor que el número de opciones ({{items}}).",
+            "min_votes_error": "votos mínimos ({{min}}) no puede ser mayor que votos máximos ({{max}}).",
+            "min_votes_exceeded": "No puedes establecer votos mínimos ({{min}}) mayor que el número de opciones ({{items}}).",
+            "item_too_long": "Las siguientes opciones exceden los 100 caracteres:\n{{items}}",
+            "db_fail": "Encuesta creada, pero falló al guardar en la base de datos. La persistencia puede estar comprometida.",
+            "generic_error": "Algo salió mal procesando tu encuesta."
+        },
+        "config": {
+            "update_fail": "Falló la actualización de la configuración.",
+            "update_success_enabled": "Los botones de encuesta han sido **HABILITADOS** para este servidor.",
+            "update_success_disabled": "Los botones de encuesta han sido **DESHABILITADOS** para este servidor."
+        },
+        "manager": {
+            "poll_not_found": "Encuesta no encontrada en la base de datos.",
+            "permissions_error": "Necesitas permisos de 'Administrar servidor' o el rol 'Poll Manager' para gestionar esta encuesta.",
+            "update_state_fail": "Falló al actualizar el estado de la encuesta.",
+            "msg_update_fail": "No se pudo encontrar el mensaje de la encuesta para actualizar.",
+            "reopened": "¡Encuesta Reabierta!",
+            "closed": "¡Encuesta Cerrada!",
+            "unknown_user": "Usuario Desconocido",
+            "select_placeholder": "Selecciona una opción para votar",
+            "vote_option_desc": "Votar por la Opción #{{index}}",
+            "close_button": "Cerrar Encuesta",
+            "reopen_button": "Reabrir Encuesta",
+            "invalid_id": "ID de encuesta o enlace inválido proporcionado."
+        }
+    }
+}

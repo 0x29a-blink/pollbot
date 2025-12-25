@@ -2,6 +2,7 @@ import { Interaction, ButtonBuilder, ButtonStyle, ActionRowBuilder, StringSelect
 import { supabase } from './db';
 import { Renderer } from './renderer';
 import { logger } from './logger';
+import { I18n } from './i18n';
 
 export class PollManager {
     static async setPollStatus(interaction: ChatInputCommandInteraction | ButtonInteraction, pollId: string, active: boolean) {
@@ -14,10 +15,11 @@ export class PollManager {
                 .single();
 
             if (pollError || !pollData) {
+                const msg = I18n.t('messages.manager.poll_not_found', interaction.locale);
                 if (interaction.deferred || interaction.replied) {
-                    return interaction.editReply({ content: 'Poll not found in database.' });
+                    return interaction.editReply({ content: msg });
                 }
-                return interaction.reply({ content: 'Poll not found in database.', flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
             }
 
             // 2. Auth Check
@@ -26,8 +28,7 @@ export class PollManager {
             const isPollManager = member?.roles.cache.some(r => r.name === 'Poll Manager');
 
             if (!isAdmin && !isPollManager) {
-                const errorMsg = 'You need \'Manage Guild\' permissions or the \'Poll Manager\' role to manage this poll.\n' +
-                    'You can ask a server admin to run `/pollmanager create` and then `/pollmanager assign` to give you the role.';
+                const errorMsg = I18n.t('messages.manager.permissions_error', interaction.locale);
                 if (interaction.deferred || interaction.replied) {
                     return interaction.editReply({ content: errorMsg });
                 }
@@ -42,10 +43,11 @@ export class PollManager {
 
             if (updateError) {
                 logger.error('Failed to update poll state:', updateError);
+                const msg = I18n.t('messages.manager.update_state_fail', interaction.locale);
                 if (interaction.deferred || interaction.replied) {
-                    return interaction.editReply({ content: 'Failed to update poll state.' });
+                    return interaction.editReply({ content: msg });
                 }
-                return interaction.reply({ content: 'Failed to update poll state.', flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
             }
 
             // 4. Fetch Vote Data for Render
@@ -63,7 +65,7 @@ export class PollManager {
             const totalVotes = voteCounts ? voteCounts.length : 0;
 
             // Fetch Creator Tag
-            let creatorTag = "Unknown User";
+            let creatorTag = I18n.t('messages.manager.unknown_user', interaction.locale);
             try {
                 const user = await interaction.client.users.fetch(pollData.creator_id);
                 creatorTag = user.tag;
@@ -106,7 +108,7 @@ export class PollManager {
 
                 const selectMenu = new StringSelectMenuBuilder()
                     .setCustomId('poll_vote')
-                    .setPlaceholder('Select an option to vote')
+                    .setPlaceholder(I18n.t('messages.manager.select_placeholder', interaction.locale))
                     .setMinValues(minVotes)
                     .setMaxValues(maxVotes)
                     .addOptions(
@@ -114,7 +116,7 @@ export class PollManager {
                             new StringSelectMenuOptionBuilder()
                                 .setLabel(item.substring(0, 100))
                                 .setValue(index.toString())
-                                .setDescription(`Vote for Option #${index + 1}`)
+                                .setDescription(I18n.t('messages.manager.vote_option_desc', interaction.locale, { index: index + 1 }))
                         )
                     );
                 components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu));
@@ -132,7 +134,7 @@ export class PollManager {
                     if (showButton) {
                         const closeButton = new ButtonBuilder()
                             .setCustomId('poll_close')
-                            .setLabel('Close Poll')
+                            .setLabel(I18n.t('messages.manager.close_button', interaction.locale))
                             .setStyle(ButtonStyle.Danger)
                             .setEmoji('🔒');
                         components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(closeButton));
@@ -151,7 +153,7 @@ export class PollManager {
                 if (showButton) {
                     const reopenButton = new ButtonBuilder()
                         .setCustomId('poll_reopen')
-                        .setLabel('Reopen Poll')
+                        .setLabel(I18n.t('messages.manager.reopen_button', interaction.locale))
                         .setStyle(ButtonStyle.Success)
                         .setEmoji('🔓');
                     components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(reopenButton));
@@ -177,27 +179,29 @@ export class PollManager {
                     components: components
                 });
             } else {
+                const msg = I18n.t('messages.manager.msg_update_fail', interaction.locale);
                 if (interaction.deferred || interaction.replied) {
-                    return interaction.editReply({ content: 'Could not find the poll message to update.' });
+                    return interaction.editReply({ content: msg });
                 }
-                return interaction.reply({ content: 'Could not find the poll message to update.', flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
             }
 
             // Interaction Response
+            const successMsg = active ? I18n.t('messages.manager.reopened', interaction.locale) : I18n.t('messages.manager.closed', interaction.locale);
             if (interaction.isButton()) {
                 try {
                     if (!interaction.replied && !interaction.deferred) {
-                        await interaction.reply({ content: active ? 'Poll Reopened!' : 'Poll Closed!', flags: MessageFlags.Ephemeral });
+                        await interaction.reply({ content: successMsg, flags: MessageFlags.Ephemeral });
                     } else {
-                        await interaction.followUp({ content: active ? 'Poll Reopened!' : 'Poll Closed!', flags: MessageFlags.Ephemeral });
+                        await interaction.followUp({ content: successMsg, flags: MessageFlags.Ephemeral });
                     }
                 } catch (e) { /* ignore already replied */ }
             } else {
                 // Slash Command
                 if (!interaction.replied && !interaction.deferred) {
-                    await interaction.reply({ content: active ? 'Poll Reopened!' : 'Poll Closed!', flags: MessageFlags.Ephemeral });
+                    await interaction.reply({ content: successMsg, flags: MessageFlags.Ephemeral });
                 } else {
-                    await interaction.editReply({ content: active ? 'Poll Reopened!' : 'Poll Closed!' });
+                    await interaction.editReply({ content: successMsg });
                 }
             }
 
@@ -205,10 +209,11 @@ export class PollManager {
             logger.error('Error in PollManager:', err);
             // Try to notify user
             try {
+                const msg = I18n.t('messages.common.error', interaction.locale);
                 if (interaction.deferred || interaction.replied) {
-                    await interaction.editReply({ content: 'An error occurred.' });
+                    await interaction.editReply({ content: msg });
                 } else {
-                    await interaction.reply({ content: 'An error occurred.', flags: MessageFlags.Ephemeral });
+                    await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
                 }
             } catch { }
         }

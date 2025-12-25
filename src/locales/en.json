@@ -1,0 +1,116 @@
+{
+    "commands": {
+        "poll": {
+            "name": "poll",
+            "description": "Create a new poll",
+            "options": {
+                "title": {
+                    "name": "title",
+                    "description": "The title for the message embed (max 256 chars)"
+                },
+                "items": {
+                    "name": "items",
+                    "description": "Comma separated items (max 25 items)"
+                },
+                "max_votes": {
+                    "name": "max_votes",
+                    "description": "Maximum number of options a user can select (default: 1)"
+                },
+                "min_votes": {
+                    "name": "min_votes",
+                    "description": "Minimum number of options a user must select (default: 1)"
+                },
+                "description": {
+                    "name": "description",
+                    "description": "The description for the message embed (use \\n for newline)"
+                },
+                "public": {
+                    "name": "public",
+                    "description": "Whether to display current vote counts (default: true)"
+                },
+                "close_button": {
+                    "name": "close_button",
+                    "description": "Whether to add a Close Poll button"
+                },
+                "thread": {
+                    "name": "thread",
+                    "description": "Whether to attach a thread to the poll"
+                }
+            }
+        },
+        "config": {
+            "name": "config",
+            "description": "Configure Poll Bot settings for this server",
+            "subcommands": {
+                "poll-buttons": {
+                    "name": "poll-buttons",
+                    "description": "Enable or disable poll buttons (Close/Reopen)",
+                    "options": {
+                        "enabled": {
+                            "name": "enabled",
+                            "description": "Whether to enable poll buttons"
+                        }
+                    }
+                }
+            }
+        },
+        "close": {
+            "name": "close",
+            "description": "Close an active poll",
+            "options": {
+                "poll": {
+                    "name": "poll",
+                    "description": "Message Link or ID of the poll"
+                }
+            }
+        },
+        "reopen": {
+            "name": "reopen",
+            "description": "Reopen a closed poll",
+            "options": {
+                "poll": {
+                    "name": "poll",
+                    "description": "Message Link or ID of the poll"
+                }
+            }
+        }
+    },
+    "messages": {
+        "common": {
+            "error": "An error occurred.",
+            "guild_only": "This command can only be used in a server.",
+            "no_permission": "You need the \"Manage Server\" permission to use this command."
+        },
+        "poll": {
+            "title_too_long": "Title is too long! ({{length}}/256 characters)",
+            "description_too_long": "Description is too long! ({{length}}/4096 characters)",
+            "items_required": "You must provide at least one valid item.",
+            "items_too_many": "Too many items! You provided {{count}}, max is 25.",
+            "max_votes_exceeded": "You cannot set max_votes ({{max}}) higher than the number of items ({{items}}).",
+            "min_votes_error": "min_votes ({{min}}) cannot be greater than max_votes ({{max}}).",
+            "min_votes_exceeded": "You cannot set min_votes ({{min}}) higher than the number of items ({{items}}).",
+            "item_too_long": "The following items exceed 100 characters:\n{{items}}",
+            "db_fail": "Poll created, but failed to save to database. Persistence may be compromised.",
+            "generic_error": "Something went wrong processing your poll."
+        },
+        "config": {
+            "update_fail": "Failed to update settings.",
+            "update_success_enabled": "Poll buttons have been **ENABLED** for this server.",
+            "update_success_disabled": "Poll buttons have been **DISABLED** for this server."
+        },
+        "manager": {
+            "poll_not_found": "Poll not found in database.",
+            "permissions_error": "You need 'Manage Guild' permissions or the 'Poll Manager' role to manage this poll.\nYou can ask a server admin to run `/pollmanager create` and then `/pollmanager assign` to give you the role.",
+            "update_state_fail": "Failed to update poll state.",
+            "msg_update_fail": "Could not find the poll message to update.",
+            "reopened": "Poll Reopened!",
+            "closed": "Poll Closed!",
+            "unknown_user": "Unknown User",
+            "select_placeholder": "Select an option to vote",
+            "vote_option_desc": "Vote for Option #{{index}}",
+            "close_button": "Close Poll",
+            "reopen_button": "Reopen Poll",
+            "invalid_id": "Invalid poll ID or link provided."
+        }
+    }
+}

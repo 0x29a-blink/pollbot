@@ -3,6 +3,9 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { logger } from './lib/logger';
+import { I18n } from './lib/i18n';
+
+I18n.init();
 
 dotenv.config();
 

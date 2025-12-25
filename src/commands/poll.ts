@@ -3,6 +3,7 @@ import { supabase } from '../lib/db';
 import { Renderer } from '../lib/renderer';
 import { logger } from '../lib/logger';
 import { PollManager } from '../lib/pollManager';
+import { I18n } from '../lib/i18n';
 
 export default {
     data: new SlashCommandBuilder()
@@ -45,12 +46,22 @@ export default {
                 .setDescription('Whether to attach a thread to the poll')
                 .setRequired(false)),
     async execute(interaction: ChatInputCommandInteraction) {
-        // ... (Permission check lines 30-58 remain same, omitted for brevity in instruction but included in content if contiguous needed. 
-        // Actually, let's just replace the top part and then jump to the logic part using multi-replace or just careful large replace).
+        if (!interaction.inGuild()) {
+            return interaction.reply({ content: I18n.t('messages.common.guild_only', interaction.locale), flags: MessageFlags.Ephemeral });
+        }
 
-        // Let's use the provided context which starts at line 1.
+        // 1. Permission Check
+        const member = interaction.member as GuildMember;
+        // Check for 'Poll Creator' role or 'Manage Guild' permission
+        const hasRole = member.roles.cache.some(r => r.name === 'Poll Creator');
+        const hasPermission = member.permissions.has(PermissionsBitField.Flags.ManageGuild);
 
-        // ...
+        if (!hasRole && !hasPermission) {
+            return interaction.reply({
+                content: I18n.t('messages.common.no_permission', interaction.locale),
+                flags: MessageFlags.Ephemeral
+            });
+        }
 
         // 2. Input Parsing & Validation
         const title = interaction.options.getString('title', true);
@@ -78,44 +89,67 @@ export default {
         // If server disables, force false. If server allows, use user choice (default true).
         const allowClose = serverAllowsButtons ? (userWantsButtons ?? true) : false;
 
-        // ... (Validation logic lines 66-93)
         // Title Limit
         if (title.length > 256) {
-            return interaction.reply({ content: `Title is too long! (${title.length}/256 characters)`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({
+                content: I18n.t('messages.poll.title_too_long', interaction.locale, { length: title.length }),
+                flags: MessageFlags.Ephemeral
+            });
         }
 
         // Description processing
         const description = descriptionRaw.replace(/\\n/g, '\n');
 
         if (description.length > 4096) {
-            return interaction.reply({ content: `Description is too long! (${description.length}/4096 characters)`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({
+                content: I18n.t('messages.poll.description_too_long', interaction.locale, { length: description.length }),
+                flags: MessageFlags.Ephemeral
+            });
         }
 
         // Items processing
         const items = itemsRaw.split(',').map(item => item.trim()).filter(item => item.length > 0);
 
         if (items.length === 0) {
-            return interaction.reply({ content: 'You must provide at least one valid item.', flags: MessageFlags.Ephemeral });
+            return interaction.reply({
+                content: I18n.t('messages.poll.items_required', interaction.locale),
+                flags: MessageFlags.Ephemeral
+            });
         }
         if (items.length > 25) {
-            return interaction.reply({ content: `Too many items! You provided ${items.length}, max is 25.`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({
+                content: I18n.t('messages.poll.items_too_many', interaction.locale, { count: items.length }),
+                flags: MessageFlags.Ephemeral
+            });
         }
 
         // Max/Min Votes Validation
         if (maxVotes > items.length) {
-            return interaction.reply({ content: `You cannot set max_votes (${maxVotes}) higher than the number of items (${items.length}).`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({
+                content: I18n.t('messages.poll.max_votes_exceeded', interaction.locale, { max: maxVotes, items: items.length }),
+                flags: MessageFlags.Ephemeral
+            });
         }
         if (minVotes > maxVotes) {
-            return interaction.reply({ content: `min_votes (${minVotes}) cannot be greater than max_votes (${maxVotes}).`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({
+                content: I18n.t('messages.poll.min_votes_error', interaction.locale, { min: minVotes, max: maxVotes }),
+                flags: MessageFlags.Ephemeral
+            });
         }
         if (minVotes > items.length) {
-            return interaction.reply({ content: `You cannot set min_votes (${minVotes}) higher than the number of items (${items.length}).`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({
+                content: I18n.t('messages.poll.min_votes_exceeded', interaction.locale, { min: minVotes, items: items.length }),
+                flags: MessageFlags.Ephemeral
+            });
         }
 
         // Item char limit check
         const invalidItems = items.filter(i => i.length > 100);
         if (invalidItems.length > 0) {
-            return interaction.reply({ content: `The following items exceed 100 characters:\n${invalidItems.join('\n')}`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({
+                content: I18n.t('messages.poll.item_too_long', interaction.locale, { items: invalidItems.join('\n') }),
+                flags: MessageFlags.Ephemeral
+            });
         }
 
         await interaction.deferReply();
@@ -141,7 +175,7 @@ export default {
             // Row 1: Select Menu
             const selectMenu = new StringSelectMenuBuilder()
                 .setCustomId('poll_vote')
-                .setPlaceholder('Select an option to vote')
+                .setPlaceholder(I18n.t('messages.manager.select_placeholder', interaction.locale))
                 .setMinValues(minVotes)
                 .setMaxValues(maxVotes)
                 .addOptions(
@@ -149,7 +183,7 @@ export default {
                         new StringSelectMenuOptionBuilder()
                             .setLabel(item.substring(0, 100))
                             .setValue(index.toString())
-                            .setDescription(`Vote for Option #${index + 1}`)
+                            .setDescription(I18n.t('messages.manager.vote_option_desc', interaction.locale, { index: index + 1 }))
                     )
                 );
 
@@ -159,7 +193,7 @@ export default {
             if (allowClose) {
                 const closeButton = new ButtonBuilder()
                     .setCustomId('poll_close')
-                    .setLabel('Close Poll')
+                    .setLabel(I18n.t('messages.manager.close_button', interaction.locale))
                     .setStyle(ButtonStyle.Danger)
                     .setEmoji('🔒');
 
@@ -203,7 +237,10 @@ export default {
 
                 if (error) {
                     logger.error('Failed to save poll to DB:', error);
-                    await interaction.followUp({ content: 'Poll created, but failed to save to database. Persistence may be compromised.', flags: MessageFlags.Ephemeral });
+                    await interaction.followUp({
+                        content: I18n.t('messages.poll.db_fail', interaction.locale),
+                        flags: MessageFlags.Ephemeral
+                    });
                 }
             } else {
                 logger.warn('Skipping DB save (no credentials)');
@@ -211,7 +248,10 @@ export default {
 
         } catch (err) {
             logger.error('Error processing poll:', err);
-            await interaction.followUp({ content: 'Something went wrong processing your poll.', flags: MessageFlags.Ephemeral });
+            await interaction.followUp({
+                content: I18n.t('messages.poll.generic_error', interaction.locale),
+                flags: MessageFlags.Ephemeral
+            });
         }
     }
 };
