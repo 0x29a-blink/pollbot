@@ -16,7 +16,7 @@
     "start": "node dist/index.js",
     "db:start": "npx supabase start",
     "db:stop": "npx supabase stop",
-    "install": "npm install && npx playwright install chromium --with-deps && npm run build"
+    "postinstall": "npx playwright install chromium --with-deps && npm run build"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",
