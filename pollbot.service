@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=blink
 WorkingDirectory=/home/blink/dev/pollbot
-ExecStart=/usr/bin/npm run start
+ExecStart=/home/blink/.nvm/versions/node/v24.11.1/bin/node dist/index.js
 Restart=always
 RestartSec=10
 Environment=NODE_ENV=production
