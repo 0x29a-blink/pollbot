@@ -21,6 +21,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",
     "playwright": "^1.57.0",
-    "winston": "^3.19.0"
+    "winston": "^3.19.0",
+    "undici": "^6.0.0"
   }
 }

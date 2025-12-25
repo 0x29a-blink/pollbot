@@ -5,3 +5,4 @@ node_modules
 combined.log
 error.log
 dist
+setup.txt

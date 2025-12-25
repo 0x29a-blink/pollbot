@@ -7,6 +7,15 @@ import { I18n } from './lib/i18n';
 
 I18n.init();
 
+// 0. Global Error Handlers (Prevent Crash)
+process.on('uncaughtException', (error) => {
+    logger.error('[Global] Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (reason: any, promise) => {
+    logger.error('[Global] Unhandled Rejection:', reason);
+});
+
 dotenv.config();
 
 // Extended Client Interface to include commands property
