@@ -26,6 +26,6 @@ const manager = new ShardingManager(botFile, {
 
 manager.on('shardCreate', shard => logger.info(`[Manager] Launched shard ${shard.id}`));
 
-manager.spawn().catch(error => {
+manager.spawn({ timeout: 60000 }).catch(error => {
     logger.error('[Manager] Failed to spawn shards:', error);
 });
