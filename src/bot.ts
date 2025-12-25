@@ -30,7 +30,7 @@ if (!fs.existsSync(foldersPath)) {
     fs.mkdirSync(foldersPath);
 }
 
-const commandFiles = fs.readdirSync(foldersPath).filter(file => file.endsWith('.ts') || file.endsWith('.js'));
+const commandFiles = fs.readdirSync(foldersPath).filter(file => (file.endsWith('.ts') || file.endsWith('.js')) && !file.endsWith('.d.ts'));
 
 // Load Commands
 for (const file of commandFiles) {
@@ -50,7 +50,7 @@ for (const file of commandFiles) {
 // Load Events
 const eventsPath = path.join(__dirname, 'events');
 if (fs.existsSync(eventsPath)) {
-    const eventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith('.ts') || file.endsWith('.js'));
+    const eventFiles = fs.readdirSync(eventsPath).filter(file => (file.endsWith('.ts') || file.endsWith('.js')) && !file.endsWith('.d.ts'));
     for (const file of eventFiles) {
         const filePath = path.join(eventsPath, file);
         const event = require(filePath).default || require(filePath);
