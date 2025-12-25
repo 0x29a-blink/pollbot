@@ -13,24 +13,36 @@ export default {
                 .setDescription('The title for the message embed (max 256 chars)')
                 .setRequired(true))
         .addStringOption(option =>
-            option.setName('description')
-                .setDescription('The description for the message embed (use \\n for newline)')
-                .setRequired(true))
-        .addStringOption(option =>
             option.setName('items')
                 .setDescription('Comma separated items (max 25 items)')
                 .setRequired(true))
+        .addIntegerOption(option =>
+            option.setName('max_votes')
+                .setDescription('Maximum number of options a user can select (default: 1)')
+                .setMinValue(1)
+                .setMaxValue(25)
+                .setRequired(false))
+        .addIntegerOption(option =>
+            option.setName('min_votes')
+                .setDescription('Minimum number of options a user must select (default: 1)')
+                .setMinValue(1)
+                .setMaxValue(25)
+                .setRequired(false))
+        .addStringOption(option =>
+            option.setName('description')
+                .setDescription('The description for the message embed (use \\n for newline)')
+                .setRequired(false))
         .addBooleanOption(option =>
             option.setName('public')
-                .setDescription('Whether to display current vote counts')
-                .setRequired(true))
-        .addBooleanOption(option =>
-            option.setName('thread')
-                .setDescription('Whether to attach a thread to the poll')
+                .setDescription('Whether to display current vote counts (default: true)')
                 .setRequired(false))
         .addBooleanOption(option =>
             option.setName('close_button')
                 .setDescription('Whether to add a Close Poll button')
+                .setRequired(false))
+        .addBooleanOption(option =>
+            option.setName('thread')
+                .setDescription('Whether to attach a thread to the poll')
                 .setRequired(false)),
     async execute(interaction: ChatInputCommandInteraction) {
         // ... (Permission check lines 30-58 remain same, omitted for brevity in instruction but included in content if contiguous needed. 
@@ -42,10 +54,12 @@ export default {
 
         // 2. Input Parsing & Validation
         const title = interaction.options.getString('title', true);
-        const descriptionRaw = interaction.options.getString('description', true);
+        const descriptionRaw = interaction.options.getString('description') || '';
         const itemsRaw = interaction.options.getString('items', true);
         const isPublic = interaction.options.getBoolean('public') ?? true;
         const createThread = interaction.options.getBoolean('thread') ?? false;
+        const maxVotes = interaction.options.getInteger('max_votes') ?? 1;
+        const minVotes = interaction.options.getInteger('min_votes') ?? 1;
 
         // Fetch Guild Settings
         let serverAllowsButtons = true;
@@ -87,6 +101,17 @@ export default {
             return interaction.reply({ content: `Too many items! You provided ${items.length}, max is 25.`, flags: MessageFlags.Ephemeral });
         }
 
+        // Max/Min Votes Validation
+        if (maxVotes > items.length) {
+            return interaction.reply({ content: `You cannot set max_votes (${maxVotes}) higher than the number of items (${items.length}).`, flags: MessageFlags.Ephemeral });
+        }
+        if (minVotes > maxVotes) {
+            return interaction.reply({ content: `min_votes (${minVotes}) cannot be greater than max_votes (${maxVotes}).`, flags: MessageFlags.Ephemeral });
+        }
+        if (minVotes > items.length) {
+            return interaction.reply({ content: `You cannot set min_votes (${minVotes}) higher than the number of items (${items.length}).`, flags: MessageFlags.Ephemeral });
+        }
+
         // Item char limit check
         const invalidItems = items.filter(i => i.length > 100);
         if (invalidItems.length > 0) {
@@ -117,6 +142,8 @@ export default {
             const selectMenu = new StringSelectMenuBuilder()
                 .setCustomId('poll_vote')
                 .setPlaceholder('Select an option to vote')
+                .setMinValues(minVotes)
+                .setMaxValues(maxVotes)
                 .addOptions(
                     items.map((item, index) =>
                         new StringSelectMenuOptionBuilder()
@@ -166,7 +193,9 @@ export default {
                     settings: {
                         public: isPublic,
                         allow_thread: createThread,
-                        allow_close: allowClose
+                        allow_close: allowClose,
+                        max_votes: maxVotes,
+                        min_votes: minVotes
                     },
                     active: true,
                     created_at: new Date().toISOString()

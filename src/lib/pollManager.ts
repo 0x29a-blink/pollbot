@@ -101,9 +101,14 @@ export class PollManager {
 
             if (active) {
                 // ACTIVE: Select Menu + Close Button (if enabled)
+                const maxVotes = Math.min(pollData.settings?.max_votes || 1, pollData.options.length);
+                const minVotes = Math.min(pollData.settings?.min_votes || 1, maxVotes);
+
                 const selectMenu = new StringSelectMenuBuilder()
                     .setCustomId('poll_vote')
                     .setPlaceholder('Select an option to vote')
+                    .setMinValues(minVotes)
+                    .setMaxValues(maxVotes)
                     .addOptions(
                         pollData.options.map((item: string, index: number) =>
                             new StringSelectMenuOptionBuilder()

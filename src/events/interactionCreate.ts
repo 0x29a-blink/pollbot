@@ -24,9 +24,9 @@ export default {
         if (interaction.isStringSelectMenu() && interaction.customId === 'poll_vote') {
             const pollId = interaction.message.id;
             const userId = interaction.user.id;
-            const selectedIndex = parseInt(interaction.values[0]!);
+            const selectedIndices = interaction.values.map(v => parseInt(v));
 
-            if (isNaN(selectedIndex)) {
+            if (selectedIndices.some(isNaN)) {
                 return interaction.reply({ content: 'Invalid selection.', flags: MessageFlags.Ephemeral });
             }
 
@@ -35,19 +35,23 @@ export default {
                 await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
                 // 1. Check for Existing Vote
-                const { data: existingVote } = await supabase
+                const { data: existingVotes } = await supabase
                     .from('votes')
                     .select('option_index')
                     .eq('poll_id', pollId)
-                    .eq('user_id', userId)
-                    .single();
+                    .eq('user_id', userId);
 
-                if (existingVote && existingVote.option_index === selectedIndex) {
-                    await interaction.editReply({ content: 'You have already voted for this option.' });
+                const currentVoteIndices = existingVotes ? existingVotes.map(v => v.option_index).sort((a, b) => a - b) : [];
+                const newVoteIndices = [...selectedIndices].sort((a, b) => a - b);
+
+                // If identical, no change needed
+                if (JSON.stringify(currentVoteIndices) === JSON.stringify(newVoteIndices)) {
+                    await interaction.editReply({ content: 'You have already voted for these options.' });
                     return;
                 }
 
                 // 2. Record Vote (Delete old, insert new)
+                // Delete all previous votes for this user on this poll
                 const { error: deleteError } = await supabase
                     .from('votes')
                     .delete()
@@ -60,13 +64,16 @@ export default {
                     return;
                 }
 
+                // Insert new votes
+                const rowsToInsert = selectedIndices.map(index => ({
+                    poll_id: pollId,
+                    user_id: userId,
+                    option_index: index
+                }));
+
                 const { error: insertError } = await supabase
                     .from('votes')
-                    .insert({
-                        poll_id: pollId,
-                        user_id: userId,
-                        option_index: selectedIndex
-                    });
+                    .insert(rowsToInsert);
 
                 if (insertError) {
                     if (insertError.code === '23503') { // Foreign Key Violation (Poll missing)
@@ -114,7 +121,8 @@ export default {
                 }
 
                 // 3. Acknowledge the vote
-                await interaction.editReply({ content: `You voted for **${pollData.options[selectedIndex]}**!` });
+                const votedOptions = selectedIndices.map(i => pollData.options[i]).join(', ');
+                await interaction.editReply({ content: `You voted for **${votedOptions}**!` });
 
                 // 4. Update the Poll Image (Always, to show updated Total Votes or Breakdown)
                 // Fetch Vote Counts
