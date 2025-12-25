@@ -2,6 +2,7 @@ import { SlashCommandBuilder, AttachmentBuilder } from 'discord.js';
 import { supabase } from '../lib/db';
 import { Renderer } from '../lib/renderer';
 import { I18n } from '../lib/i18n';
+import { logger } from '../lib/logger';
 import os from 'os';
 
 export default {
@@ -121,6 +122,8 @@ export default {
 
             const attachment = new AttachmentBuilder(buffer, { name: 'stats.png' });
             await interaction.editReply({ files: [attachment] });
+
+            logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} executed command /stats`);
 
         } catch (err) {
             console.error(err);
