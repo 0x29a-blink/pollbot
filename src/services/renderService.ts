@@ -2,8 +2,11 @@ import http from 'http';
 import dotenv from 'dotenv';
 import { browserPool } from '../lib/browserPool';
 import { logger } from '../lib/logger';
+import { I18n } from '../lib/i18n';
 
 dotenv.config();
+
+I18n.init();
 
 const PORT = process.env.RENDER_SERVICE_PORT ? parseInt(process.env.RENDER_SERVICE_PORT) : 3000;
 
