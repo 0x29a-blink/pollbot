@@ -1,4 +1,5 @@
 import { ShardingManager } from 'discord.js';
+import { AutoPoster } from 'topgg-autoposter';
 import dotenv from 'dotenv';
 import path from 'path';
 import { logger } from './lib/logger';
@@ -53,6 +54,18 @@ setTimeout(() => {
     });
 
     manager.on('shardCreate', shard => logger.info(`[Manager] Launched shard ${shard.id}`));
+
+    // Integrated Top.gg AutoPoster
+    const topggToken = process.env.TOPGG_TOKEN;
+    if (topggToken) {
+        const ap = AutoPoster(topggToken, manager);
+        ap.on('posted', () => {
+            logger.info('[AutoPoster] Posted stats to Top.gg!');
+        });
+        ap.on('error', (err: any) => {
+            logger.error('[AutoPoster] Error posting stats:', err);
+        });
+    }
 
     // Increase Timeout to 5 MINUTES
     manager.spawn({ timeout: 300000 }).catch(error => {
