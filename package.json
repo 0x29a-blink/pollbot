@@ -16,6 +16,7 @@
     "start": "node dist/index.js",
     "db:start": "npx supabase start",
     "db:stop": "npx supabase stop",
+    "db:reset": "npx supabase db reset",
     "postinstall": "npx playwright install chromium --with-deps && npm run build"
   },
   "dependencies": {

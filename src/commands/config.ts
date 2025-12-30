@@ -27,6 +27,40 @@ export default {
                         .setRequired(true)
                         .setAutocomplete(true)
                 )
+        )
+        .addSubcommandGroup(group =>
+            group
+                .setName('weights')
+                .setDescription('Manage global vote weights for roles')
+                .addSubcommand(subcommand =>
+                    subcommand
+                        .setName('set')
+                        .setDescription('Set weight for a role')
+                        .addRoleOption(option =>
+                            option.setName('role')
+                                .setDescription('The role to assign weight to')
+                                .setRequired(true))
+                        .addIntegerOption(option =>
+                            option.setName('value')
+                                .setDescription('The vote weight value')
+                                .setRequired(true)
+                                .setMinValue(1)))
+                .addSubcommand(subcommand =>
+                    subcommand
+                        .setName('remove')
+                        .setDescription('Remove weight for a role')
+                        .addRoleOption(option =>
+                            option.setName('role')
+                                .setDescription('The role to remove weight from')
+                                .setRequired(true)))
+                .addSubcommand(subcommand =>
+                    subcommand
+                        .setName('view')
+                        .setDescription('View current weight configuration'))
+                .addSubcommand(subcommand =>
+                    subcommand
+                        .setName('clear')
+                        .setDescription('Clear all weight configurations'))
         ),
     async execute(interaction: ChatInputCommandInteraction) {
         if (!interaction.inGuild()) {
@@ -38,12 +72,100 @@ export default {
             return interaction.reply({ content: I18n.t('messages.common.no_permission', interaction.locale), flags: MessageFlags.Ephemeral });
         }
 
-        const subcommand = interaction.options.getSubcommand();
+        let subcommand, subcommandGroup;
+        try {
+            subcommand = interaction.options.getSubcommand();
+            subcommandGroup = interaction.options.getSubcommandGroup();
+        } catch (e) {
+            // Should not happen if builder is correct
+        }
+
+        const guildId = interaction.guildId!;
+
+        if (subcommandGroup === 'weights') {
+            // Fetch current settings
+            const { data: currentSettings, error: fetchError } = await supabase
+                .from('guild_settings')
+                .select('vote_weights')
+                .eq('guild_id', guildId)
+                .single();
+
+            if (fetchError && fetchError.code !== 'PGRST116') { // Ignore not found, treat as empty
+                logger.error('Failed to fetch guild settings:', fetchError);
+                return interaction.reply({ content: I18n.t('messages.config.update_fail', interaction.locale), flags: MessageFlags.Ephemeral });
+            }
+
+            let weights = (currentSettings?.vote_weights as Record<string, number>) || {};
+
+            if (subcommand === 'set') {
+                const role = interaction.options.getRole('role', true);
+                const value = interaction.options.getInteger('value', true);
+                weights[role.id] = value;
+
+                const { error } = await supabase
+                    .from('guild_settings')
+                    .upsert({
+                        guild_id: guildId,
+                        vote_weights: weights,
+                        updated_at: new Date().toISOString()
+                    });
+
+                if (error) {
+                    logger.error('Failed to update weights:', error);
+                    return interaction.reply({ content: I18n.t('messages.config.update_fail', interaction.locale), flags: MessageFlags.Ephemeral });
+                }
+
+                return interaction.reply({ content: `Updated weight for **${role.name}** to **${value}**.`, flags: MessageFlags.Ephemeral });
+
+            } else if (subcommand === 'remove') {
+                const role = interaction.options.getRole('role', true);
+                if (weights[role.id]) {
+                    delete weights[role.id];
+
+                    const { error } = await supabase
+                        .from('guild_settings')
+                        .upsert({
+                            guild_id: guildId,
+                            vote_weights: weights,
+                            updated_at: new Date().toISOString()
+                        });
+
+                    if (error) {
+                        logger.error('Failed to update weights:', error);
+                        return interaction.reply({ content: I18n.t('messages.config.update_fail', interaction.locale), flags: MessageFlags.Ephemeral });
+                    }
+                    return interaction.reply({ content: `Removed weight for **${role.name}**.`, flags: MessageFlags.Ephemeral });
+                } else {
+                    return interaction.reply({ content: `No weight configured for **${role.name}**.`, flags: MessageFlags.Ephemeral });
+                }
+
+            } else if (subcommand === 'view') {
+                if (Object.keys(weights).length === 0) {
+                    return interaction.reply({ content: 'No custom vote weights configured.', flags: MessageFlags.Ephemeral });
+                }
+
+                const lines = Object.entries(weights).map(([roleId, weight]) => `<@&${roleId}>: ${weight}`);
+                return interaction.reply({ content: `**Current Vote Weights:**\n${lines.join('\n')}`, flags: MessageFlags.Ephemeral });
+
+            } else if (subcommand === 'clear') {
+                const { error } = await supabase
+                    .from('guild_settings')
+                    .upsert({
+                        guild_id: guildId,
+                        vote_weights: {},
+                        updated_at: new Date().toISOString()
+                    });
+
+                if (error) {
+                    logger.error('Failed to clear weights:', error);
+                    return interaction.reply({ content: I18n.t('messages.config.update_fail', interaction.locale), flags: MessageFlags.Ephemeral });
+                }
+                return interaction.reply({ content: 'Cleared all vote weights.', flags: MessageFlags.Ephemeral });
+            }
+        }
 
         if (subcommand === 'poll-buttons') {
             const enabled = interaction.options.getBoolean('enabled', true);
-            const guildId = interaction.guildId!;
-
             const { error } = await supabase
                 .from('guild_settings')
                 .upsert({
@@ -65,7 +187,6 @@ export default {
             logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} executed command /config poll-buttons with parameters "enabled:${enabled}"`);
         } else if (subcommand === 'locale') {
             const lang = interaction.options.getString('lang', true);
-            const guildId = interaction.guildId!;
 
             // Validate locale
             const available = I18n.getAvailableLocales();

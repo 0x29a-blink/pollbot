@@ -291,4 +291,67 @@ export class PollManager {
         }
         return newText;
     }
+
+
+
+    /**
+     * Parses a string of weights (e.g. "@Admin=5 @Mod=2") into a map of Role ID -> Weight.
+     */
+    static parseWeights(input: string): Record<string, number> {
+        if (!input) return {};
+        const weights: Record<string, number> = {};
+
+        // Split by comma or space
+        const parts = input.split(/[, ]+/);
+
+        for (const part of parts) {
+            // Match <@&ID>=VALUE
+            const match = part.match(/<@&(\d+)>=(\d+)/);
+            if (match && match[1] && match[2]) {
+                const roleId = match[1];
+                const weight = parseInt(match[2], 10);
+                if (!isNaN(weight)) {
+                    weights[roleId] = weight;
+                }
+            }
+        }
+
+        return weights;
+    }
+
+    /**
+     * Calculates the vote weight for a user based on their roles and configuration.
+     * Takes the HIGHEST weight found among their roles.
+     * Default is 1.
+     */
+    static calculateUserWeight(member: GuildMember | null, globalWeights: Record<string, number> | null, pollWeights: Record<string, number> | null): number {
+        if (!member) return 1;
+
+        let maxWeight = 1;
+
+        // Check Global Weights
+        if (globalWeights) {
+            for (const [roleId, weight] of Object.entries(globalWeights)) {
+                if (member.roles.cache.has(roleId)) {
+                    if (weight > maxWeight) maxWeight = weight;
+                }
+            }
+        }
+
+        // Check Poll Specific Weights (Override Global if higher? Or just take max of all?)
+        // Usually specific overrides global, but if we want "Highest Role Wins" logic across both:
+        if (pollWeights) {
+            for (const [roleId, weight] of Object.entries(pollWeights)) {
+                if (member.roles.cache.has(roleId)) {
+                    // Start from scratch or keep max? 
+                    // Let's assume poll specific weights take precedence if present for that role.
+                    // But if a user has Admin (Global 5) and Voted (Poll 2), which wins?
+                    // "Highest weight applies" is safest.
+                    if (weight > maxWeight) maxWeight = weight;
+                }
+            }
+        }
+
+        return maxWeight;
+    }
 }

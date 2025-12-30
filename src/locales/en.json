@@ -35,6 +35,14 @@
                 "thread": {
                     "name": "thread",
                     "description": "Whether to attach a thread to the poll"
+                },
+                "allowed_role": {
+                    "name": "allowed_role",
+                    "description": "Limit who can vote to a specific role"
+                },
+                "weights": {
+                    "name": "weights",
+                    "description": "Vote weights. e.g. @Admin=5, @Mod=2"
                 }
             }
         },
@@ -49,6 +57,44 @@
                         "enabled": {
                             "name": "enabled",
                             "description": "Whether to enable poll buttons"
+                        }
+                    }
+                },
+                "weights": {
+                    "name": "weights",
+                    "description": "Manage global vote weights for roles",
+                    "subcommands": {
+                        "set": {
+                            "name": "set",
+                            "description": "Set weight for a role",
+                            "options": {
+                                "role": {
+                                    "name": "role",
+                                    "description": "The role to assign weight to"
+                                },
+                                "value": {
+                                    "name": "value",
+                                    "description": "The vote weight value"
+                                }
+                            }
+                        },
+                        "remove": {
+                            "name": "remove",
+                            "description": "Remove weight for a role",
+                            "options": {
+                                "role": {
+                                    "name": "role",
+                                    "description": "The role to remove weight from"
+                                }
+                            }
+                        },
+                        "view": {
+                            "name": "view",
+                            "description": "View current weight configuration"
+                        },
+                        "clear": {
+                            "name": "clear",
+                            "description": "Clear all weight configurations"
                         }
                     }
                 }
@@ -91,7 +137,16 @@
             "min_votes_exceeded": "You cannot set min_votes ({{min}}) higher than the number of items ({{items}}).",
             "item_too_long": "The following items exceed 100 characters:\n{{items}}",
             "db_fail": "Poll created, but failed to save to database. Persistence may be compromised.",
-            "generic_error": "Something went wrong processing your poll."
+            "generic_error": "Something went wrong processing your poll.",
+            "role_restricted": "You do not have permission to vote in this poll.",
+            "closed": "This poll is closed.",
+            "voted": "You voted for **{{options}}**!",
+            "already_voted": "You have already voted for these options.",
+            "invalid_selection": "Invalid selection.",
+            "vote_fail": "Failed to record your vote. Please try again.",
+            "orphaned": "This poll is no longer valid.",
+            "db_missing": "This poll no longer exists in the database.",
+            "perms_missing_bot": "I am missing permissions to update the poll image."
         },
         "config": {
             "update_fail": "Failed to update settings.",

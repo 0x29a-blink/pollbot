@@ -5,7 +5,21 @@ import path from 'path';
 const logFormat = winston.format.printf(({ level, message, timestamp, ...metadata }) => {
     let msg = `${timestamp} [${level}]: ${message}`;
     if (Object.keys(metadata).length > 0) {
-        msg += ` ${JSON.stringify(metadata)}`;
+        // Custom replacer to handle Buffers and long arrays
+        const replacer = (key: string, value: any) => {
+            if (value && value.type === 'Buffer' && Array.isArray(value.data)) {
+                return `[Buffer: ${value.data.length} bytes]`;
+            }
+            if (Array.isArray(value) && value.length > 50 && value.every(v => typeof v === 'number')) {
+                 return `[Array(${value.length})]`;
+             }
+            return value;
+        };
+        try {
+            msg += ` ${JSON.stringify(metadata, replacer)}`;
+        } catch (e) {
+            msg += ` [Circular or non-serializable metadata]`;
+        }
     }
     return msg;
 });

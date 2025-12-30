@@ -44,6 +44,14 @@ export default {
         .addBooleanOption(option =>
             option.setName('thread')
                 .setDescription('Whether to attach a thread to the poll')
+                .setRequired(false))
+        .addRoleOption(option =>
+            option.setName('allowed_role')
+                .setDescription('Limit who can vote to a specific role')
+                .setRequired(false))
+        .addStringOption(option =>
+            option.setName('weights')
+                .setDescription('Vote weights. e.g. @Admin=5, @Mod=2')
                 .setRequired(false)),
     async execute(interaction: ChatInputCommandInteraction) {
         if (!interaction.inGuild()) {
@@ -71,6 +79,11 @@ export default {
         const createThread = interaction.options.getBoolean('thread') ?? false;
         const maxVotes = interaction.options.getInteger('max_votes') ?? 1;
         const minVotes = interaction.options.getInteger('min_votes') ?? 1;
+        const targetRole = interaction.options.getRole('allowed_role');
+        const weightsRaw = interaction.options.getString('weights');
+
+        const allowedRoles = targetRole ? [targetRole.id] : [];
+        const voteWeights = weightsRaw ? PollManager.parseWeights(weightsRaw) : {};
 
         // Fetch Guild Settings
         let serverAllowsButtons = true;
@@ -233,7 +246,9 @@ export default {
                         allow_thread: createThread,
                         allow_close: allowClose,
                         max_votes: maxVotes,
-                        min_votes: minVotes
+                        min_votes: minVotes,
+                        allowed_roles: allowedRoles,
+                        vote_weights: voteWeights
                     },
                     active: true,
                     created_at: new Date().toISOString()
@@ -246,7 +261,7 @@ export default {
                         flags: MessageFlags.Ephemeral
                     });
                 } else {
-                    logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} created a poll with the following parameters "/poll title:${title} items:${items.join(', ')} max_votes:${maxVotes} min_votes:${minVotes} public:${isPublic} thread:${createThread} close_button:${allowClose}"`);
+                    logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} created a poll with the following parameters "/poll title:${title} items:${items.join(', ')} max_votes:${maxVotes} min_votes:${minVotes} public:${isPublic} thread:${createThread} close_button:${allowClose} allowed_roles:${targetRole ? targetRole.name : 'None'} weights:${weightsRaw}"`);
                 }
             } else {
                 logger.warn('Skipping DB save (no credentials)');

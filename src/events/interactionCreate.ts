@@ -1,9 +1,10 @@
-import { Events, Interaction, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { Events, Interaction, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, TextChannel, GuildChannel, GuildMember } from 'discord.js';
 import { ExtendedClient } from '../bot';
 import { supabase } from '../lib/db';
 import { Renderer } from '../lib/renderer';
 import { logger } from '../lib/logger';
 import { PollManager } from '../lib/pollManager';
+import { I18n } from '../lib/i18n';
 import { AttachmentBuilder } from 'discord.js';
 
 export default {
@@ -46,14 +47,43 @@ export default {
             const selectedIndices = interaction.values.map(v => parseInt(v));
 
             if (selectedIndices.some(isNaN)) {
-                return interaction.reply({ content: 'Invalid selection.', flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: I18n.t('messages.poll.invalid_selection', interaction.locale), flags: MessageFlags.Ephemeral });
             }
 
             try {
                 // Defer immediately to prevent timeout on slow DB ops
                 await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-                // 1. Check for Existing Vote
+                // 1. Fetch Poll Data (Moved up for role checking)
+                const { data: pollData, error: pollError } = await supabase
+                    .from('polls')
+                    .select('*')
+                    .eq('message_id', pollId)
+                    .single();
+
+                if (pollError || !pollData) {
+                    await interaction.editReply({ content: I18n.t('messages.poll.db_missing', interaction.locale) });
+                    return;
+                }
+
+                if (!pollData.active) {
+                    await interaction.editReply({ content: I18n.t('messages.poll.closed', interaction.locale) });
+                    return;
+                }
+
+                // 2. Role Restriction Check
+                const member = interaction.member as GuildMember;
+                const allowedRoles = pollData.settings?.allowed_roles as string[];
+
+                if (allowedRoles && allowedRoles.length > 0) {
+                    const hasAllowedRole = allowedRoles.some(roleId => member.roles.cache.has(roleId));
+                    if (!hasAllowedRole) {
+                        await interaction.editReply({ content: I18n.t('messages.poll.role_restricted', interaction.locale) });
+                        return;
+                    }
+                }
+
+                // 3. Check for Existing Vote
                 const { data: existingVotes } = await supabase
                     .from('votes')
                     .select('option_index')
@@ -65,11 +95,28 @@ export default {
 
                 // If identical, no change needed
                 if (JSON.stringify(currentVoteIndices) === JSON.stringify(newVoteIndices)) {
-                    await interaction.editReply({ content: 'You have already voted for these options.' });
+                    await interaction.editReply({ content: I18n.t('messages.poll.already_voted', interaction.locale) });
                     return;
                 }
 
-                // 2. Record Vote (Delete old, insert new)
+                // 4. Calculate Weight
+                // Fetch Global Weights
+                let globalWeights = {};
+                if (interaction.guildId) {
+                    const { data: guildSettings } = await supabase
+                        .from('guild_settings')
+                        .select('vote_weights')
+                        .eq('guild_id', interaction.guildId)
+                        .single();
+                    if (guildSettings?.vote_weights) {
+                        globalWeights = guildSettings.vote_weights;
+                    }
+                }
+
+                const pollWeights = pollData.settings?.vote_weights || {};
+                const voteWeight = PollManager.calculateUserWeight(member, globalWeights, pollWeights);
+
+                // 5. Record Vote (Delete old, insert new)
                 // Delete all previous votes for this user on this poll
                 const { error: deleteError } = await supabase
                     .from('votes')
@@ -79,7 +126,7 @@ export default {
 
                 if (deleteError) {
                     logger.error('Vote Delete Error:', deleteError);
-                    await interaction.editReply({ content: 'Failed to record your vote. Please try again.' });
+                    await interaction.editReply({ content: I18n.t('messages.poll.vote_fail', interaction.locale) });
                     return;
                 }
 
@@ -87,7 +134,8 @@ export default {
                 const rowsToInsert = selectedIndices.map(index => ({
                     poll_id: pollId,
                     user_id: userId,
-                    option_index: index
+                    option_index: index,
+                    weight: voteWeight
                 }));
 
                 const { error: insertError } = await supabase
@@ -112,54 +160,39 @@ export default {
                             components: [disabledRow]
                         });
 
-                        await interaction.editReply({ content: 'This poll is no longer valid.' });
+                        await interaction.editReply({ content: I18n.t('messages.poll.orphaned', interaction.locale) });
                         return;
                     }
 
                     logger.error('Vote Insert Error:', insertError);
-                    await interaction.editReply({ content: 'Failed to record your vote. Please try again.' });
+                    await interaction.editReply({ content: I18n.t('messages.poll.vote_fail', interaction.locale) });
                     return;
                 }
 
-                // 2. Fetch Poll Settings & Data to see if we should update UI
-                const { data: pollData, error: pollError } = await supabase
-                    .from('polls')
-                    .select('*')
-                    .eq('message_id', pollId)
-                    .single();
-
-                if (pollError || !pollData) {
-                    // Poll might have been deleted but message remains?
-                    await interaction.editReply({ content: 'This poll no longer exists in the database.' });
-                    return;
-                }
-
-                if (!pollData.active) {
-                    await interaction.editReply({ content: 'This poll is closed.' });
-                    return;
-                }
-
-                // 3. Acknowledge the vote
+                // 6. Acknowledge the vote
                 const votedOptions = selectedIndices.map(i => pollData.options[i]).join(', ');
-                await interaction.editReply({ content: `You voted for **${votedOptions}**!` });
-                logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} voted on poll ${pollId} with the following item: ${votedOptions}`);
+                const weightMsg = voteWeight > 1 ? ` (Weight: ${voteWeight})` : '';
+                await interaction.editReply({ content: I18n.t('messages.poll.voted', interaction.locale, { options: votedOptions }) + weightMsg });
+                logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} voted on poll ${pollId} with the following item: ${votedOptions} weight:${voteWeight}`);
 
-                // 4. Update the Poll Image (Always, to show updated Total Votes or Breakdown)
-                // Fetch Vote Counts
-                const { data: voteCounts, error: countError } = await supabase
+                // 7. Update the Poll Image (Always, to show updated Total Votes or Breakdown)
+                // Fetch Vote Counts calling new logic? Or just raw aggregation?
+                // We need sum of weights now.
+                const { data: allVotes, error: countError } = await supabase
                     .from('votes')
-                    .select('option_index')
+                    .select('option_index, weight')
                     .eq('poll_id', pollId);
 
-                if (!countError && voteCounts) {
-                    // Calculate Total Votes
-                    const totalVotes = voteCounts.length;
-
-                    // Calculate Breakdown (only needed if public, but useful to have)
+                if (!countError && allVotes) {
+                    // Calculate Total Votes (Effective)
+                    let totalEffectiveVotes = 0;
                     const counts = new Array(pollData.options.length).fill(0);
-                    voteCounts.forEach((v: any) => {
+
+                    allVotes.forEach((v: any) => {
+                        const w = v.weight || 1; // Default to 1 if null (shouldn't happen with default)
                         if (v.option_index >= 0 && v.option_index < counts.length) {
-                            counts[v.option_index]++;
+                            counts[v.option_index] += w;
+                            totalEffectiveVotes += w;
                         }
                     });
 
@@ -200,7 +233,7 @@ export default {
                         title: resolvedTitle,
                         description: resolvedDescription,
                         options: resolvedOptions,
-                        totalVotes: totalVotes,
+                        totalVotes: totalEffectiveVotes,
                         creator: creatorTag,
                         closed: false,
                         locale: serverLocale // Pass Server Locale
@@ -220,14 +253,51 @@ export default {
                     });
                 }
 
-            } catch (err) {
+            } catch (err: any) {
                 logger.error('Voting Logic Error:', err);
-                // If anything blew up, try to notify
+
+                // Handle Missing Access / Permissions
+                if (err.code === 50001 || err.code === 50013) {
+                    let missingPerms: string[] = [];
+
+                    if (interaction.guild && interaction.channel && !interaction.channel.isDMBased()) {
+                        const me = interaction.guild.members.me;
+                        if (me) {
+                            const channelPerms = interaction.channel.permissionsFor(me);
+                            const required = [
+                                { name: 'View Channel', flag: PermissionFlagsBits.ViewChannel },
+                                { name: 'Send Messages', flag: PermissionFlagsBits.SendMessages },
+                                { name: 'Embed Links', flag: PermissionFlagsBits.EmbedLinks },
+                                { name: 'Attach Files', flag: PermissionFlagsBits.AttachFiles }
+                            ];
+
+                            missingPerms = required
+                                .filter(p => !channelPerms.has(p.flag))
+                                .map(p => p.name);
+                        }
+                    }
+
+                    const permMsg = missingPerms.length > 0
+                        ? `\nMissing permissions: **${missingPerms.join(', ')}**`
+                        : '';
+
+                    const errorResponse = `I cannot update the poll image due to missing permissions in this channel.${permMsg}`;
+
+                    try {
+                        if (interaction.deferred && !interaction.replied) {
+                            await interaction.editReply({ content: errorResponse });
+                        } else if (!interaction.replied) {
+                            await interaction.reply({ content: errorResponse, flags: MessageFlags.Ephemeral });
+                        }
+                    } catch { /* ignore */ }
+                    return;
+                }
+
+                // Generic Error
                 try {
                     if (interaction.deferred && !interaction.replied) {
                         await interaction.editReply({ content: 'An error occurred while voting.' });
                     } else if (!interaction.replied) {
-                        // Should not happen if we deferred at start, but safety net
                         await interaction.reply({ content: 'An error occurred while voting.', flags: MessageFlags.Ephemeral });
                     }
                 } catch { /* ignore if we can't even reply */ }
