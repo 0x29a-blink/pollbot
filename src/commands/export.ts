@@ -9,7 +9,7 @@ export default {
         .setDescription('Export voting results for a specific poll')
         .addStringOption(option =>
             option.setName('message_id')
-                .setDescription('The Message ID of the poll')
+                .setDescription('The Message ID or Link of the poll')
                 .setRequired(true)
         ),
     async execute(interaction: ChatInputCommandInteraction) {
@@ -45,6 +45,7 @@ export default {
                 content: I18n.t('messages.export.success', interaction.locale),
                 files: [attachment]
             });
+            logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} executed command /export-poll with parameters "message_id:${pollId}"`);
 
         } catch (error) {
             logger.error(`Export command failed: ${error}`);

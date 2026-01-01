@@ -32,6 +32,7 @@ export default {
                 content: I18n.t('messages.export.success', interaction.locale),
                 files: [attachment]
             });
+            logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} executed Context Menu "Export Results" on message ${pollId}`);
 
         } catch (error) {
             logger.error(`Export command failed: ${error}`);
