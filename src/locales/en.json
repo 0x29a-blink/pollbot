@@ -100,6 +100,19 @@
                 }
             }
         },
+        "export-poll": {
+            "name": "export-poll",
+            "description": "Export voting results for a specific poll",
+            "options": {
+                "message_id": {
+                    "name": "message_id",
+                    "description": "Message Link or ID of the poll"
+                }
+            }
+        },
+        "Export Results": {
+            "name": "Export Results"
+        },
         "close": {
             "name": "close",
             "description": "Close an active poll",
@@ -147,6 +160,11 @@
             "orphaned": "This poll is no longer valid.",
             "db_missing": "This poll no longer exists in the database.",
             "perms_missing_bot": "I am missing permissions to update the poll image."
+        },
+        "export": {
+            "not_found": "Poll not found or no votes recorded.",
+            "success": "Here are the poll results:",
+            "generic_error": "An error occurred while exporting."
         },
         "config": {
             "update_fail": "Failed to update settings.",

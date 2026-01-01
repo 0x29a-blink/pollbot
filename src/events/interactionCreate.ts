@@ -310,8 +310,8 @@ export default {
             return;
         }
 
-        // Chat Input Commands
-        if (!interaction.isChatInputCommand()) return;
+        // Chat Input & Context Menu Commands
+        if (!interaction.isChatInputCommand() && !interaction.isContextMenuCommand()) return;
 
         const client = interaction.client as ExtendedClient;
         const command = client.commands.get(interaction.commandName);
