@@ -254,7 +254,12 @@ export default {
                 }
 
             } catch (err: any) {
-                logger.error('Voting Logic Error:', err);
+                // Sanitize error log to avoid dumping raw request body (binary data)
+                const loggableError = { ...err, message: err.message, stack: err.stack, code: err.code };
+                if (loggableError.requestBody) {
+                    loggableError.requestBody = '[Binary Data Omitted]';
+                }
+                logger.error('Voting Logic Error:', loggableError);
 
                 // Handle Missing Access / Permissions
                 if (err.code === 50001 || err.code === 50013) {

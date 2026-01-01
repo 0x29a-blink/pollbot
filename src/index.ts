@@ -60,7 +60,7 @@ setTimeout(() => {
     if (topggToken) {
         const ap = AutoPoster(topggToken, manager);
         ap.on('posted', () => {
-            logger.info('[AutoPoster] Posted stats to Top.gg!');
+            logger.debug('[AutoPoster] Posted stats to Top.gg!');
         });
         ap.on('error', (err: any) => {
             logger.error('[AutoPoster] Error posting stats:', err);
