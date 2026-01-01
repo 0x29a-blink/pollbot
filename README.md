@@ -9,10 +9,12 @@ PollBot is a feature-rich, image-generating Discord polling bot built with **Typ
 - **🎨 Image-Based Polls**: Renders high-quality images for every poll, displaying options, descriptions, and creators in a clean, professional format.
 - **🔢 Flexible Voting**: 
   - **Single & Multi-Select**: Configure minimum and maximum votes per user (`min_votes`, `max_votes`).
+  - **🔒 Role Restrictions**: Limit voting to specific roles (e.g., `@Members` only).
+  - **⚖️ Weighted Voting**: Assign voting power to roles (e.g., `@Admin` votes count as 5).
   - **Dynamic Updates**: Images and vote counts update in real-time.
 - **🌍 Internationalization (i18n)**: Fully localized UI and messages. Supports multiple languages (configurable per server).
 - **🛠️ Advanced Management**:
-  - **Slash Commands**: `/poll`, `/close`, `/reopen`.
+  - **Slash Commands**: `/poll`, `/close`, `/reopen`, `/config`.
   - **Interactive Components**: Options to add "Close Poll" buttons directly to the poll message.
   - **Thread Integration**: Automatically create a thread for discussion when a poll is created.
 - **📊 Visual Statistics**: View system performance and usage metrics with the `/stats` command.
@@ -99,9 +101,9 @@ Monitor your bot's health with a generated dashboard image.
 
 | Command | Description | Options |
 |---------|-------------|---------|
-| `/poll` | Create a new poll | `title`, `items` (comma lists), `description`, `max_votes`, `min_votes`, `public`, `thread`, `close_button` |
+| `/poll` | Create a new poll | `title`, `items`, `description`, `max_votes`, `min_votes`, `public`, `thread`, `allowed_role`, `close_button` |
 | `/stats` | View bot statistics | None |
-| `/config` | Manage server settings | `poll-buttons` (enable/disable), `locale` (set language) |
+| `/config` | Manage server settings | `poll-buttons`, `locale`, `weights (set/remove/view/clear)` |
 | `/close` | Close an active poll | `id` (Message ID of the poll) |
 | `/reopen` | Reopen a closed poll | `id` (Message ID of the poll) |
 
@@ -113,9 +115,10 @@ Monitor your bot's health with a generated dashboard image.
 | `items` | String | **Yes** | - | A comma-separated list of voting options (e.g., "Yes, No, Maybe"). Max 25 items. |
 | `max_votes` | Integer | No | `1` | The maximum number of choices a user can select (e.g., 2 for "Pick 2"). |
 | `min_votes` | Integer | No | `1` | The minimum number of choices a user must select. |
-| `description` | String | No | - | Additional context or details. Supports `\n` for newlines and mentions (`@user`, `@role`). |
+| `description` | String | No | - | Additional context or details. |
 | `public` | Boolean | No | `True` | If `False`, vote counts are hidden from the results image until the poll is closed. |
-| `thread` | Boolean | No | `False` | If `True`, automatically starts a Discord thread on the poll message for discussion. |
+| `thread` | Boolean | No | `False` | If `True`, automatically starts a Discord thread. |
+| `allowed_role` | Role | No | - | Only users with this role can vote. |
 | `close_button`| Boolean | No | `True`* | If `True`, adds a "Close Poll" button. *Subject to server-wide `/config` settings.* |
 
 ---
