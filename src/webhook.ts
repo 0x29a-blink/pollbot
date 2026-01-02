@@ -57,7 +57,8 @@ export async function startWebhookServer() {
         // This ensures it works on Linux, macOS, and Windows regardless of CWD
         const cloudflaredDir = path.dirname(require.resolve('cloudflared'));
         const binaryName = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared';
-        const binaryPath = path.join(cloudflaredDir, 'bin', binaryName);
+        // The main entry point is in 'lib', so we need to go up one level to find the 'bin' folder
+        const binaryPath = path.join(cloudflaredDir, '..', 'bin', binaryName);
 
         try {
             const child = spawn(binaryPath, ['tunnel', 'run', '--token', process.env.CLOUDFLARED_TOKEN]);

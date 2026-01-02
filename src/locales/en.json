@@ -205,5 +205,26 @@
         "total_polls": "Total Polls",
         "cpu_load": "CPU Load",
         "memory_usage": "Memory Usage"
+    },
+    "view": {
+        "title": "Detailed Results: {{title}}",
+        "description": "Select an option below to view the list of voters.",
+        "option_default": "Select an option...",
+        "option_label": "Option {{index}} ({{count}} votes)",
+        "voter_list_title": "Voters for Option {{index}}: {{option}}",
+        "no_votes": "No votes yet for this option.",
+        "page_indicator": "Page {{current}} / {{total}}",
+        "nav_prev": "Previous",
+        "nav_next": "Next >",
+        "premium_title": "Premium Feature: View Detailed Results",
+        "premium_desc": "Viewing detailed poll results (who voted for what) is a **Premium Feature**.\n\nTo unlock this for 12 hours, simply vote for the bot on Top.gg!\n\nIf you don't want to vote you can use the export app/command to get a list of voters but it will not be formatted automatically for you or show option winners, it is just a CSV of the voters.",
+        "vote_unlock": "Vote to Unlock",
+        "i_voted": "I Voted!",
+        "export_btn": "Export List",
+        "export_fail": "Failed to export list.",
+        "export_content": "Voters for Option: {option}\n\nUser ID | Username | Display Name | Nickname\n--------------------------------------------------\n",
+        "winner_upper": "WINNER",
+        "nav_first": "First",
+        "nav_last": "Last"
     }
 }

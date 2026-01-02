@@ -45,6 +45,10 @@ export class Renderer {
         return this.sendRequest({ type: 'stats', ...data });
     }
 
+    static async renderDetailedView(data: RenderOptions): Promise<Buffer> {
+        return this.sendRequest({ type: 'detailed_view', ...data });
+    }
+
     private static async sendRequest(payload: any): Promise<Buffer> {
         try {
             const response = await fetch(RENDER_SERVICE_URL, {

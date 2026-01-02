@@ -98,6 +98,8 @@ const server = http.createServer(async (req, res) => {
 
                     if (type === 'stats') {
                         buffer = await RenderBackend.renderStats(page, options);
+                    } else if (type === 'detailed_view') {
+                        buffer = await RenderBackend.renderDetailedView(page, options);
                     } else {
                         buffer = await RenderBackend.renderPoll(page, options);
                     }

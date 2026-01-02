@@ -478,7 +478,215 @@ export class RenderBackend {
         return buffer;
     }
 
+    static async renderDetailedView(page: Page, data: RenderOptions): Promise<Buffer> {
+        // Calculate Totals and Winner
+        const votes = data.votes || data.options.map(() => 0);
+        const totalVotes = votes.reduce((a, b) => a + b, 0);
+        const highestVote = Math.max(...votes);
+
+        // Prepare Data for Chart/List
+        const items = data.options.map((opt, i) => {
+            const count = votes[i] || 0; // Use local 'votes' var which has default
+            const percentage = totalVotes > 0 ? (count / totalVotes) * 100 : 0;
+            return {
+                label: opt,
+                count: count,
+                percentage: percentage,
+                isWinner: count > 0 && count === highestVote
+            };
+        });
+
+        const locale = data.locale || 'en';
+
+        const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {
+                    font-family: 'Inter', sans-serif;
+                    background-color: #111214;
+                    color: #ffffff;
+                    margin: 0;
+                    padding: 0;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    min-height: 100vh;
+                    width: 700px;
+                }
+                .dashboard-card {
+                    background: #1e1f22;
+                    padding: 32px;
+                    border-radius: 12px;
+                    width: 100%;
+                    box-sizing: border-box;
+                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+                    border-top: 4px solid #FEE75C; /* Premium Gold */
+                }
+                .header-section {
+                    margin-bottom: 24px;
+                    text-align: center;
+                }
+                .header-title {
+                    font-size: 24px;
+                    font-weight: 800;
+                    margin-bottom: 8px;
+                    color: #ffffff;
+                }
+                .header-meta {
+                    font-size: 14px;
+                    color: #949ba4;
+                    display: flex;
+                    justify-content: center;
+                    gap: 12px;
+                    font-weight: 500;
+                }
+                .meta-badge {
+                    background: #2b2d31;
+                    padding: 4px 10px;
+                    border-radius: 12px;
+                    font-size: 12px;
+                }
+
+                .stats-grid {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr; /* 2 Columns: Chart Area | Key Stats */
+                    gap: 24px;
+                    margin-bottom: 24px;
+                }
+                
+                /* Chart Simulation (Bars) */
+                .chart-container {
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                    gap: 12px;
+                }
+                .chart-row {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                }
+                .chart-label {
+                    width: 30px; /* #1, #2 */
+                    font-size: 12px;
+                    color: #949ba4;
+                    text-align: right;
+                }
+                .chart-bar-area {
+                    flex: 1;
+                    background: #2b2d31;
+                    height: 8px;
+                    border-radius: 4px;
+                    overflow: hidden;
+                }
+                .chart-bar-fill {
+                    height: 100%;
+                    background: #5865F2;
+                    border-radius: 4px;
+                }
+                .winner-fill { background: #FEE75C; }
+                .chart-value {
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: #dbdee1;
+                    width: 40px; 
+                }
+
+                /* Key Stats */
+                .key-stats {
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: space-around;
+                    background: #2b2d31;
+                    border-radius: 8px;
+                    padding: 16px;
+                }
+                .stat-item {
+                    text-align: center;
+                    margin-bottom: 12px;
+                }
+                .stat-item:last-child { margin-bottom: 0; }
+                .stat-label {
+                    font-size: 12px;
+                    color: #949ba4;
+                    text-transform: uppercase;
+                    font-weight: 700;
+                    margin-bottom: 4px;
+                }
+                .stat-value {
+                    font-size: 24px;
+                    font-weight: 800;
+                    color: #ffffff;
+                }
+                .gold-text { color: #FEE75C; }
+
+                .footer {
+                    margin-top: 16px;
+                    border-top: 1px solid #2b2d31;
+                    padding-top: 12px;
+                    text-align: center;
+                    font-size: 12px;
+                    color: #5d6067;
+                }
+
+                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap');
+            </style>
+        </head>
+        <body>
+            <div class="dashboard-card">
+                <div class="header-section">
+                    <div class="header-title">${escapeHtml(data.title)}</div>
+                    <div class="header-meta">
+                        <span class="meta-badge">${I18n.t('messages.renderer.created_by', locale)} ${escapeHtml(data.creator)}</span>
+                        ${data.closed ? `<span class="meta-badge" style="background:#ED4245;color:white">${I18n.t('messages.renderer.closed', locale)}</span>` : ''}
+                    </div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="chart-container">
+                        ${items.map((item, i) => `
+                        <div class="chart-row">
+                            <div class="chart-label">#${i + 1}</div>
+                            <div class="chart-bar-area">
+                                <div class="chart-bar-fill ${item.isWinner ? 'winner-fill' : ''}" style="width: ${item.percentage}%;"></div>
+                            </div>
+                            <div class="chart-value">${Math.round(item.percentage)}%</div>
+                        </div>
+                        `).join('')}
+                    </div>
+
+                    <div class="key-stats">
+                        <div class="stat-item">
+                            <div class="stat-label">${I18n.t('messages.renderer.total_votes_lower', locale).toUpperCase()}</div>
+                            <div class="stat-value">${totalVotes}</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">${I18n.t('view.winner_upper', locale)}</div> <!-- Localized "Winner" -->
+                            <div class="stat-value gold-text">
+                                ${getWinnersHtml(items)}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="footer">
+                    Generated by PollBot Premium
+                </div>
+            </div>
+        </body>
+        </html>
+        `;
+
+        await page.setContent(html);
+        const element = await page.$('.dashboard-card');
+        if (!element) throw new Error('Could not find dashboard-card element');
+        return await element.screenshot({ type: 'png' });
+    }
+
 }
+
 
 // Basic HTML escape to prevent injection
 function escapeHtml(unsafe: string) {
@@ -488,4 +696,20 @@ function escapeHtml(unsafe: string) {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
+}
+
+function getWinnersHtml(items: any[]): string {
+    const winners = items.filter(i => i.isWinner);
+    if (winners.length === 0) return '-';
+
+    return winners.map(w => {
+        const label = escapeHtml(w.label);
+        // Dynamic sizing based on length
+        // Base size 24px per CSS .stat-value
+        let style = '';
+        if (label.length > 20) style = 'font-size: 16px;';
+        else if (label.length > 15) style = 'font-size: 20px;';
+
+        return `<div style="${style} white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 250px;">${label}</div>`;
+    }).join('');
 }
