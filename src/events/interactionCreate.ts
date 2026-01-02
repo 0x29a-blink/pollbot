@@ -11,14 +11,48 @@ export default {
     name: Events.InteractionCreate,
     async execute(interaction: Interaction) {
         // Handle Button Interactions (Close/Reopen)
-        if (interaction.isButton() && (interaction.customId === 'poll_close' || interaction.customId === 'poll_reopen')) {
-            const pollId = interaction.message.id;
-            const isCloseAction = interaction.customId === 'poll_close';
+        if (interaction.isButton()) {
+            // Poll Management (Close/Reopen)
+            if (interaction.customId === 'poll_close' || interaction.customId === 'poll_reopen') {
+                const pollId = interaction.message.id;
+                const isCloseAction = interaction.customId === 'poll_close';
+                await PollManager.setPollStatus(interaction, pollId, !isCloseAction);
+                return;
+            }
 
-            // Use centralised manager
-            // Pass active state: Close -> false, Reopen -> true
-            await PollManager.setPollStatus(interaction, pollId, !isCloseAction);
-            return;
+            // View Details
+            if (interaction.customId === 'view_details' || interaction.customId.startsWith('view_details_')) {
+                // Determine Poll ID: from message ID if static, or parsed if using old dynamic logic (backup)
+                let pollId = interaction.message.id;
+                if (interaction.customId.startsWith('view_details_')) {
+                    pollId = interaction.customId.replace('view_details_', '');
+                }
+
+                // Permission Check
+                const member = interaction.member as GuildMember;
+                const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
+                const isPollManager = member.roles.cache.some(r => r.name === 'Poll Manager' || r.name === 'Poll Creator');
+
+                if (!isAdmin && !isPollManager) {
+                    await interaction.reply({
+                        content: 'You do not have permission to view poll details (Admin or Poll Manager role required).',
+                        flags: MessageFlags.Ephemeral
+                    });
+                    return;
+                }
+
+                const { handleViewPoll } = await import('../commands/view');
+                await handleViewPoll(interaction, pollId);
+                return;
+            }
+
+            // Check Vote (Premium Upgrade Check)
+            if (interaction.customId.startsWith('check_vote_')) {
+                const pollId = interaction.customId.replace('check_vote_', '');
+                const { handleViewPoll } = await import('../commands/view');
+                await handleViewPoll(interaction, pollId);
+                return;
+            }
         }
 
         // Handle Autocomplete

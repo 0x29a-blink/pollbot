@@ -67,6 +67,16 @@ setTimeout(() => {
         });
     }
 
+    // 4. Start Webhook Server (Top.gg & Cloudflare Tunnel)
+    setTimeout(() => {
+        logger.info(`[Manager] Checking CLOUDFLARED_TOKEN: ${process.env.CLOUDFLARED_TOKEN ? 'EXISTS (' + process.env.CLOUDFLARED_TOKEN.substring(0, 5) + '...)' : 'MISSING'}`);
+        import('./webhook').then(({ startWebhookServer }) => {
+            startWebhookServer();
+        }).catch(err => {
+            logger.error('[Manager] Failed to start Webhook Server:', err);
+        });
+    }, 5000); // Start after shards to ensure bot is ready-ish
+
     // Increase Timeout to 5 MINUTES
     manager.spawn({ timeout: 300000 }).catch(error => {
         logger.error('[Manager] Failed to spawn shards:', error);

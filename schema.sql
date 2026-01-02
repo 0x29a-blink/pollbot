@@ -86,6 +86,13 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
+-- 5. Create users table [NEW]
+-- Tracks user-specific data like last vote time for premium features
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    last_vote_at TIMESTAMPTZ
+);
+
 -- Function and Trigger for Polls
 CREATE OR REPLACE FUNCTION update_global_poll_count()
 RETURNS TRIGGER AS $$
@@ -121,4 +128,3 @@ CREATE TRIGGER trg_update_global_vote_count
 AFTER INSERT ON votes
 FOR EACH ROW
 EXECUTE FUNCTION update_global_vote_count();
-

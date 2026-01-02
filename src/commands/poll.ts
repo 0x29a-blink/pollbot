@@ -206,15 +206,31 @@ export default {
 
             components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu));
 
-            // Row 2: Close Button (if enabled)
+            // Row 2: Close Button (if enabled) & View Details Button
+            const row2 = new ActionRowBuilder<ButtonBuilder>();
+
             if (allowClose) {
                 const closeButton = new ButtonBuilder()
                     .setCustomId('poll_close')
                     .setLabel(I18n.t('messages.manager.close_button', serverLocale)) // Use Server Locale
                     .setStyle(ButtonStyle.Danger)
                     .setEmoji('🔒');
+                row2.addComponents(closeButton);
+            }
 
-                components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(closeButton));
+            // View Details Button (Always added if buttons allowed, or maybe just always?)
+            // User requested: "If the user has buttons enabled for polls it will add a 'View Details' button"
+            if (serverAllowsButtons) {
+                const viewButton = new ButtonBuilder()
+                    .setCustomId('view_details') // Static ID, we get ID from message context
+                    .setLabel('View Details') // TODO: Localize?
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('📊');
+                row2.addComponents(viewButton);
+            }
+
+            if (row2.components.length > 0) {
+                components.push(row2);
             }
 
             // Send Message
