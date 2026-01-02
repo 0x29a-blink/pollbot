@@ -71,6 +71,14 @@ export async function handleViewPoll(interaction: ChatInputCommandInteraction | 
         .single();
 
     if (pollError || !poll) {
+        // If this was triggered by a button click on the poll message, remove the buttons to stop spam
+        if (interaction.message && typeof interaction.message.edit === 'function') {
+            try {
+                await interaction.message.edit({ components: [] });
+            } catch (error) {
+                logger.error('Failed to remove buttons from orphaned poll:', error);
+            }
+        }
         await interaction.reply({ content: 'Poll not found.', ephemeral: true });
         return;
     }
