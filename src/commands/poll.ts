@@ -81,8 +81,12 @@ export default {
         const itemsRaw = interaction.options.getString('items', true);
         const isPublic = interaction.options.getBoolean('public') ?? true;
         const createThread = interaction.options.getBoolean('thread') ?? false;
-        const maxVotes = interaction.options.getInteger('max_votes') ?? 1;
         const minVotes = interaction.options.getInteger('min_votes') ?? 1;
+        let maxVotes = interaction.options.getInteger('max_votes');
+
+        if (maxVotes === null) {
+            maxVotes = Math.max(1, minVotes);
+        }
         const targetRole = interaction.options.getRole('allowed_role');
         const weightsRaw = interaction.options.getString('weights');
         const allowExports = interaction.options.getBoolean('allow_exports') ?? true;
