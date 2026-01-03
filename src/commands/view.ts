@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, AttachmentBuilder, StringSelectMenuBuilder } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, AttachmentBuilder, StringSelectMenuBuilder, PermissionsBitField, GuildMember } from 'discord.js';
 import { supabase } from '../lib/db';
 import { logger } from '../lib/logger';
 import { I18n } from '../lib/i18n';
@@ -85,6 +85,23 @@ export async function handleViewPoll(interaction: ChatInputCommandInteraction | 
         return;
     }
 
+    // 2a. Check allow_exports / public permissions
+    const settings = poll.settings as any || {};
+    const allowExports = settings.allow_exports !== false; // Default true
+    const isPublic = settings.public !== false; // Default true
+
+    if (!allowExports || !isPublic) {
+        const member = interaction.member as GuildMember;
+        const hasRole = member.roles.cache.some(r => r.name === 'Poll Manager');
+        const hasPermission = member.permissions.has(PermissionsBitField.Flags.ManageGuild);
+        const isCreator = poll.creator_id === interaction.user.id;
+
+        if (!isCreator && !hasRole && !hasPermission) {
+            await interaction.reply({ content: I18n.t('view.export_restricted', interaction.locale), ephemeral: true });
+            return;
+        }
+    }
+
     // 3. Fetch Vote Data (Just indexes for aggregate counts)
     const { data: votes, error: voteError } = await supabase
         .from('votes')
@@ -119,7 +136,7 @@ export async function handleViewPoll(interaction: ChatInputCommandInteraction | 
             options: options,
             votes: voteCounts,
             totalVotes: votes ? votes.length : 0,
-            creator: (await interaction.client.users.fetch(poll.creator_id).catch(() => ({ username: 'Unknown' }))).username,
+            creator: (await interaction.client.users.fetch(poll.creator_id).catch(() => ({ username: I18n.t('messages.manager.unknown_user', interaction.locale) }))).username,
             locale: interaction.locale,
             closed: !poll.active
         });

@@ -34,6 +34,10 @@ export default {
                 .setDescription('The description for the message embed (use \\n for newline)')
                 .setRequired(false))
         .addBooleanOption(option =>
+            option.setName('allow_exports')
+                .setDescription('Allow users to view detailed results/export (default: true)')
+                .setRequired(false))
+        .addBooleanOption(option =>
             option.setName('public')
                 .setDescription('Whether to display current vote counts (default: true)')
                 .setRequired(false))
@@ -81,6 +85,7 @@ export default {
         const minVotes = interaction.options.getInteger('min_votes') ?? 1;
         const targetRole = interaction.options.getRole('allowed_role');
         const weightsRaw = interaction.options.getString('weights');
+        const allowExports = interaction.options.getBoolean('allow_exports') ?? true;
 
         const allowedRoles = targetRole ? [targetRole.id] : [];
         const voteWeights = weightsRaw ? PollManager.parseWeights(weightsRaw) : {};
@@ -264,7 +269,8 @@ export default {
                         max_votes: maxVotes,
                         min_votes: minVotes,
                         allowed_roles: allowedRoles,
-                        vote_weights: voteWeights
+                        vote_weights: voteWeights,
+                        allow_exports: allowExports
                     },
                     active: true,
                     created_at: new Date().toISOString()

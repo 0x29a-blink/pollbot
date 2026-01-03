@@ -51,8 +51,9 @@ export class ViewInteractionHandler {
                     .eq('message_id', pollId)
                     .single();
 
-                const optName = pollData?.options ? (pollData.options as string[])[selectedOption] : `Option-${selectedOption + 1}`;
-                const safeOptName = optName || `Option-${selectedOption + 1}`;
+                const fallbackName = I18n.t('view.option_generic', interaction.locale, { index: (selectedOption + 1).toString() });
+                const optName = pollData?.options ? (pollData.options as string[])[selectedOption] : fallbackName;
+                const safeOptName = optName || fallbackName;
                 const cleanOptName = safeOptName.replace(/[^a-z0-9]/gi, '_').substring(0, 30);
 
                 // Format content
@@ -79,9 +80,9 @@ export class ViewInteractionHandler {
 
                         allVoters.forEach(v => {
                             const member = members.get(v.user_id);
-                            const username = member?.user.username || 'Unknown';
-                            const displayName = member?.user.displayName || 'Unknown';
-                            const nickname = member?.nickname || 'None';
+                            const username = member?.user.username || I18n.t('messages.manager.unknown_user', interaction.locale);
+                            const displayName = member?.user.displayName || I18n.t('messages.manager.unknown_user', interaction.locale);
+                            const nickname = member?.nickname || I18n.t('messages.common.none', interaction.locale);
                             fileContent += `${v.user_id} | ${username} | ${displayName} | ${nickname}\n`;
                         });
 
@@ -142,7 +143,7 @@ export class ViewInteractionHandler {
             .eq('message_id', pollId)
             .single();
 
-        const optionName = poll?.options ? (poll.options as string[])[selectedOption] : `Option ${selectedOption + 1}`;
+        const optionName = poll?.options ? (poll.options as string[])[selectedOption] : I18n.t('view.option_generic', interaction.locale, { index: (selectedOption + 1).toString() });
 
         // Build Embed
         const embed = new EmbedBuilder()

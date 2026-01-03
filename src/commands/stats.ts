@@ -127,7 +127,7 @@ export default {
 
         } catch (err) {
             console.error(err);
-            await interaction.editReply({ content: 'An error occurred while generating stats.' });
+            await interaction.editReply({ content: I18n.t('messages.common.error', interaction.locale) });
         }
     }
 };
