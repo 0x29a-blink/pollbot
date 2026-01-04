@@ -5,54 +5,117 @@
             "description": "Crear una nueva encuesta",
             "options": {
                 "title": {
-                    "name": "titulo",
-                    "description": "El título para la encuesta (max 256 caracteres)"
+                    "name": "título",
+                    "description": "El título para el embed del mensaje (máx 256 caracteres)"
                 },
                 "items": {
                     "name": "opciones",
-                    "description": "Opciones separadas por coma (max 25)"
+                    "description": "Opciones separadas por comas (máx 25 opciones)"
                 },
                 "max_votes": {
-                    "name": "votos_maximos",
-                    "description": "Número máximo de opciones que un usuario puede seleccionar (defecto: 1)"
+                    "name": "votos_máximos",
+                    "description": "Número máximo de opciones que un usuario puede seleccionar (predeterminado: 1)"
                 },
                 "min_votes": {
-                    "name": "votos_minimos",
-                    "description": "Número mínimo de opciones que un usuario debe seleccionar (defecto: 1)"
+                    "name": "votos_mínimos",
+                    "description": "Número mínimo de opciones que un usuario debe seleccionar (predeterminado: 1)"
                 },
                 "description": {
-                    "name": "descripcion",
-                    "description": "La descripción para la encuesta (uase \\n para nueva línea)"
+                    "name": "descripción",
+                    "description": "La descripción para el embed del mensaje (usa \\n para nueva línea)"
+                },
+                "allow_exports": {
+                    "name": "permitir_exportaciones",
+                    "description": "Permitir ver/exportar resultados (por defecto: sí). Privadas fuerzan no."
                 },
                 "public": {
-                    "name": "publica",
-                    "description": "Si se deben mostrar los votos actuales (defecto: verdadero)"
+                    "name": "público",
+                    "description": "Mostrar el recuento de votos actual (predeterminado: verdadero)"
                 },
                 "close_button": {
-                    "name": "boton_cerrar",
-                    "description": "Si añadir un botón de Cerrar Encuesta"
+                    "name": "botón_cerrar",
+                    "description": "Añadir un botón para cerrar la encuesta"
                 },
                 "thread": {
                     "name": "hilo",
-                    "description": "Si adjuntar un hilo a la encuesta"
+                    "description": "Adjuntar un hilo a la encuesta"
+                },
+                "allowed_role": {
+                    "name": "rol_permitido",
+                    "description": "Limitar quién puede votar a un rol específico"
+                },
+                "weights": {
+                    "name": "pesos",
+                    "description": "Pesos de voto. ej. @Admin=5, @Mod=2"
                 }
             }
         },
         "config": {
             "name": "configuracion",
-            "description": "Configurar ajustes del Poll Bot para este servidor",
+            "description": "Configurar ajustes de Poll Bot para este servidor",
             "subcommands": {
                 "poll-buttons": {
-                    "name": "botones_encuesta",
+                    "name": "botones-encuesta",
                     "description": "Habilitar o deshabilitar botones de encuesta (Cerrar/Reabrir)",
                     "options": {
                         "enabled": {
                             "name": "habilitado",
-                            "description": "Si habilitar botones de encuesta"
+                            "description": "Habilitar botones de encuesta"
+                        }
+                    }
+                },
+                "weights": {
+                    "name": "pesos",
+                    "description": "Gestionar pesos de voto globales para roles",
+                    "subcommands": {
+                        "set": {
+                            "name": "establecer",
+                            "description": "Establecer peso para un rol",
+                            "options": {
+                                "role": {
+                                    "name": "rol",
+                                    "description": "El rol al que asignar peso"
+                                },
+                                "value": {
+                                    "name": "valor",
+                                    "description": "El valor del peso del voto"
+                                }
+                            }
+                        },
+                        "remove": {
+                            "name": "eliminar",
+                            "description": "Eliminar peso para un rol",
+                            "options": {
+                                "role": {
+                                    "name": "rol",
+                                    "description": "El rol del que eliminar peso"
+                                }
+                            }
+                        },
+                        "view": {
+                            "name": "ver",
+                            "description": "Ver configuración actual de pesos"
+                        },
+                        "clear": {
+                            "name": "limpiar",
+                            "description": "Limpiar todas las configuraciones de pesos"
                         }
                     }
                 }
             }
+        },
+        "export-poll": {
+            "name": "exportar-encuesta",
+            "description": "Exportar resultados de votación para una encuesta específica",
+            "options": {
+                "message_id": {
+                    "name": "id_mensaje",
+                    "description": "Enlace al mensaje o ID de la encuesta"
+                }
+            }
+        },
+        "Export Results": {
+            "name": "Exportar Resultados"
         },
         "close": {
             "name": "cerrar",
@@ -60,7 +123,7 @@
             "options": {
                 "poll": {
                     "name": "encuesta",
-                    "description": "Enlace del mensaje o ID de la encuesta"
+                    "description": "Enlace al mensaje o ID de la encuesta"
                 }
             }
         },
@@ -70,7 +133,7 @@
             "options": {
                 "poll": {
                     "name": "encuesta",
-                    "description": "Enlace del mensaje o ID de la encuesta"
+                    "description": "Enlace al mensaje o ID de la encuesta"
                 }
             }
         }
@@ -79,31 +142,64 @@
         "common": {
             "error": "Ocurrió un error.",
             "guild_only": "Este comando solo se puede usar en un servidor.",
-            "no_permission": "Necesitas el permiso \"Administrar servidor\" para usar este comando."
+            "no_permission": "Necesitas el permiso \"Gestionar Servidor\" para usar este comando.",
+            "none": "Ninguno",
+            "view_details_deny": "No tienes permiso para ver los detalles de la encuesta (se requiere permiso de Gestionar Servidor o rol de Gestor de Encuestas).",
+            "vote_error": "Ocurrió un error al votar.",
+            "missing_perms_action": "¡Me faltan permisos para realizar esta acción! Por favor revisa mis permisos de rol.",
+            "command_error": "¡Hubo un error al ejecutar este comando!",
+            "missing_perms_channel": "No puedo actualizar la imagen de la encuesta debido a falta de permisos en este canal."
         },
         "poll": {
             "title_too_long": "¡El título es demasiado largo! ({{length}}/256 caracteres)",
             "description_too_long": "¡La descripción es demasiado larga! ({{length}}/4096 caracteres)",
             "items_required": "Debes proporcionar al menos una opción válida.",
             "items_too_many": "¡Demasiadas opciones! Proporcionaste {{count}}, el máximo es 25.",
-            "max_votes_exceeded": "No puedes establecer votos máximos ({{max}}) mayor que el número de opciones ({{items}}).",
-            "min_votes_error": "votos mínimos ({{min}}) no puede ser mayor que votos máximos ({{max}}).",
-            "min_votes_exceeded": "No puedes establecer votos mínimos ({{min}}) mayor que el número de opciones ({{items}}).",
+            "max_votes_exceeded": "No puedes establecer max_votes ({{max}}) mayor que el número de opciones ({{items}}).",
+            "min_votes_error": "min_votes ({{min}}) no puede ser mayor que max_votes ({{max}}).",
+            "min_votes_exceeded": "No puedes establecer min_votes ({{min}}) mayor que el número de opciones ({{items}}).",
             "item_too_long": "Las siguientes opciones exceden los 100 caracteres:\n{{items}}",
             "db_fail": "Encuesta creada, pero falló al guardar en la base de datos. La persistencia puede estar comprometida.",
-            "generic_error": "Algo salió mal procesando tu encuesta."
+            "generic_error": "Algo salió mal procesando tu encuesta.",
+            "role_restricted": "No tienes permiso para votar en esta encuesta.",
+            "closed": "Esta encuesta está cerrada.",
+            "voted": "¡Votaste por **{{options}}**!",
+            "already_voted": "Ya has votado por estas opciones.",
+            "invalid_selection": "Selección inválida.",
+            "vote_fail": "Falló el registro de tu voto. Por favor intenta de nuevo.",
+            "orphaned": "Esta encuesta ya no es válida.",
+            "db_missing": "Esta encuesta ya no existe en la base de datos.",
+            "perms_missing_bot": "Me faltan permisos para actualizar la imagen de la encuesta."
+        },
+        "export": {
+            "not_found": "Encuesta no encontrada o sin votos registrados.",
+            "success": "Aquí están los resultados de la encuesta:",
+            "generic_error": "Ocurrió un error al exportar."
         },
         "config": {
-            "update_fail": "Falló la actualización de la configuración.",
+            "update_fail": "Falló la actualización de ajustes.",
             "update_success_enabled": "Los botones de encuesta han sido **HABILITADOS** para este servidor.",
             "update_success_disabled": "Los botones de encuesta han sido **DESHABILITADOS** para este servidor.",
-            "invalid_locale": "Localización inválida. Disponibles: {{available}}",
-            "locale_success": "Localización establecida a {{lang}}."
+            "invalid_locale": "Localización inválida. Disponible: {{available}}",
+            "locale_success": "Localización establecida a {{lang}}.",
+            "weight_updated": "Peso actualizado para **{{role}}** a **{{value}}**.",
+            "weight_removed": "Peso eliminado para **{{role}}**.",
+            "weight_none": "No hay peso configurado para **{{role}}**.",
+            "weight_empty": "No hay pesos de voto personalizados configurados.",
+            "weight_list": "**Pesos de Voto Actuales:**\n{{list}}",
+            "weight_cleared": "Se limpiaron todos los pesos de voto."
+        },
+        "renderer": {
+            "closed": "CERRADA",
+            "final_results": "Resultados Finales",
+            "created_by": "Creada por",
+            "votes_lower": "votos",
+            "total_votes_lower": "total de votos"
         },
         "manager": {
             "poll_not_found": "Encuesta no encontrada en la base de datos.",
-            "permissions_error": "Necesitas permisos de 'Administrar servidor' o el rol 'Poll Manager' para gestionar esta encuesta.",
-            "update_state_fail": "Falló al actualizar el estado de la encuesta.",
+            "permissions_error": "Necesitas permisos de 'Gestionar Servidor' o el rol 'Poll Manager' para gestionar esta encuesta.\nPuedes pedir a un administrador del servidor que ejecute `/pollmanager create` y luego `/pollmanager assign` para darte el rol.",
+            "update_state_fail": "Falló la actualización del estado de la encuesta.",
             "msg_update_fail": "No se pudo encontrar el mensaje de la encuesta para actualizar.",
             "reopened": "¡Encuesta Reabierta!",
             "closed": "¡Encuesta Cerrada!",
@@ -112,25 +208,53 @@
             "vote_option_desc": "Votar por la Opción #{{index}}",
             "close_button": "Cerrar Encuesta",
             "reopen_button": "Reabrir Encuesta",
-            "invalid_id": "ID de encuesta o enlace inválido proporcionado."
-        },
-        "renderer": {
-            "closed": "CERRADO",
-            "final_results": "Resultados Finales",
-            "created_by": "Creado por",
-            "votes_lower": "votos",
-            "total_votes_lower": "votos totales"
+            "invalid_id": "ID de encuesta o enlace inválido.",
+            "create_success": "Se creó exitosamente el rol {{role}}.",
+            "role_exists": "El rol {{role}} ya existe.",
+            "role_not_found_create": "El rol \"Poll Manager\" no existe. Por favor ejecuta `/pollmanager create` primero.",
+            "role_not_found": "El rol \"Poll Manager\" no existe.",
+            "already_has_role": "{{user}} ya tiene el rol {{role}}.",
+            "assigned_success": "Asignado el rol {{role}} a {{user}}.",
+            "not_have_role": "{{user}} no tiene el rol {{role}}.",
+            "removed_success": "Eliminado el rol {{role}} de {{user}}.",
+            "manage_fail": "Ocurrió un error al gestionar el rol Poll Manager.",
+            "missing_perms_create": "¡Me faltan permisos para crear roles! Por favor asegúrate de que tengo el permiso \"Gestionar Roles\".",
+            "missing_perms_manage": "¡Me faltan permisos para gestionar los roles de este usuario! Por favor asegúrate de que tengo el permiso \"Gestionar Roles\" y que mi rol más alto está por encima del rol \"Poll Manager\"."
         }
     },
     "stats": {
         "title": "PollBot",
         "subtitle": "Analíticas del Sistema",
-        "uptime": "Tiempo Activo",
-        "shards": "Fragmentos",
+        "uptime": "Tiempo de actividad",
+        "shards": "Shards",
         "active_servers": "Servidores Activos",
         "total_votes": "Votos Totales",
         "total_polls": "Encuestas Totales",
-        "cpu_load": "Carga CPU",
-        "memory_usage": "Uso Memoria"
+        "cpu_load": "Carga de CPU",
+        "memory_usage": "Uso de Memoria"
+    },
+    "view": {
+        "title": "Resultados Detallados: {{title}}",
+        "description": "Selecciona una opción abajo para ver la lista de votantes.",
+        "option_default": "Selecciona una opción...",
+        "option_label": "Opción {{index}} ({{count}} votos)",
+        "voter_list_title": "Votantes para Opción {{index}}: {{option}}",
+        "no_votes": "Aún no hay votos para esta opción.",
+        "page_indicator": "Página {{current}} / {{total}}",
+        "nav_prev": "Anterior",
+        "nav_next": "Siguiente >",
+        "premium_title": "Función Premium: Ver Resultados Detallados",
+        "premium_desc": "Ver resultados detallados de la encuesta (quién votó por qué) es una **Función Premium**.\n\nPara desbloquear esto por 12 horas, ¡simplemente vota por el bot en Top.gg!\n\nSi no quieres votar puedes usar la app/comando de exportar para obtener una lista de votantes pero no estará formateada automáticamente para ti ni mostrará ganadores de opciones, es solo un CSV de los votantes.",
+        "vote_unlock": "Votar para Desbloquear",
+        "i_voted": "¡Yo Voté!",
+        "export_btn": "Exportar Lista",
+        "export_restricted": "Las exportaciones y vistas detalladas están deshabilitadas para esta encuesta (o es privada). Solo el Creador de la Encuesta o Gestores de Encuestas pueden verlas.",
+        "export_fail": "Falló la exportación de la lista.",
+        "export_content": "Votantes para la Opción: {option}\n\nID de Usuario | Nombre de Usuario | Nombre en Pantalla | Apodo\n--------------------------------------------------\n",
+        "winner_upper": "GANADOR",
+        "nav_first": "Primero",
+        "nav_last": "Último",
+        "generated_by": "Generado por PollBot Premium",
+        "option_generic": "Opción {{index}}"
     }
 }

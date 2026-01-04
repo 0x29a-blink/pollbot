@@ -30,12 +30,12 @@ export default {
 
                 // Permission Check
                 const member = interaction.member as GuildMember;
-                const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
+                const isAdmin = member.permissions.has(PermissionFlagsBits.ManageGuild);
                 const isPollManager = member.roles.cache.some(r => r.name === 'Poll Manager' || r.name === 'Poll Creator');
 
                 if (!isAdmin && !isPollManager) {
                     await interaction.reply({
-                        content: 'You do not have permission to view poll details (Admin or Poll Manager role required).',
+                        content: I18n.t('messages.common.view_details_deny', interaction.locale),
                         flags: MessageFlags.Ephemeral
                     });
                     return;
@@ -320,7 +320,7 @@ export default {
                         ? `\nMissing permissions: **${missingPerms.join(', ')}**`
                         : '';
 
-                    const errorResponse = `I cannot update the poll image due to missing permissions in this channel.${permMsg}`;
+                    const errorResponse = I18n.t('messages.common.missing_perms_channel', interaction.locale) + permMsg;
 
                     try {
                         if (interaction.deferred && !interaction.replied) {
@@ -335,9 +335,9 @@ export default {
                 // Generic Error
                 try {
                     if (interaction.deferred && !interaction.replied) {
-                        await interaction.editReply({ content: 'An error occurred while voting.' });
+                        await interaction.editReply({ content: I18n.t('messages.common.vote_error', interaction.locale) });
                     } else if (!interaction.replied) {
-                        await interaction.reply({ content: 'An error occurred while voting.', flags: MessageFlags.Ephemeral });
+                        await interaction.reply({ content: I18n.t('messages.common.vote_error', interaction.locale), flags: MessageFlags.Ephemeral });
                     }
                 } catch { /* ignore if we can't even reply */ }
             }
@@ -364,17 +364,17 @@ export default {
             // Check for Missing Permissions to handle gracefully
             if (error.code === 50013) { // Missing Permissions
                 if (interaction.replied || interaction.deferred) {
-                    await interaction.followUp({ content: 'I am missing permissions to perform this action! Please check my role permissions.', flags: MessageFlags.Ephemeral });
+                    await interaction.followUp({ content: I18n.t('messages.common.missing_perms_action', interaction.locale), flags: MessageFlags.Ephemeral });
                 } else {
-                    await interaction.reply({ content: 'I am missing permissions to perform this action! Please check my role permissions.', flags: MessageFlags.Ephemeral });
+                    await interaction.reply({ content: I18n.t('messages.common.missing_perms_action', interaction.locale), flags: MessageFlags.Ephemeral });
                 }
                 return;
             }
 
             if (interaction.replied || interaction.deferred) {
-                await interaction.followUp({ content: 'There was an error while executing this command!', flags: MessageFlags.Ephemeral });
+                await interaction.followUp({ content: I18n.t('messages.common.command_error', interaction.locale), flags: MessageFlags.Ephemeral });
             } else {
-                await interaction.reply({ content: 'There was an error while executing this command!', flags: MessageFlags.Ephemeral });
+                await interaction.reply({ content: I18n.t('messages.common.command_error', interaction.locale), flags: MessageFlags.Ephemeral });
             }
         }
     },

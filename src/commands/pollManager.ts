@@ -1,5 +1,6 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionsBitField, PermissionFlagsBits, MessageFlags, GuildMember, Role, Colors } from 'discord.js';
 import { logger } from '../lib/logger';
+import { I18n } from '../lib/i18n';
 
 export default {
     data: new SlashCommandBuilder()
@@ -29,7 +30,7 @@ export default {
         ),
     async execute(interaction: ChatInputCommandInteraction) {
         if (!interaction.inGuild()) {
-            return interaction.reply({ content: 'This command can only be used in a server.', flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: I18n.t('messages.common.guild_only', interaction.locale), flags: MessageFlags.Ephemeral });
         }
 
         const subcommand = interaction.options.getSubcommand();
@@ -44,7 +45,7 @@ export default {
             if (subcommand === 'create') {
                 let role = findPollManagerRole();
                 if (role) {
-                    return interaction.reply({ content: `The role ${role.toString()} already exists.`, flags: MessageFlags.Ephemeral });
+                    return interaction.reply({ content: I18n.t('messages.manager.role_exists', interaction.locale, { role: role.toString() }), flags: MessageFlags.Ephemeral });
                 }
 
                 role = await guild.roles.create({
@@ -54,7 +55,7 @@ export default {
                 });
 
                 logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} executed command /pollmanager create`);
-                return interaction.reply({ content: `Successfully created the ${role.toString()} role.`, flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: I18n.t('messages.manager.create_success', interaction.locale, { role: role.toString() }), flags: MessageFlags.Ephemeral });
             }
 
             if (subcommand === 'assign') {
@@ -62,16 +63,16 @@ export default {
                 const role = findPollManagerRole();
 
                 if (!role) {
-                    return interaction.reply({ content: 'The "Poll Manager" role does not exist. Please run `/pollmanager create` first.', flags: MessageFlags.Ephemeral });
+                    return interaction.reply({ content: I18n.t('messages.manager.role_not_found_create', interaction.locale), flags: MessageFlags.Ephemeral });
                 }
 
                 if (targetUser.roles.cache.has(role.id)) {
-                    return interaction.reply({ content: `${targetUser.toString()} already has the ${role.toString()} role.`, flags: MessageFlags.Ephemeral });
+                    return interaction.reply({ content: I18n.t('messages.manager.already_has_role', interaction.locale, { user: targetUser.toString(), role: role.toString() }), flags: MessageFlags.Ephemeral });
                 }
 
                 await targetUser.roles.add(role);
                 logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} executed command /pollmanager assign with parameters "user:${targetUser.user.tag}"`);
-                return interaction.reply({ content: `Assigned ${role.toString()} role to ${targetUser.toString()}.`, flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: I18n.t('messages.manager.assigned_success', interaction.locale, { role: role.toString(), user: targetUser.toString() }), flags: MessageFlags.Ephemeral });
             }
 
             if (subcommand === 'remove') {
@@ -79,16 +80,16 @@ export default {
                 const role = findPollManagerRole();
 
                 if (!role) {
-                    return interaction.reply({ content: 'The "Poll Manager" role does not exist.', flags: MessageFlags.Ephemeral });
+                    return interaction.reply({ content: I18n.t('messages.manager.role_not_found', interaction.locale), flags: MessageFlags.Ephemeral });
                 }
 
                 if (!targetUser.roles.cache.has(role.id)) {
-                    return interaction.reply({ content: `${targetUser.toString()} does not have the ${role.toString()} role.`, flags: MessageFlags.Ephemeral });
+                    return interaction.reply({ content: I18n.t('messages.manager.not_have_role', interaction.locale, { user: targetUser.toString(), role: role.toString() }), flags: MessageFlags.Ephemeral });
                 }
 
                 await targetUser.roles.remove(role);
                 logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} executed command /pollmanager remove with parameters "user:${targetUser.user.tag}"`);
-                return interaction.reply({ content: `Removed ${role.toString()} role from ${targetUser.toString()}.`, flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: I18n.t('messages.manager.removed_success', interaction.locale, { role: role.toString(), user: targetUser.toString() }), flags: MessageFlags.Ephemeral });
             }
 
         } catch (error: any) {
@@ -96,14 +97,14 @@ export default {
 
             if (error.code === 50013) { // Missing Permissions
                 if (subcommand === 'create') {
-                    return interaction.reply({ content: 'I am missing permissions to create roles! Please ensure I have the "Manage Roles" permission.', flags: MessageFlags.Ephemeral });
+                    return interaction.reply({ content: I18n.t('messages.manager.missing_perms_create', interaction.locale), flags: MessageFlags.Ephemeral });
                 }
                 if (subcommand === 'assign' || subcommand === 'remove') {
-                    return interaction.reply({ content: 'I am missing permissions to manage this user\'s roles! Please ensure I have the "Manage Roles" permission and that my highest role is above the "Poll Manager" role.', flags: MessageFlags.Ephemeral });
+                    return interaction.reply({ content: I18n.t('messages.manager.missing_perms_manage', interaction.locale), flags: MessageFlags.Ephemeral });
                 }
             }
 
-            return interaction.reply({ content: 'An error occurred while managing the Poll Manager role.', flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: I18n.t('messages.manager.manage_fail', interaction.locale), flags: MessageFlags.Ephemeral });
         }
     }
 };

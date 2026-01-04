@@ -143,7 +143,12 @@
             "error": "An error occurred.",
             "guild_only": "This command can only be used in a server.",
             "no_permission": "You need the \"Manage Server\" permission to use this command.",
-            "none": "None"
+            "none": "None",
+            "view_details_deny": "You do not have permission to view poll details (Manage Server permission or Poll Manager role required).",
+            "vote_error": "An error occurred while voting.",
+            "missing_perms_action": "I am missing permissions to perform this action! Please check my role permissions.",
+            "command_error": "There was an error while executing this command!",
+            "missing_perms_channel": "I cannot update the poll image due to missing permissions in this channel."
         },
         "poll": {
             "title_too_long": "Title is too long! ({{length}}/256 characters)",
@@ -176,7 +181,13 @@
             "update_success_enabled": "Poll buttons have been **ENABLED** for this server.",
             "update_success_disabled": "Poll buttons have been **DISABLED** for this server.",
             "invalid_locale": "Invalid locale. Available: {{available}}",
-            "locale_success": "Locale set to {{lang}}."
+            "locale_success": "Locale set to {{lang}}.",
+            "weight_updated": "Updated weight for **{{role}}** to **{{value}}**.",
+            "weight_removed": "Removed weight for **{{role}}**.",
+            "weight_none": "No weight configured for **{{role}}**.",
+            "weight_empty": "No custom vote weights configured.",
+            "weight_list": "**Current Vote Weights:**\n{{list}}",
+            "weight_cleared": "Cleared all vote weights."
         },
         "renderer": {
             "closed": "CLOSED",
@@ -197,7 +208,18 @@
             "vote_option_desc": "Vote for Option #{{index}}",
             "close_button": "Close Poll",
             "reopen_button": "Reopen Poll",
-            "invalid_id": "Invalid poll ID or link provided."
+            "invalid_id": "Invalid poll ID or link provided.",
+            "create_success": "Successfully created the {{role}} role.",
+            "role_exists": "The role {{role}} already exists.",
+            "role_not_found_create": "The \"Poll Manager\" role does not exist. Please run `/pollmanager create` first.",
+            "role_not_found": "The \"Poll Manager\" role does not exist.",
+            "already_has_role": "{{user}} already has the {{role}} role.",
+            "assigned_success": "Assigned {{role}} role to {{user}}.",
+            "not_have_role": "{{user}} does not have the {{role}} role.",
+            "removed_success": "Removed {{role}} role from {{user}}.",
+            "manage_fail": "An error occurred while managing the Poll Manager role.",
+            "missing_perms_create": "I am missing permissions to create roles! Please ensure I have the \"Manage Roles\" permission.",
+            "missing_perms_manage": "I am missing permissions to manage this user's roles! Please ensure I have the \"Manage Roles\" permission and that my highest role is above the \"Poll Manager\" role."
         }
     },
     "stats": {

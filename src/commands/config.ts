@@ -115,7 +115,7 @@ export default {
                     return interaction.reply({ content: I18n.t('messages.config.update_fail', interaction.locale), flags: MessageFlags.Ephemeral });
                 }
 
-                return interaction.reply({ content: `Updated weight for **${role.name}** to **${value}**.`, flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: I18n.t('messages.config.weight_updated', interaction.locale, { role: role.name, value: value }), flags: MessageFlags.Ephemeral });
 
             } else if (subcommand === 'remove') {
                 const role = interaction.options.getRole('role', true);
@@ -134,18 +134,18 @@ export default {
                         logger.error('Failed to update weights:', error);
                         return interaction.reply({ content: I18n.t('messages.config.update_fail', interaction.locale), flags: MessageFlags.Ephemeral });
                     }
-                    return interaction.reply({ content: `Removed weight for **${role.name}**.`, flags: MessageFlags.Ephemeral });
+                    return interaction.reply({ content: I18n.t('messages.config.weight_removed', interaction.locale, { role: role.name }), flags: MessageFlags.Ephemeral });
                 } else {
-                    return interaction.reply({ content: `No weight configured for **${role.name}**.`, flags: MessageFlags.Ephemeral });
+                    return interaction.reply({ content: I18n.t('messages.config.weight_none', interaction.locale, { role: role.name }), flags: MessageFlags.Ephemeral });
                 }
 
             } else if (subcommand === 'view') {
                 if (Object.keys(weights).length === 0) {
-                    return interaction.reply({ content: 'No custom vote weights configured.', flags: MessageFlags.Ephemeral });
+                    return interaction.reply({ content: I18n.t('messages.config.weight_empty', interaction.locale), flags: MessageFlags.Ephemeral });
                 }
 
                 const lines = Object.entries(weights).map(([roleId, weight]) => `<@&${roleId}>: ${weight}`);
-                return interaction.reply({ content: `**Current Vote Weights:**\n${lines.join('\n')}`, flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: I18n.t('messages.config.weight_list', interaction.locale, { list: lines.join('\n') }), flags: MessageFlags.Ephemeral });
 
             } else if (subcommand === 'clear') {
                 const { error } = await supabase
@@ -160,7 +160,7 @@ export default {
                     logger.error('Failed to clear weights:', error);
                     return interaction.reply({ content: I18n.t('messages.config.update_fail', interaction.locale), flags: MessageFlags.Ephemeral });
                 }
-                return interaction.reply({ content: 'Cleared all vote weights.', flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: I18n.t('messages.config.weight_cleared', interaction.locale), flags: MessageFlags.Ephemeral });
             }
         }
 
