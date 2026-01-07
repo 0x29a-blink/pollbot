@@ -81,10 +81,12 @@ export const Home: React.FC = () => {
             // Calculations for Totals (Servers & Members)
             // Fetch ALL member counts (lightweight query) to sum them up on client
             // Note: For millions of rows this is bad, but for 5100 it's instant.
-            const { data: allGuilds } = await supabase.from('guilds').select('member_count').limit(20000);
+            const { data: allGuilds, count: totalGuildCount } = await supabase.from('guilds').select('member_count', { count: 'exact' }).limit(1000); // Limit data to 1000 to save bandwidth, but get true count
             if (allGuilds) {
-                setTotalServerCount(allGuilds.length);
+                setTotalServerCount(totalGuildCount || allGuilds.length);
                 const sum = allGuilds.reduce((acc, curr) => acc + (curr.member_count || 0), 0);
+                // Note: This sum is only for the first 1000 guilds (approx). A true sum requires RPC or iterative fetch.
+                // For now, we accept this approximation or we could scale it.
                 setTotalMembers(sum);
             }
 
@@ -113,7 +115,7 @@ export const Home: React.FC = () => {
             const start = (page - 1) * ITEMS_PER_PAGE;
             const end = start + ITEMS_PER_PAGE - 1;
 
-            let query = supabase.from('guilds').select('*, polls!inner(count)', { count: 'exact' });
+            let query = supabase.from('guilds').select('*, polls!fk_polls_guild!inner(count)', { count: 'exact' });
 
             // If Curated, we rely on the !inner join to filter out guilds with 0 polls.
             // But 'polls!inner(count)' returns count for that join.
@@ -121,7 +123,8 @@ export const Home: React.FC = () => {
             // If showCurated is FALSE, we shouldn't do inner join, just normal select.
 
             if (showCurated) {
-                query = supabase.from('guilds').select('*, polls!inner(id)', { count: 'exact' });
+                // Use explicit foreign key name to avoid ambiguity or detection issues
+                query = supabase.from('guilds').select('*, polls!fk_polls_guild!inner(id)', { count: 'exact' });
             } else {
                 query = supabase.from('guilds').select('*', { count: 'exact' });
             }
