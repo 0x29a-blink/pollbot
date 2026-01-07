@@ -22,6 +22,11 @@
     // Style Options
     "strict": true,
     "verbatimModuleSyntax": false,
-    "skipLibCheck": true,
-  }
+    "skipLibCheck": true
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "telemetry-panel"
+  ]
 }

@@ -17,6 +17,18 @@ app.get('/health', (req, res) => {
     res.status(200).send('OK');
 });
 
+app.use(express.json()); // Ensure JSON body parsing if not already (Top.gg listener might handle it, but for ours we need it)
+// Note: top.gg webhook listener is a middleware.
+
+app.post('/api/validate-key', (req, res) => {
+    const { key } = req.body;
+    if (key === process.env.TELEMETRY_ACCESS_KEY) {
+        return res.status(200).json({ valid: true });
+    }
+    // Simple rate limiting could be added here (e.g. using a Map of IP -> count)
+    return res.status(401).json({ valid: false });
+});
+
 app.post('/vote', webhook.listener(async (vote) => {
     logger.info(`[Webhook] Received vote from user: ${vote.user}`);
 

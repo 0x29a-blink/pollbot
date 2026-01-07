@@ -77,6 +77,15 @@ setTimeout(() => {
         });
     }, 5000); // Start after shards to ensure bot is ready-ish
 
+    // 5. Start Telemetry Tunnel
+    if (process.env.TELEMETRY_TOKEN) {
+        import('./services/TelemetryTunnelService').then(({ TelemetryTunnelService }) => {
+            new TelemetryTunnelService();
+        }).catch(err => {
+            logger.error('[Manager] Failed to start Telemetry Tunnel:', err);
+        });
+    }
+
     // Increase Timeout to 5 MINUTES
     manager.spawn({ timeout: 300000 }).catch(error => {
         logger.error('[Manager] Failed to spawn shards:', error);

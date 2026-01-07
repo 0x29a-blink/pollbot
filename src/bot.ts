@@ -80,7 +80,11 @@ if (!token) {
     process.exit(1);
 }
 
-client.login(token).catch(err => {
+client.login(token).then(() => {
+    // Initialize Guild Sync Service
+    const { GuildSyncService } = require('./services/GuildSyncService');
+    new GuildSyncService(client);
+}).catch(err => {
     logger.error("Failed to login:", err);
 });
 

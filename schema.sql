@@ -93,13 +93,43 @@ CREATE TABLE IF NOT EXISTS users (
     last_vote_at TIMESTAMPTZ
 );
 
+-- 6. Create guilds table [NEW TELEMETRY]
+CREATE TABLE IF NOT EXISTS guilds (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    member_count INTEGER DEFAULT 0,
+    icon_url TEXT,
+    joined_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE guilds ENABLE ROW LEVEL SECURITY;
+
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT FROM pg_catalog.pg_policies 
+        WHERE tablename = 'guilds' AND policyname = 'Enable read access for all users'
+    ) THEN
+        CREATE POLICY "Enable read access for all users" ON guilds FOR SELECT USING (true);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT FROM pg_catalog.pg_policies 
+        WHERE tablename = 'guilds' AND policyname = 'Enable insert/update for service role only'
+    ) THEN
+        CREATE POLICY "Enable insert/update for service role only" ON guilds FOR ALL USING (true) WITH CHECK (true);
+    END IF;
+END $$;
+
+
 -- Function and Trigger for Polls
 CREATE OR REPLACE FUNCTION update_global_poll_count()
 RETURNS TRIGGER AS $$
 BEGIN
     UPDATE global_stats
     SET total_polls = total_polls + 1,
-        last_updated = NOW()
+    last_updated = NOW()
     WHERE id = 1;
     RETURN NEW;
 END;
@@ -117,7 +147,7 @@ RETURNS TRIGGER AS $$
 BEGIN
     UPDATE global_stats
     SET total_votes = total_votes + 1,
-        last_updated = NOW()
+    last_updated = NOW()
     WHERE id = 1;
     RETURN NEW;
 END;
