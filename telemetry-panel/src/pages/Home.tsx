@@ -24,7 +24,8 @@ interface GuildData {
 
 export const Home: React.FC = () => {
     const [stats, setStats] = useState<GlobalStats | null>(null);
-    const [guilds, setGuilds] = useState<GuildData[]>([]);
+    const [guilds, setGuilds] = useState<GuildData[]>([]); // Only stores loaded subset (top 100)
+    const [totalServerCount, setTotalServerCount] = useState(0); // Stores total DB count
     const [topCreators, setTopCreators] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('');
@@ -61,12 +62,24 @@ export const Home: React.FC = () => {
 
             if (statsData) setStats(statsData);
 
-            // Fetch Guilds
+            // Fetch Guilds Count (Real Total)
+            const { count: totalGuilds } = await supabase
+                .from('guilds')
+                .select('*', { count: 'exact', head: true });
+
+            if (totalGuilds !== null) setActivePremiumCount(prev => prev); // Hack: We need a state for totalGuilds. 
+            // Better: Let's create a new state or just use the guilds.length if small, but here we expect >1000.
+            // Let's assume we need a new state: [totalServerCount, setTotalServerCount]
+
+            // Fetch Recent/Top Guilds for List (Limit 100 for performance)
             const { data: guildsData } = await supabase
                 .from('guilds')
-                .select('*');
+                .select('*')
+                .order('member_count', { ascending: false }) // Default to largest first
+                .limit(100);
 
             if (guildsData) setGuilds(guildsData);
+            if (totalGuilds !== null) setTotalServerCount(totalGuilds);
 
             // Fetch Active Premium Users
             const { data: usersData } = await supabase
@@ -168,7 +181,7 @@ export const Home: React.FC = () => {
                     />
                     <StatsCard
                         title="Active Servers"
-                        value={guilds.length}
+                        value={totalServerCount}
                         icon={<Server className="text-violet-400" />}
                         color="violet"
                     />
@@ -182,10 +195,10 @@ export const Home: React.FC = () => {
 
                 {/* Analytics Section */}
                 <section className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
-                    <div className="md:col-span-2 chart-container">
+                    <div className="md:col-span-2 chart-container" style={{ width: '100%', minHeight: '300px' }}>
                         <VoteHistoryChart />
                     </div>
-                    <div className="chart-container">
+                    <div className="chart-container" style={{ width: '100%', minHeight: '300px' }}>
                         <LanguagePieChart />
                     </div>
                 </section>
