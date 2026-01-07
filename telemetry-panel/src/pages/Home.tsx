@@ -81,7 +81,7 @@ export const Home: React.FC = () => {
             // Calculations for Totals (Servers & Members)
             // Fetch ALL member counts (lightweight query) to sum them up on client
             // Note: For millions of rows this is bad, but for 5100 it's instant.
-            const { data: allGuilds } = await supabase.from('guilds').select('member_count');
+            const { data: allGuilds } = await supabase.from('guilds').select('member_count').limit(20000);
             if (allGuilds) {
                 setTotalServerCount(allGuilds.length);
                 const sum = allGuilds.reduce((acc, curr) => acc + (curr.member_count || 0), 0);
@@ -187,7 +187,7 @@ export const Home: React.FC = () => {
                     <StatsCard
                         title="Active Servers"
                         value={totalServerCount}
-                        subLabel={`${(totalMembers / 1000000).toFixed(1)}M Users`} // Show formatted millions
+                        subLabel={`${totalMembers.toLocaleString()} Users`}
                         icon={<Server className="text-violet-400" />}
                         color="violet"
                     />
@@ -196,10 +196,10 @@ export const Home: React.FC = () => {
 
                 {/* Analytics Section */}
                 <section className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
-                    <div className="md:col-span-2 chart-container" style={{ width: '100%', minHeight: '300px' }}>
+                    <div className="md:col-span-2 chart-container" style={{ width: '100%', minHeight: '300px', minWidth: 0 }}>
                         <VoteHistoryChart />
                     </div>
-                    <div className="chart-container" style={{ width: '100%', minHeight: '300px' }}>
+                    <div className="chart-container" style={{ width: '100%', minHeight: '300px', minWidth: 0 }}>
                         <LanguagePieChart />
                     </div>
                 </section>
@@ -243,7 +243,7 @@ export const Home: React.FC = () => {
                                     onClick={() => { setShowCurated(true); setPage(1); }}
                                     className={`px-3 py-1 rounded text-xs font-bold transition-all ${showCurated ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
                                 >
-                                    Curated
+                                    Curated Polls
                                 </button>
                             </div>
                         </div>
