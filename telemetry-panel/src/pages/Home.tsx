@@ -115,17 +115,37 @@ export const Home: React.FC = () => {
             const start = (page - 1) * ITEMS_PER_PAGE;
             const end = start + ITEMS_PER_PAGE - 1;
 
-            let query = supabase.from('guilds').select('*, polls!fk_polls_guild!inner(count)', { count: 'exact' });
+            let guildIdsToFilter: string[] | null = null;
 
-            // If Curated, we rely on the !inner join to filter out guilds with 0 polls.
-            // But 'polls!inner(count)' returns count for that join.
-            // Actually, if we just want "has polls", `!inner` enforces existence.
-            // If showCurated is FALSE, we shouldn't do inner join, just normal select.
-
+            // If Curated, first fetch valid guild IDs manually to avoid Foreign Key issues (400 Bad Request)
             if (showCurated) {
-                query = supabase.from('guilds').select('*, polls!inner(id)', { count: 'exact' });
-            } else {
-                query = supabase.from('guilds').select('*', { count: 'exact' });
+                const { data: pollGuilds, error: pollError } = await supabase
+                    .from('polls')
+                    .select('guild_id');
+
+                if (pollError) throw pollError;
+
+                if (pollGuilds) {
+                    // Get unique IDs
+                    guildIdsToFilter = Array.from(new Set(pollGuilds.map(p => p.guild_id)));
+                } else {
+                    guildIdsToFilter = [];
+                }
+            }
+
+            let query = supabase.from('guilds').select('*', { count: 'exact' });
+
+            // Apply manual filter if needed
+            if (showCurated) {
+                if (guildIdsToFilter && guildIdsToFilter.length > 0) {
+                    query = query.in('id', guildIdsToFilter);
+                } else {
+                    // If no polls found, return empty result immediately
+                    setGuilds([]);
+                    setTotalPages(0);
+                    setLoading(false);
+                    return;
+                }
             }
 
             // Search Filter
@@ -142,14 +162,12 @@ export const Home: React.FC = () => {
             const { data, count } = await query;
 
             if (data) {
-                // If using inner join, 'polls' property might be attached. Remove it to match GuildData interface if strict, or ignore.
-                // Data comes back as GuildData + polls: [...]
-                setGuilds(data as any);
+                setGuilds(data);
                 if (count !== null) setTotalPages(Math.ceil(count / ITEMS_PER_PAGE));
             }
         } catch (error) {
             console.error('Error fetching guilds:', error);
-            setGuilds([]); // Clear list on error so user sees no results instead of stale data
+            setGuilds([]);
         } finally {
             setLoading(false);
         }
