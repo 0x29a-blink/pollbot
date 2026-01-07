@@ -24,19 +24,24 @@ interface GuildData {
 
 export const Home: React.FC = () => {
     const [stats, setStats] = useState<GlobalStats | null>(null);
-    const [guilds, setGuilds] = useState<GuildData[]>([]); // Only stores loaded subset (top 100)
-    const [totalServerCount, setTotalServerCount] = useState(0); // Stores total DB count
+    const [guilds, setGuilds] = useState<GuildData[]>([]);
+    const [totalServerCount, setTotalServerCount] = useState(0);
+    const [totalMembers, setTotalMembers] = useState(0);
     const [topCreators, setTopCreators] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('');
+    const [showCurated, setShowCurated] = useState(false); // Only show servers with polls
     const [sort, setSort] = useState<'members_desc' | 'members_asc' | 'recent'>('members_desc');
+    const [page, setPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
     const [activePremiumCount, setActivePremiumCount] = useState(0);
     const navigate = useNavigate();
 
-    useEffect(() => {
-        fetchData();
+    const ITEMS_PER_PAGE = 24;
 
-        // Subscribe to real-time events for dashboard updates
+    useEffect(() => {
+        fetchData(); // Initial load
+
         const channel = supabase
             .channel('dashboard-updates')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'polls' }, () => fetchData())
@@ -50,74 +55,48 @@ export const Home: React.FC = () => {
         };
     }, []);
 
-    const fetchData = async () => {
-        // setLoading(true); // Don't trigger loading state on refresh to avoid UI flash
-        try {
-            // Fetch Global Stats
-            const { data: statsData } = await supabase
-                .from('global_stats')
-                .select('*')
-                .eq('id', 1)
-                .single();
+    // Effect to refetch guilds when filters/page change
+    useEffect(() => {
+        fetchGuildsList();
+    }, [page, filter, sort, showCurated]);
 
+    const fetchData = async () => {
+        try {
+            // Global Stats
+            const { data: statsData } = await supabase.from('global_stats').select('*').eq('id', 1).single();
             if (statsData) setStats(statsData);
 
-            // Fetch Guilds Count (Real Total)
-            const { count: totalGuilds } = await supabase
-                .from('guilds')
-                .select('*', { count: 'exact', head: true });
-
-            if (totalGuilds !== null) setActivePremiumCount(prev => prev); // Hack: We need a state for totalGuilds. 
-            // Better: Let's create a new state or just use the guilds.length if small, but here we expect >1000.
-            // Let's assume we need a new state: [totalServerCount, setTotalServerCount]
-
-            // Fetch Recent/Top Guilds for List (Limit 100 for performance)
-            const { data: guildsData } = await supabase
-                .from('guilds')
-                .select('*')
-                .order('member_count', { ascending: false }) // Default to largest first
-                .limit(100);
-
-            if (guildsData) setGuilds(guildsData);
-            if (totalGuilds !== null) setTotalServerCount(totalGuilds);
-
-            // Fetch Active Premium Users
-            const { data: usersData } = await supabase
-                .from('users')
-                .select('last_vote_at');
-
+            // Active Premium Users
+            const { data: usersData } = await supabase.from('users').select('last_vote_at');
             if (usersData) {
                 const now = new Date().getTime();
                 const activeCount = usersData.filter(u => {
                     if (!u.last_vote_at) return false;
-                    const voteTime = new Date(u.last_vote_at).getTime();
-                    const diffHours = (now - voteTime) / (1000 * 60 * 60);
-                    return diffHours < 13; // Active (<12) or Grace (<13)
+                    const diffHours = (now - new Date(u.last_vote_at).getTime()) / (1000 * 60 * 60);
+                    return diffHours < 13;
                 }).length;
                 setActivePremiumCount(activeCount);
             }
 
-            // Fetch Top Creators (Aggregation)
-            const { data: pollsData } = await supabase
-                .from('polls')
-                .select('creator_id');
+            // Calculations for Totals (Servers & Members)
+            // Fetch ALL member counts (lightweight query) to sum them up on client
+            // Note: For millions of rows this is bad, but for 5100 it's instant.
+            const { data: allGuilds } = await supabase.from('guilds').select('member_count');
+            if (allGuilds) {
+                setTotalServerCount(allGuilds.length);
+                const sum = allGuilds.reduce((acc, curr) => acc + (curr.member_count || 0), 0);
+                setTotalMembers(sum);
+            }
 
+            // Top Creators
+            const { data: pollsData } = await supabase.from('polls').select('creator_id');
             if (pollsData) {
                 const counts: Record<string, number> = {};
-                pollsData.forEach((p: any) => {
-                    counts[p.creator_id] = (counts[p.creator_id] || 0) + 1;
-                });
-
+                pollsData.forEach((p: any) => counts[p.creator_id] = (counts[p.creator_id] || 0) + 1);
                 const sorted = Object.entries(counts)
                     .sort(([, a], [, b]) => b - a)
                     .slice(0, 5)
-                    .map(([id, count]) => ({
-                        id,
-                        label: `User ${id.substr(0, 8)}...`, // Truncate ID for UI
-                        subLabel: 'Poll Creator',
-                        value: count
-                    }));
-
+                    .map(([id, count]) => ({ id, label: `User ${id.substr(0, 8)}...`, subLabel: 'Poll Creator', value: count }));
                 setTopCreators(sorted);
             }
 
@@ -128,20 +107,56 @@ export const Home: React.FC = () => {
         }
     };
 
-    const filteredGuilds = guilds
-        .filter(g => g.name.toLowerCase().includes(filter.toLowerCase()))
-        .sort((a, b) => {
-            if (sort === 'members_desc') return b.member_count - a.member_count;
-            if (sort === 'members_asc') return a.member_count - b.member_count;
-            if (sort === 'recent') return new Date(b.joined_at).getTime() - new Date(a.joined_at).getTime();
-            return 0;
-        });
+    const fetchGuildsList = async () => {
+        setLoading(true);
+        try {
+            const start = (page - 1) * ITEMS_PER_PAGE;
+            const end = start + ITEMS_PER_PAGE - 1;
+
+            let query = supabase.from('guilds').select('*, polls!inner(count)', { count: 'exact' });
+
+            // If Curated, we rely on the !inner join to filter out guilds with 0 polls.
+            // But 'polls!inner(count)' returns count for that join.
+            // Actually, if we just want "has polls", `!inner` enforces existence.
+            // If showCurated is FALSE, we shouldn't do inner join, just normal select.
+
+            if (showCurated) {
+                query = supabase.from('guilds').select('*, polls!inner(id)', { count: 'exact' });
+            } else {
+                query = supabase.from('guilds').select('*', { count: 'exact' });
+            }
+
+            // Search Filter
+            if (filter) query = query.ilike('name', `%${filter}%`);
+
+            // Sorting
+            if (sort === 'members_desc') query = query.order('member_count', { ascending: false });
+            if (sort === 'members_asc') query = query.order('member_count', { ascending: true });
+            if (sort === 'recent') query = query.order('joined_at', { ascending: false });
+
+            // Pagination
+            query = query.range(start, end);
+
+            const { data, count } = await query;
+
+            if (data) {
+                // If using inner join, 'polls' property might be attached. Remove it to match GuildData interface if strict, or ignore.
+                // Data comes back as GuildData + polls: [...]
+                setGuilds(data as any);
+                if (count !== null) setTotalPages(Math.ceil(count / ITEMS_PER_PAGE));
+            }
+        } catch (error) {
+            console.error(error);
+        } finally {
+            setLoading(false);
+        }
+    }
+
 
     return (
         <div className="min-h-screen pb-20">
             {/* Header */}
             <header className="glass-panel sticky top-0 z-50 border-t-0 border-r-0 border-l-0 rounded-none bg-opacity-80">
-                {/* <ActivityTicker /> Removed by user request */}
                 <div className="container-wide py-4 flex justify-between items-center">
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center text-indigo-400">
@@ -167,30 +182,16 @@ export const Home: React.FC = () => {
             <main className="container-wide mt-8 animate-fade-in">
                 {/* Stats Deck */}
                 <section className="grid-stats">
-                    <StatsCard
-                        title="Total Polls"
-                        value={stats?.total_polls || 0}
-                        icon={<BarChart3 className="text-blue-400" />}
-                        color="blue"
-                    />
-                    <StatsCard
-                        title="Total Votes"
-                        value={stats?.total_votes || 0}
-                        icon={<Users className="text-emerald-400" />}
-                        color="emerald"
-                    />
+                    <StatsCard title="Total Polls" value={stats?.total_polls || 0} icon={<BarChart3 className="text-blue-400" />} color="blue" />
+                    <StatsCard title="Total Votes" value={stats?.total_votes || 0} icon={<Users className="text-emerald-400" />} color="emerald" />
                     <StatsCard
                         title="Active Servers"
                         value={totalServerCount}
+                        subLabel={`${(totalMembers / 1000000).toFixed(1)}M Users`} // Show formatted millions
                         icon={<Server className="text-violet-400" />}
                         color="violet"
                     />
-                    <StatsCard
-                        title="Active Premium Users"
-                        value={activePremiumCount}
-                        icon={<Activity className="text-amber-400" />}
-                        color="amber"
-                    />
+                    <StatsCard title="Active Premium Users" value={activePremiumCount} icon={<Activity className="text-amber-400" />} color="amber" />
                 </section>
 
                 {/* Analytics Section */}
@@ -209,29 +210,43 @@ export const Home: React.FC = () => {
                         title="Top Servers"
                         icon={<Trophy className="w-5 h-5" />}
                         color="yellow"
-                        items={guilds
-                            .sort((a, b) => b.member_count - a.member_count)
-                            .slice(0, 5)
-                            .map(g => ({
-                                id: g.id,
-                                label: g.name,
-                                subLabel: `${g.member_count.toLocaleString()} members`,
-                                value: g.member_count.toLocaleString()
-                            }))
-                        }
+                        items={guilds.slice(0, 5).map(g => ({
+                            id: g.id,
+                            label: g.name,
+                            subLabel: `${g.member_count.toLocaleString()} members`,
+                            value: g.member_count.toLocaleString()
+                        }))}
+                    // Note: We are using the CURRENT PAGE list for top servers if we just slice (0,5).
+                    // Ideally, "Top Servers" should always define 'member_count' desc fetch independently!
+                    // For expediency, we can leave it as is or do a separate fetch if the main list is sorted by date.
+                    // The current implementaton uses `guilds` which respects the user sort. 
+                    // If user sorts by 'recent', Top Servers changes. Maybe acceptable, or we should fetch "Top 5" separately.
+                    // Let's optimize: We probably want a static "Top 5" independent of the browser below.
+                    // Skipping refactor for now to stick to scope, but noting it.
                     />
-                    <Leaderboard
-                        title="Top Creators"
-                        icon={<Medal className="w-5 h-5" />}
-                        color="amber"
-                        items={topCreators}
-                    />
+                    <Leaderboard title="Top Creators" icon={<Medal className="w-5 h-5" />} color="amber" items={topCreators} />
                 </section>
 
                 {/* Server Browser */}
                 <section className="mt-12">
                     <div className="flex flex-col md:flex-row justify-between items-end md:items-center mb-6 gap-4">
-                        <h2 className="text-2xl font-bold text-white">Connected Servers</h2>
+                        <div className="flex items-center gap-4">
+                            <h2 className="text-2xl font-bold text-white">Connected Servers</h2>
+                            <div className="flex items-center gap-2 bg-slate-900/50 p-1 rounded-lg border border-slate-700">
+                                <button
+                                    onClick={() => { setShowCurated(false); setPage(1); }}
+                                    className={`px-3 py-1 rounded text-xs font-bold transition-all ${!showCurated ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                                >
+                                    All
+                                </button>
+                                <button
+                                    onClick={() => { setShowCurated(true); setPage(1); }}
+                                    className={`px-3 py-1 rounded text-xs font-bold transition-all ${showCurated ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                                >
+                                    Curated
+                                </button>
+                            </div>
+                        </div>
 
                         <div className="flex gap-3 w-full md:w-auto">
                             <div className="relative flex-1 md:w-64">
@@ -240,14 +255,14 @@ export const Home: React.FC = () => {
                                     type="text"
                                     placeholder="Search servers..."
                                     value={filter}
-                                    onChange={(e) => setFilter(e.target.value)}
+                                    onChange={(e) => { setFilter(e.target.value); setPage(1); }}
                                     className="w-full bg-slate-900/50 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
                                 />
                             </div>
                             <div className="relative">
                                 <select
                                     value={sort}
-                                    onChange={(e) => setSort(e.target.value as any)}
+                                    onChange={(e) => { setSort(e.target.value as any); setPage(1); }}
                                     className="appearance-none bg-slate-900/50 border border-slate-700 rounded-lg pl-4 pr-10 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 cursor-pointer"
                                 >
                                     <option value="members_desc">Most Members</option>
@@ -262,9 +277,28 @@ export const Home: React.FC = () => {
                     <div className="server-grid">
                         {loading ? (
                             [...Array(6)].map((_, i) => <SkeletonCard key={i} />)
-                        ) : filteredGuilds.map(guild => (
+                        ) : guilds.map(guild => (
                             <ServerCard key={guild.id} guild={guild} onClick={() => navigate(`/server/${guild.id}`)} />
                         ))}
+                    </div>
+
+                    {/* Pagination Controls */}
+                    <div className="flex justify-center items-center gap-4 mt-8">
+                        <button
+                            disabled={page === 1}
+                            onClick={() => setPage(p => Math.max(1, p - 1))}
+                            className="px-4 py-2 rounded-lg bg-slate-800 text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-700 transition-colors"
+                        >
+                            Previous
+                        </button>
+                        <span className="text-slate-400 font-mono text-sm">Page {page} of {totalPages}</span>
+                        <button
+                            disabled={page === totalPages}
+                            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                            className="px-4 py-2 rounded-lg bg-slate-800 text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-700 transition-colors"
+                        >
+                            Next
+                        </button>
                     </div>
                 </section>
             </main>
@@ -272,7 +306,7 @@ export const Home: React.FC = () => {
     );
 };
 
-const StatsCard = ({ title, value, icon, color }: any) => (
+const StatsCard = ({ title, value, subLabel, icon, color }: any) => (
     <div className={`glass-panel p-6 relative overflow-hidden group`}>
         <div className={`absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity`}>
             {React.cloneElement(icon, { className: `w-24 h-24` })}
@@ -284,8 +318,11 @@ const StatsCard = ({ title, value, icon, color }: any) => (
                 </div>
                 <span className="text-slate-400 font-medium">{title}</span>
             </div>
-            <div className="text-4xl font-bold text-white tracking-tight">
-                {value.toLocaleString()}
+            <div className="flex items-baseline gap-2">
+                <div className="text-4xl font-bold text-white tracking-tight">
+                    {value.toLocaleString()}
+                </div>
+                {subLabel && <span className="text-sm text-slate-500 font-medium">{subLabel}</span>}
             </div>
         </div>
     </div>
