@@ -82,7 +82,7 @@ export const PollCard: React.FC<PollCardProps> = ({ poll, votes = {}, guild }) =
                                     return (
                                         <div key={i} className="relative">
                                             <div className="flex justify-between text-sm text-slate-300 mb-1 z-10 relative">
-                                                <span>{opt.text || opt.label}</span>
+                                                <span>{typeof opt === 'string' ? opt : (opt.text || opt.label)}</span>
                                                 <span className="font-mono text-indigo-300">{count}</span>
                                             </div>
                                             <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
