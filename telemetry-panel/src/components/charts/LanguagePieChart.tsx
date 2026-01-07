@@ -63,7 +63,7 @@ export const LanguagePieChart: React.FC = () => {
                 </div>
             </div>
 
-            <div className="h-64 w-full flex items-center justify-center" style={{ width: '100%', height: '300px' }}>
+            <div className="h-64 w-full flex items-center justify-center" style={{ width: '100%', height: '300px', minWidth: 0 }}>
                 {data.length > 0 ? (
                     <ResponsiveContainer width="99%" height="100%">
                         <PieChart>
@@ -74,14 +74,14 @@ export const LanguagePieChart: React.FC = () => {
                                 paddingAngle={5}
                                 dataKey="value"
                             >
-                                {data.map((entry, index) => (
+                                {data.map((_, index) => (
                                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} stroke="rgba(0,0,0,0)" />
                                 ))}
                             </Pie>
                             <Tooltip
                                 contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff' }}
                                 itemStyle={{ color: '#fff' }}
-                                formatter={(value: number, name: string) => [`${value} Servers`, name]}
+                                formatter={(value: number | undefined, name: any) => [`${value} Servers`, name]}
                             />
                             <Legend iconType="circle" />
                         </PieChart>

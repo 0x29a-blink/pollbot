@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
 import { supabase } from '../../lib/supabase';
 import { motion } from 'framer-motion';
 import { TrendingUp } from 'lucide-react';
@@ -72,7 +72,7 @@ export const VoteHistoryChart: React.FC = () => {
                 </div>
             </div>
 
-            <div className="h-64 w-full" style={{ width: '100%', height: '300px' }}>
+            <div className="h-64 w-full" style={{ width: '100%', height: '300px', minWidth: 0 }}>
                 <ResponsiveContainer width="99%" height="100%">
                     <AreaChart data={data}>
                         <defs>
