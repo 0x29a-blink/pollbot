@@ -72,7 +72,7 @@ export const VoteHistoryChart: React.FC = () => {
                 </div>
             </div>
 
-            <div className="h-64 w-full">
+            <div className="h-64 w-full" style={{ width: '100%', height: '300px' }}>
                 <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={data}>
                         <defs>
