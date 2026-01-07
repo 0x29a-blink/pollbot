@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, Filter, SortDesc, TrendingUp } from 'lucide-react';
+import { ArrowLeft, SortDesc, TrendingUp, X } from 'lucide-react';
 import { PollCard } from '../components/PollCard';
-import type { Poll } from '../types';
 
 export const PollsView: React.FC = () => {
     const navigate = useNavigate();
@@ -129,6 +128,17 @@ export const PollsView: React.FC = () => {
                     <div>
                         <h1 className="text-3xl font-bold text-white mb-2">Global Polls View</h1>
                         <p className="text-slate-400">Viewing latest {displayPolls.length} polls across all servers</p>
+                        {userIdFilter && (
+                            <div className="flex items-center gap-2 mt-4 bg-indigo-500/20 w-fit px-3 py-1 rounded-lg border border-indigo-500/30">
+                                <span className="text-indigo-300 text-sm">Filtered by Creator: <span className="font-mono">{userIdFilter}</span></span>
+                                <button
+                                    onClick={() => navigate('/polls')}
+                                    className="p-1 hover:bg-indigo-500/20 rounded-full text-indigo-400 transition-colors"
+                                >
+                                    <X className="w-3 h-3" />
+                                </button>
+                            </div>
+                        )}
                     </div>
 
                     <div className="flex flex-col sm:flex-row gap-4">

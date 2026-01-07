@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, Filter } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { PollCard } from '../components/PollCard';
 import type { Poll, GuildData } from '../types';
 
@@ -101,6 +101,7 @@ export const ServerView: React.FC = () => {
                                     <h1 className="text-4xl font-bold text-white mb-2">{guild?.name}</h1>
                                     <div className="flex gap-4 text-slate-400 text-sm">
                                         <span className="bg-slate-800 px-3 py-1 rounded-full">{polls.length} Polls Created</span>
+                                        <span className="bg-slate-800 px-3 py-1 rounded-full">{guild?.member_count?.toLocaleString() || 0} Members</span>
                                         <span className="bg-slate-800 px-3 py-1 rounded-full">ID: {guild?.id}</span>
                                     </div>
                                 </div>

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { ArrowLeft, Search, CheckCircle, XCircle, Clock } from 'lucide-react';
-import { motion } from 'framer-motion';
+
 
 interface UserData {
     id: string;

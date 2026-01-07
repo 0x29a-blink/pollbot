@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { motion } from 'framer-motion';
-import { Activity, Users, BarChart3, Search, Filter, Server, Trophy, Medal } from 'lucide-react';
+import { Activity, Users, BarChart3, Search, Filter, Server, Trophy, Medal, RefreshCw } from 'lucide-react';
+import { PasswordModal } from '../components/PasswordModal';
 import { useNavigate } from 'react-router-dom';
 import { VoteHistoryChart } from '../components/charts/VoteHistoryChart';
 import { LanguagePieChart } from '../components/charts/LanguagePieChart';
@@ -31,10 +32,11 @@ export const Home: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('');
     const [showCurated, setShowCurated] = useState(false); // Only show servers with polls
-    const [sort, setSort] = useState<'members_desc' | 'members_asc' | 'recent'>('members_desc');
+    const [sort, setSort] = useState<'members_desc' | 'members_asc' | 'recent' | 'polls_desc' | 'ratio_desc'>('members_desc');
     const [page, setPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
     const [activePremiumCount, setActivePremiumCount] = useState(0);
+    const [isRefreshModalOpen, setIsRefreshModalOpen] = useState(false);
     const navigate = useNavigate();
 
     const ITEMS_PER_PAGE = 24;
@@ -98,7 +100,13 @@ export const Home: React.FC = () => {
                 const sorted = Object.entries(counts)
                     .sort(([, a], [, b]) => b - a)
                     .slice(0, 5)
-                    .map(([id, count]) => ({ id, label: `User ${id.substr(0, 8)}...`, subLabel: 'Poll Creator', value: count }));
+                    .map(([id, count]) => ({
+                        id,
+                        label: `User ${id.substr(0, 8)}...`,
+                        subLabel: 'Poll Creator',
+                        value: count,
+                        onClick: () => navigate(`/polls?user_id=${id}`) // Add navigation
+                    }));
                 setTopCreators(sorted);
             }
 
@@ -107,6 +115,11 @@ export const Home: React.FC = () => {
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleRefreshData = () => {
+        fetchData();
+        fetchGuildsList();
     };
 
     const fetchGuildsList = async () => {
@@ -156,7 +169,77 @@ export const Home: React.FC = () => {
             if (sort === 'members_asc') query = query.order('member_count', { ascending: true });
             if (sort === 'recent') query = query.order('joined_at', { ascending: false });
 
-            // Pagination
+            // Advanced Analytics Sorting (Client-side mainly since no DB views yet)
+            if (sort === 'polls_desc' || sort === 'ratio_desc') {
+                // Fetch ALL polls to aggregate stats (Heavy operation, but needed for this specific filter)
+                const { data: allPolls } = await supabase.from('polls').select('guild_id, message_id');
+
+                if (allPolls) {
+                    const guildStats: Record<string, { polls: number, votes: number }> = {};
+                    allPolls.forEach(p => {
+                        if (!guildStats[p.guild_id]) guildStats[p.guild_id] = { polls: 0, votes: 0 };
+                        guildStats[p.guild_id].polls++;
+                    });
+
+                    // For Ratio, we need votes too.
+                    if (sort === 'ratio_desc') {
+                        const { data: allVotes } = await supabase.from('votes').select('poll_id');
+                        const pollToGuild = new Map(allPolls.map(p => [p.message_id, p.guild_id]));
+
+                        if (allVotes) {
+                            allVotes.forEach(v => {
+                                const gId = pollToGuild.get(v.poll_id);
+                                if (gId && guildStats[gId]) {
+                                    guildStats[gId].votes++;
+                                }
+                            });
+                        }
+                    }
+
+                    // Sort Guild IDs based on stats
+                    const sortedGuildIds = Object.entries(guildStats)
+                        .sort(([, statA], [, statB]) => {
+                            if (sort === 'polls_desc') return statB.polls - statA.polls;
+                            if (sort === 'ratio_desc') {
+                                const ratioA = statA.polls > 0 ? statA.votes / statA.polls : 0;
+                                const ratioB = statB.polls > 0 ? statB.votes / statB.polls : 0;
+                                return ratioB - ratioA;
+                            }
+                            return 0;
+                        })
+                        .map(([id]) => id);
+
+                    // Now filter the query to these IDs and ideally preserve order (Supabase doesn't preserve order of IN clause easily)
+                    // So we fetch matching guilds and sort in memory
+                    if (sortedGuildIds.length > 0) {
+                        query = query.in('id', sortedGuildIds);
+                    } else {
+                        setGuilds([]);
+                        setLoading(false);
+                        return;
+                    }
+
+                    // execute query
+                    const { data: unsortedData } = await query;
+
+                    if (unsortedData) {
+                        // Re-sort client side
+                        const sortedData = unsortedData.sort((a, b) => {
+                            return sortedGuildIds.indexOf(a.id) - sortedGuildIds.indexOf(b.id);
+                        });
+
+                        // Pagination slice handling for client-side sorted list
+                        // Note: This logic retrieves ALL matching guilds then slices. 
+                        // It defies the backend pagination but is necessary for these computed sorts without DB func.
+                        setTotalPages(Math.ceil(sortedData.length / ITEMS_PER_PAGE));
+                        setGuilds(sortedData.slice(start, end + 1));
+                    }
+                    setLoading(false);
+                    return; // Return early since we handled data setting
+                }
+            }
+
+            // Pagination (Standard)
             query = query.range(start, end);
 
             const { data, count } = await query;
@@ -176,6 +259,13 @@ export const Home: React.FC = () => {
 
     return (
         <div className="min-h-screen pb-20">
+            <PasswordModal
+                isOpen={isRefreshModalOpen}
+                onClose={() => setIsRefreshModalOpen(false)}
+                onSuccess={handleRefreshData}
+                title="Refresh Guild Data"
+                description="This action re-syncs dashboard analytics. Please enter your key to confirm."
+            />
             {/* Header */}
             <header className="glass-panel sticky top-0 z-50 border-t-0 border-r-0 border-l-0 rounded-none bg-opacity-80">
                 <div className="container-wide py-4 flex justify-between items-center">
@@ -189,6 +279,10 @@ export const Home: React.FC = () => {
                     <div className="flex items-center gap-4">
                         <button onClick={() => navigate('/polls')} className="text-sm font-bold text-indigo-400 hover:text-indigo-300">Global Polls</button>
                         <button onClick={() => navigate('/voters')} className="text-sm font-bold text-indigo-400 hover:text-indigo-300">Voters</button>
+                        <button onClick={() => setIsRefreshModalOpen(true)} className="flex items-center gap-2 text-sm font-bold text-emerald-400 hover:text-emerald-300 transition-colors">
+                            <RefreshCw className="w-4 h-4" />
+                            Refresh
+                        </button>
                         <div className="h-4 w-px bg-slate-700"></div>
                         <button
                             onClick={() => { localStorage.removeItem('telemetry_key'); navigate('/login'); }}
@@ -289,6 +383,8 @@ export const Home: React.FC = () => {
                                     <option value="members_desc">Most Members</option>
                                     <option value="members_asc">Least Members</option>
                                     <option value="recent">Recently Joined</option>
+                                    <option value="polls_desc">Most Polls</option>
+                                    <option value="ratio_desc">Highest Engagement</option>
                                 </select>
                                 <Filter className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
                             </div>

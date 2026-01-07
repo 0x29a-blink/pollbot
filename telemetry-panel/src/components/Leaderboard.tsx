@@ -1,6 +1,5 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Trophy, Medal, Star } from 'lucide-react';
 
 interface LeaderboardProps {
     title: string;
@@ -12,6 +11,7 @@ interface LeaderboardProps {
         subLabel?: string;
         value: string | number;
         rank?: number;
+        onClick?: () => void;
     }[];
 }
 
@@ -37,7 +37,11 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ title, icon, color, it
                     <div className="text-center text-slate-500 py-4 text-sm">No data available</div>
                 ) : (
                     items.map((item, index) => (
-                        <div key={item.id} className="flex items-center gap-4 group">
+                        <div
+                            key={item.id}
+                            onClick={item.onClick}
+                            className={`flex items-center gap-4 group ${item.onClick ? 'cursor-pointer' : ''}`}
+                        >
                             <div className={`w-8 h-8 flex items-center justify-center rounded-full font-bold text-sm
                                 ${index === 0 ? 'bg-yellow-500/20 text-yellow-400' :
                                     index === 1 ? 'bg-slate-400/20 text-slate-300' :
@@ -48,7 +52,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ title, icon, color, it
                             </div>
 
                             <div className="flex-1 min-w-0">
-                                <div className="text-white text-sm font-medium truncate group-hover:text-indigo-300 transition-colors">
+                                <div className={`text-white text-sm font-medium truncate transition-colors ${item.onClick ? 'group-hover:text-indigo-400' : 'group-hover:text-indigo-300'}`}>
                                     {item.label}
                                 </div>
                                 {item.subLabel && <div className="text-xs text-slate-500 truncate">{item.subLabel}</div>}
