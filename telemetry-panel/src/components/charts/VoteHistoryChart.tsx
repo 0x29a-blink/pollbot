@@ -73,7 +73,7 @@ export const VoteHistoryChart: React.FC = () => {
             </div>
 
             <div className="h-64 w-full" style={{ width: '100%', height: '300px' }}>
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="99%" height="100%">
                     <AreaChart data={data}>
                         <defs>
                             <linearGradient id="colorVotes" x1="0" y1="0" x2="0" y2="1">

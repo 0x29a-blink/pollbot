@@ -65,7 +65,7 @@ export const LanguagePieChart: React.FC = () => {
 
             <div className="h-64 w-full flex items-center justify-center" style={{ width: '100%', height: '300px' }}>
                 {data.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="99%" height="100%">
                         <PieChart>
                             <Pie
                                 data={data}

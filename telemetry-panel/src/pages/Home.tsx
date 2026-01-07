@@ -123,8 +123,7 @@ export const Home: React.FC = () => {
             // If showCurated is FALSE, we shouldn't do inner join, just normal select.
 
             if (showCurated) {
-                // Use explicit foreign key name to avoid ambiguity or detection issues
-                query = supabase.from('guilds').select('*, polls!fk_polls_guild!inner(id)', { count: 'exact' });
+                query = supabase.from('guilds').select('*, polls!inner(id)', { count: 'exact' });
             } else {
                 query = supabase.from('guilds').select('*', { count: 'exact' });
             }
@@ -149,7 +148,8 @@ export const Home: React.FC = () => {
                 if (count !== null) setTotalPages(Math.ceil(count / ITEMS_PER_PAGE));
             }
         } catch (error) {
-            console.error(error);
+            console.error('Error fetching guilds:', error);
+            setGuilds([]); // Clear list on error so user sees no results instead of stale data
         } finally {
             setLoading(false);
         }
