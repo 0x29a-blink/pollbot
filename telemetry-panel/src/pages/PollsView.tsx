@@ -19,6 +19,7 @@ export const PollsView: React.FC = () => {
 
     useEffect(() => {
         setPolls([]);
+        setVoteCounts({}); // Reset vote counts to prevent accumulation
         setPage(1);
         setHasMore(true);
         fetchPolls(1, true);

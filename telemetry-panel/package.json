@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "start": "serve -s dist -l 4173",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -16,7 +17,8 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.11.0",
-    "recharts": "^3.6.0"
+    "recharts": "^3.6.0",
+    "serve": "^14.2.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
