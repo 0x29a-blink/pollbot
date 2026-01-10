@@ -4,8 +4,6 @@
     "@types/localtunnel": "^2.0.4",
     "@types/node": "^25.0.3",
     "@types/ws": "^8.18.1",
-    "discord.js": "^14.25.1",
-    "dotenv": "^17.2.3",
     "supabase": "^2.70.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
@@ -25,6 +23,8 @@
     "@supabase/supabase-js": "^2.89.0",
     "@top-gg/sdk": "^3.1.6",
     "cloudflared": "^0.7.1",
+    "discord.js": "^14.25.1",
+    "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "localtunnel": "^2.0.2",
     "playwright": "^1.57.0",

@@ -219,7 +219,8 @@
             "removed_success": "Removed {{role}} role from {{user}}.",
             "manage_fail": "An error occurred while managing the Poll Manager role.",
             "missing_perms_create": "I am missing permissions to create roles! Please ensure I have the \"Manage Roles\" permission.",
-            "missing_perms_manage": "I am missing permissions to manage this user's roles! Please ensure I have the \"Manage Roles\" permission and that my highest role is above the \"Poll Manager\" role."
+            "missing_perms_manage": "I am missing permissions to manage this user's roles! Please ensure I have the \"Manage Roles\" permission and that my highest role is above the \"Poll Manager\" role.",
+            "view_details_button": "View Details"
         }
     },
     "stats": {

@@ -1,23 +1,13 @@
--- 4. Create global_stats table
--- Tracks lifetime stats that persist even if polls/votes are deleted
-CREATE TABLE IF NOT EXISTS global_stats (
-    id INT PRIMARY KEY DEFAULT 1,
-    total_polls BIGINT DEFAULT 0,
-    total_votes BIGINT DEFAULT 0,
-    peak_active_servers INT DEFAULT 0,
-    last_updated TIMESTAMPTZ DEFAULT NOW(),
-    CONSTRAINT global_stats_id_check CHECK (id = 1)
-);
+-- 02_triggers.sql
+-- Triggers for automatic global_stats updates
+-- Fixed: Added explicit search_path to prevent security warnings
 
--- Initialize the row if it doesn't exist, using current counts as baseline
--- In a fresh migration run, polls and votes are empty, so 0 is correct.
-INSERT INTO global_stats (id, total_polls, total_votes)
-VALUES (1, 0, 0)
-ON CONFLICT (id) DO NOTHING;
-
--- Function and Trigger for Polls
+-- Function for poll count (with fixed search_path)
 CREATE OR REPLACE FUNCTION update_global_poll_count()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER 
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
     UPDATE global_stats
     SET total_polls = total_polls + 1,
@@ -33,9 +23,12 @@ AFTER INSERT ON polls
 FOR EACH ROW
 EXECUTE FUNCTION update_global_poll_count();
 
--- Function and Trigger for Votes
+-- Function for vote count (with fixed search_path)
 CREATE OR REPLACE FUNCTION update_global_vote_count()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
     UPDATE global_stats
     SET total_votes = total_votes + 1,

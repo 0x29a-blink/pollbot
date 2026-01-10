@@ -5,10 +5,16 @@ export interface Poll {
     creator_id: string;
     title: string;
     description: string;
-    options: any[]; // JSONB
+    options: string[];
     settings: {
         public: boolean;
         allow_thread: boolean;
+        allow_close: boolean;
+        max_votes: number;
+        min_votes: number;
+        allowed_roles: string[];
+        vote_weights: Record<string, number>;
+        allow_exports: boolean;
     };
     created_at: string;
     active: boolean;

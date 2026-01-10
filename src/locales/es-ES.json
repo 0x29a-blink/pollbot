@@ -219,7 +219,8 @@
             "removed_success": "Eliminado el rol {{role}} de {{user}}.",
             "manage_fail": "Ocurrió un error al gestionar el rol Poll Manager.",
             "missing_perms_create": "¡Me faltan permisos para crear roles! Por favor asegúrate de que tengo el permiso \"Gestionar Roles\".",
-            "missing_perms_manage": "¡Me faltan permisos para gestionar los roles de este usuario! Por favor asegúrate de que tengo el permiso \"Gestionar Roles\" y que mi rol más alto está por encima del rol \"Poll Manager\"."
+            "missing_perms_manage": "¡Me faltan permisos para gestionar los roles de este usuario! Por favor asegúrate de que tengo el permiso \"Gestionar Roles\" y que mi rol más alto está por encima del rol \"Poll Manager\".",
+            "view_details_button": "Ver Detalles"
         }
     },
     "stats": {

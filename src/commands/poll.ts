@@ -232,7 +232,7 @@ export default {
             if (serverAllowsButtons) {
                 const viewButton = new ButtonBuilder()
                     .setCustomId('view_details') // Static ID, we get ID from message context
-                    .setLabel('View Details') // TODO: Localize?
+                    .setLabel(I18n.t('messages.manager.view_details_button', serverLocale))
                     .setStyle(ButtonStyle.Secondary)
                     .setEmoji('📊');
                 row2.addComponents(viewButton);
