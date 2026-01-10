@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "start": "serve -s dist -l 4173",
+    "start": "serve -s dist -l 6000",
     "lint": "eslint .",
     "preview": "vite preview"
   },
