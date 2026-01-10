@@ -169,7 +169,8 @@
             "vote_fail": "Failed to record your vote. Please try again.",
             "orphaned": "This poll is no longer valid.",
             "db_missing": "This poll no longer exists in the database.",
-            "perms_missing_bot": "I am missing permissions to update the poll image."
+            "perms_missing_bot": "I am missing permissions to update the poll image.",
+            "thread_fail": "Poll created, but failed to create a thread due to missing permissions."
         },
         "export": {
             "not_found": "Poll not found or no votes recorded.",

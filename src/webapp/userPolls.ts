@@ -1,0 +1,176 @@
+import { Router, Request, Response } from 'express';
+import { supabase } from '../lib/db';
+import { logger } from '../lib/logger';
+
+const router = Router();
+
+const DISCORD_API_BASE = 'https://discord.com/api/v10';
+const MANAGE_GUILD = 0x20; // 32
+const PERMISSION_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+interface DiscordGuild {
+    id: string;
+    name: string;
+    icon: string | null;
+    owner: boolean;
+    permissions: string;
+}
+
+// Cache for permission verification to avoid hitting Discord API rate limits
+// Key: `${userId}:${guildId}`, Value: { hasPermission: boolean, timestamp: number }
+const permissionCache = new Map<string, { hasPermission: boolean; timestamp: number }>();
+
+function getCachedPermission(userId: string, guildId: string): boolean | null {
+    const key = `${userId}:${guildId}`;
+    const cached = permissionCache.get(key);
+    if (cached && Date.now() - cached.timestamp < PERMISSION_CACHE_TTL) {
+        return cached.hasPermission;
+    }
+    return null;
+}
+
+function setCachedPermission(userId: string, guildId: string, hasPermission: boolean): void {
+    const key = `${userId}:${guildId}`;
+    permissionCache.set(key, { hasPermission, timestamp: Date.now() });
+}
+
+/**
+ * GET /api/user/polls/:guildId
+ * Returns all polls in a server (requires Manage Guild permission)
+ */
+router.get('/polls/:guildId', async (req: Request, res: Response) => {
+    const { guildId } = req.params;
+    const authHeader = req.headers.authorization;
+    const sessionId = authHeader?.replace('Bearer ', '');
+
+    if (!guildId) {
+        return res.status(400).json({ error: 'Guild ID is required' });
+    }
+
+    if (!sessionId) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    try {
+        // Get session with access token
+        const { data: session, error: sessionError } = await supabase
+            .from('dashboard_sessions')
+            .select('user_id, access_token, expires_at')
+            .eq('id', sessionId)
+            .single();
+
+        if (sessionError || !session) {
+            return res.status(401).json({ error: 'Invalid session' });
+        }
+
+        if (new Date(session.expires_at).getTime() < Date.now()) {
+            return res.status(401).json({ error: 'Session expired' });
+        }
+
+        // Check cached permission first to avoid Discord API rate limits
+        const cachedPermission = getCachedPermission(session.user_id, guildId);
+        
+        if (cachedPermission === false) {
+            return res.status(403).json({ error: 'You need Manage Server permission' });
+        }
+
+        // If not cached or cache says true, verify with Discord (but only if not cached)
+        if (cachedPermission === null) {
+            const discordResponse = await fetch(`${DISCORD_API_BASE}/users/@me/guilds`, {
+                headers: {
+                    Authorization: `Bearer ${session.access_token}`,
+                },
+            });
+
+            if (!discordResponse.ok) {
+                // On Discord API failure, don't show error if we have existing data
+                // Just log and return 503 (Service Unavailable) which frontend can handle gracefully
+                logger.error(`[UserPolls] Failed to fetch guilds from Discord (status: ${discordResponse.status})`);
+                if (discordResponse.status === 401) {
+                    return res.status(401).json({ error: 'Discord token expired, please re-login' });
+                }
+                // Return 503 instead of 502 to indicate temporary unavailability
+                return res.status(503).json({ error: 'Discord API temporarily unavailable, please try again' });
+            }
+
+            const userGuilds: DiscordGuild[] = await discordResponse.json();
+
+            // Find the specific guild and check permissions
+            const targetGuild = userGuilds.find(g => g.id === guildId);
+            if (!targetGuild) {
+                setCachedPermission(session.user_id, guildId, false);
+                return res.status(403).json({ error: 'You are not a member of this server' });
+            }
+
+            const permissions = BigInt(targetGuild.permissions);
+            const hasManageGuild = (permissions & BigInt(MANAGE_GUILD)) !== BigInt(0) || targetGuild.owner;
+
+            // Cache the result
+            setCachedPermission(session.user_id, guildId, hasManageGuild);
+
+            if (!hasManageGuild) {
+                return res.status(403).json({ error: 'You need Manage Server permission' });
+            }
+        }
+
+        // Verify bot is in this guild
+        const { data: botGuild } = await supabase
+            .from('guilds')
+            .select('id, name, icon_url, member_count')
+            .eq('id', guildId)
+            .single();
+
+        if (!botGuild) {
+            return res.status(404).json({ error: 'Bot is not in this server' });
+        }
+
+        // Fetch all polls in this server
+        const { data: polls, error: pollsError } = await supabase
+            .from('polls')
+            .select('*')
+            .eq('guild_id', guildId)
+            .order('created_at', { ascending: false });
+
+        if (pollsError) {
+            logger.error(`[UserPolls] Failed to fetch polls:`, pollsError);
+            return res.status(500).json({ error: 'Failed to fetch polls' });
+        }
+
+        // Get vote counts for each poll
+        const pollsWithVotes = await Promise.all((polls || []).map(async (poll) => {
+            // Get votes grouped by option
+            const { data: votes } = await supabase
+                .from('votes')
+                .select('option_index')
+                .eq('poll_id', poll.message_id);
+
+            const voteCounts: Record<number, number> = {};
+            (votes || []).forEach(vote => {
+                voteCounts[vote.option_index] = (voteCounts[vote.option_index] || 0) + 1;
+            });
+
+            return {
+                ...poll,
+                vote_counts: voteCounts,
+                total_votes: votes?.length || 0,
+            };
+        }));
+
+        logger.info(`[UserPolls] User ${session.user_id} fetched ${pollsWithVotes.length} polls from guild ${guildId} (has Manage Guild permission)`);
+
+        return res.json({
+            guild: {
+                id: botGuild.id,
+                name: botGuild.name,
+                icon_url: botGuild.icon_url,
+                member_count: botGuild.member_count,
+            },
+            polls: pollsWithVotes,
+        });
+    } catch (error) {
+        logger.error('[UserPolls] Error:', error);
+        return res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+export const userPollsRouter = router;

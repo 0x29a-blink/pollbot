@@ -9,9 +9,9 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     server: {
-      port: 6000,
+      port: 7500,
       strictPort: true, // Fail if port 6000 is taken
-      allowedHosts: ['telemetry.pollbot.win', 'localhost'],
+      allowedHosts: ['telemetry.pollbot.win', 'pollbot.win', 'localhost'],
       proxy: {
         '/api': {
           target: 'http://localhost:5000',

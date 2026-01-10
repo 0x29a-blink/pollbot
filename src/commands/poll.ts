@@ -80,7 +80,7 @@ export default {
         const descriptionRaw = interaction.options.getString('description') || '';
         const itemsRaw = interaction.options.getString('items', true);
         const isPublic = interaction.options.getBoolean('public') ?? true;
-        const createThread = interaction.options.getBoolean('thread') ?? false;
+        let createThread = interaction.options.getBoolean('thread') ?? false;
         const minVotes = interaction.options.getInteger('min_votes') ?? 1;
         let maxVotes = interaction.options.getInteger('max_votes');
 
@@ -250,10 +250,25 @@ export default {
 
             // 5. Create Thread if requested
             if (createThread) {
-                await message.startThread({
-                    name: title.substring(0, 100),
-                    autoArchiveDuration: 1440,
-                });
+                try {
+                    await message.startThread({
+                        name: title.substring(0, 100),
+                        autoArchiveDuration: 1440,
+                    });
+                } catch (threadError: any) {
+                    if (threadError.code === 50001 || threadError.code === 50013) {
+                        logger.warn(`Failed to create thread for poll ${message.id}: Missing Permissions`);
+                        await interaction.followUp({
+                            content: I18n.t('messages.poll.thread_fail', interaction.locale),
+                            flags: MessageFlags.Ephemeral
+                        });
+                        createThread = false; // Update state so DB knows thread wasn't created
+                    } else {
+                        // Re-throw other unexpected errors? Or just log and ignore to save the poll?
+                        // Better to log and continue so the poll itself isn't lost.
+                        logger.error('Unexpected error creating thread:', threadError);
+                    }
+                }
             }
 
             // 6. Save to Database

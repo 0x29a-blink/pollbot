@@ -68,7 +68,21 @@ ON CONFLICT (id) DO NOTHING;
 -- 6. users table
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
-    last_vote_at TIMESTAMPTZ
+    last_vote_at TIMESTAMPTZ,
+    username TEXT,
+    discriminator TEXT,
+    avatar_url TEXT,
+    is_admin BOOLEAN DEFAULT FALSE
+);
+
+-- 7. dashboard_sessions table
+CREATE TABLE IF NOT EXISTS dashboard_sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ============================================================================
@@ -76,6 +90,8 @@ CREATE TABLE IF NOT EXISTS users (
 -- ============================================================================
 
 CREATE INDEX IF NOT EXISTS idx_votes_poll_id ON votes(poll_id);
+CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_user_id ON dashboard_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_expires_at ON dashboard_sessions(expires_at);
 
 -- ============================================================================
 -- ROW LEVEL SECURITY
@@ -87,12 +103,14 @@ ALTER TABLE global_stats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE guild_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE guilds ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dashboard_sessions ENABLE ROW LEVEL SECURITY;
 
 -- Service role policies (bot uses service key which bypasses RLS, but explicit is best practice)
 CREATE POLICY "Service role full access" ON polls FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service role full access" ON votes FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service role full access" ON global_stats FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service role full access" ON users FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access" ON dashboard_sessions FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- Public read access for telemetry panel (uses anon key)
 CREATE POLICY "Public read access" ON polls FOR SELECT USING (true);

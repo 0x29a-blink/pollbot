@@ -3,12 +3,32 @@ import { Webhook } from '@top-gg/sdk';
 import { tunnel } from 'cloudflared';
 import { logger } from './lib/logger';
 import { supabase } from './lib/db';
+import { dashboardAuthRouter } from './webapp/dashboardAuth';
 import dotenv from 'dotenv';
+import { ShardingManager } from 'discord.js';
 
 dotenv.config();
 
 const app = express();
 const port = 5000;
+
+// Store reference to sharding manager for sync operations
+let shardingManager: ShardingManager | null = null;
+
+export function setShardingManager(manager: ShardingManager) {
+    shardingManager = manager;
+}
+
+// Dashboard Auth Routes (Discord OAuth)
+app.use('/api/auth', dashboardAuthRouter);
+
+// User Guilds Routes (user's manageable servers)
+import { userGuildsRouter } from './webapp/userGuilds';
+app.use('/api/user', userGuildsRouter);
+
+// User Polls Routes (user's polls in a server)
+import { userPollsRouter } from './webapp/userPolls';
+app.use('/api/user', userPollsRouter);
 
 // Top.gg Webhook
 const webhook = new Webhook(process.env.TOPGG_WEBHOOK_AUTH || 'default_auth');
@@ -17,16 +37,52 @@ app.get('/health', (req, res) => {
     res.status(200).send('OK');
 });
 
-app.use(express.json()); // Ensure JSON body parsing if not already (Top.gg listener might handle it, but for ours we need it)
-// Note: top.gg webhook listener is a middleware.
+app.use(express.json());
 
-app.post('/api/validate-key', (req, res) => {
-    const { key } = req.body;
-    if (key === process.env.TELEMETRY_ACCESS_KEY) {
-        return res.status(200).json({ valid: true });
+// Admin-only endpoint to sync all guilds from Discord
+// This triggers all shards to re-fetch guild data
+const ADMIN_IDS = (process.env.DISCORD_ADMIN_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
+
+app.post('/api/admin/sync-guilds', async (req, res) => {
+    // Verify admin session
+    const authHeader = req.headers.authorization;
+    const sessionId = authHeader?.replace('Bearer ', '');
+
+    if (!sessionId) {
+        return res.status(401).json({ error: 'Unauthorized' });
     }
-    // Simple rate limiting could be added here (e.g. using a Map of IP -> count)
-    return res.status(401).json({ valid: false });
+
+    // Check session and admin status
+    const { data: session } = await supabase
+        .from('dashboard_sessions')
+        .select('user_id')
+        .eq('id', sessionId)
+        .single();
+
+    if (!session || !ADMIN_IDS.includes(session.user_id)) {
+        return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    if (!shardingManager) {
+        logger.warn('[Webhook] Sync requested but ShardingManager not available');
+        return res.status(503).json({ error: 'Bot not ready, try again later' });
+    }
+
+    try {
+        logger.info(`[Webhook] Admin sync triggered by user ${session.user_id}`);
+
+        // Broadcast to all shards to sync their guilds
+        await shardingManager.broadcastEval(client => {
+            // Send message to trigger sync in GuildSyncService
+            process.send?.({ type: 'SYNC_ALL_GUILDS' });
+            return true;
+        });
+
+        return res.json({ success: true, message: 'Guild sync initiated on all shards' });
+    } catch (error) {
+        logger.error('[Webhook] Failed to trigger sync:', error);
+        return res.status(500).json({ error: 'Failed to trigger sync' });
+    }
 });
 
 app.post('/vote', webhook.listener(async (vote) => {
@@ -55,57 +111,66 @@ app.post('/vote', webhook.listener(async (vote) => {
 import { spawn } from 'child_process';
 import path from 'path';
 
-// ... (existing imports except cloudflared)
 
 export async function startWebhookServer() {
     app.listen(port, () => {
         logger.info(`[Webhook] Server listening on port ${port}`);
     });
 
-    if (process.env.CLOUDFLARED_TOKEN) {
-        logger.info('[Webhook] Found CLOUDFLARED_TOKEN, attempting to start tunnel via binary...');
+    // Dynamically locate the cloudflared binary from the npm package
+    const cloudflaredDir = path.dirname(require.resolve('cloudflared'));
+    const binaryName = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared';
+    const binaryPath = path.join(cloudflaredDir, '..', 'bin', binaryName);
 
-        // Dynamically locate the cloudflared binary from the npm package
-        // This ensures it works on Linux, macOS, and Windows regardless of CWD
-        const cloudflaredDir = path.dirname(require.resolve('cloudflared'));
-        const binaryName = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared';
-        // The main entry point is in 'lib', so we need to go up one level to find the 'bin' folder
-        const binaryPath = path.join(cloudflaredDir, '..', 'bin', binaryName);
-
+    // Helper to start a tunnel
+    const startTunnel = (token: string, name: string) => {
         try {
-            const child = spawn(binaryPath, ['tunnel', 'run', '--token', process.env.CLOUDFLARED_TOKEN]);
+            const child = spawn(binaryPath, ['tunnel', 'run', '--token', token]);
 
             child.stdout.on('data', (data) => {
-                logger.info(`[cloudflared] ${data.toString().trim()}`);
+                logger.info(`[cloudflared:${name}] ${data.toString().trim()}`);
             });
 
             child.stderr.on('data', (data) => {
-                // cloudflared often logs info to stderr
-                logger.info(`[cloudflared] ${data.toString().trim()}`);
+                logger.info(`[cloudflared:${name}] ${data.toString().trim()}`);
             });
 
             child.on('error', (err) => {
-                logger.error('[Webhook] Failed to spawn cloudflared binary:', err);
+                logger.error(`[cloudflared:${name}] Failed to spawn:`, err);
             });
 
             child.on('close', (code) => {
-                logger.warn(`[Webhook] Cloudflare Tunnel process exited with code ${code}`);
+                logger.warn(`[cloudflared:${name}] Process exited with code ${code}`);
             });
 
             // Handle shutdown
-            process.on('SIGINT', () => {
-                logger.info('[Webhook] Stopping Cloudflare Tunnel...');
+            const cleanup = () => {
+                logger.info(`[cloudflared:${name}] Stopping tunnel...`);
                 child.kill();
-            });
-            process.on('SIGTERM', () => {
-                logger.info('[Webhook] Stopping Cloudflare Tunnel...');
-                child.kill();
-            });
+            };
+            process.on('SIGINT', cleanup);
+            process.on('SIGTERM', cleanup);
 
+            return child;
         } catch (error) {
-            logger.error('[Webhook] Error starting tunnel:', error);
+            logger.error(`[cloudflared:${name}] Error starting tunnel:`, error);
+            return null;
         }
+    };
+
+    // Start webhook tunnel (Top.gg)
+    if (process.env.WEBHOOK_CLOUDFLARED_TOKEN) {
+        logger.info('[Webhook] Starting webhook tunnel (WEBHOOK_CLOUDFLARED_TOKEN)...');
+        startTunnel(process.env.WEBHOOK_CLOUDFLARED_TOKEN, 'webhook');
     } else {
-        logger.warn('[Webhook] No CLOUDFLARED_TOKEN provided. Webhook is not publicly accessible via Tunnel.');
+        logger.warn('[Webhook] No WEBHOOK_CLOUDFLARED_TOKEN provided. Webhook not accessible via tunnel.');
+    }
+
+    // Start main tunnel (Dashboard at pollbot.win)
+    if (process.env.MAIN_CLOUDFLARED_TOKEN) {
+        logger.info('[Webhook] Starting main tunnel (MAIN_CLOUDFLARED_TOKEN)...');
+        startTunnel(process.env.MAIN_CLOUDFLARED_TOKEN, 'main');
+    } else {
+        logger.warn('[Webhook] No MAIN_CLOUDFLARED_TOKEN provided. Dashboard not accessible via tunnel.');
     }
 }

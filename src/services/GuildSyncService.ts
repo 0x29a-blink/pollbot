@@ -43,9 +43,18 @@ export class GuildSyncService {
         this.client.on(Events.GuildMemberRemove, (member) => {
             this.syncGuild(member.guild);
         });
+
+        // Listen for IPC messages to trigger manual sync (from webhook server)
+        process.on('message', (msg: any) => {
+            if (msg?.type === 'SYNC_ALL_GUILDS') {
+                logger.info('[GuildSync] Received manual sync request');
+                this.syncAllGuilds();
+            }
+        });
     }
 
-    private async syncAllGuilds() {
+    // Make this public so it can be called externally
+    public async syncAllGuilds() {
         const guilds = this.client.guilds.cache;
         for (const [id, guild] of guilds) {
             await this.syncGuild(guild);
