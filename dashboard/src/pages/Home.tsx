@@ -170,6 +170,9 @@ export const Home: React.FC = () => {
     const [userGuildsWithoutBot, setUserGuildsWithoutBot] = useState<UserGuild[]>([]);
     const [userGuildsLoading, setUserGuildsLoading] = useState(false);
     const [userGuildsError, setUserGuildsError] = useState<string | null>(null);
+    const [lastGuildRefresh, setLastGuildRefresh] = useState<Date | null>(null);
+    const [refreshCooldown, setRefreshCooldown] = useState(0); // seconds remaining
+    const [isRefreshingGuilds, setIsRefreshingGuilds] = useState(false);
 
     const fetchUserGuilds = async () => {
         setUserGuildsLoading(true);
@@ -187,6 +190,9 @@ export const Home: React.FC = () => {
                 const data = await res.json();
                 setUserGuildsWithBot(data.withBot || []);
                 setUserGuildsWithoutBot(data.withoutBot || []);
+                if (data.lastRefreshed) {
+                    setLastGuildRefresh(new Date(data.lastRefreshed));
+                }
             } else if (res.status === 401) {
                 setUserGuildsError('Please log out and log back in to see your servers.');
             } else {
@@ -199,6 +205,54 @@ export const Home: React.FC = () => {
             setUserGuildsLoading(false);
         }
     };
+
+    // Manual refresh with rate limiting
+    const refreshUserGuilds = async () => {
+        if (isRefreshingGuilds || refreshCooldown > 0) return;
+
+        setIsRefreshingGuilds(true);
+        setUserGuildsError(null);
+
+        try {
+            const session = localStorage.getItem('dashboard_session');
+            const res = await fetch('/api/user/guilds/refresh', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${session}`,
+                }
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                setUserGuildsWithBot(data.withBot || []);
+                setUserGuildsWithoutBot(data.withoutBot || []);
+                setLastGuildRefresh(new Date());
+                // Start 5-minute cooldown
+                setRefreshCooldown(300);
+            } else if (res.status === 429) {
+                const data = await res.json();
+                setRefreshCooldown(data.retryAfter || 300);
+            } else if (res.status === 401) {
+                setUserGuildsError('Please log out and log back in.');
+            } else {
+                setUserGuildsError('Failed to refresh servers.');
+            }
+        } catch (error) {
+            console.error('Error refreshing guilds:', error);
+            setUserGuildsError('Failed to refresh servers.');
+        } finally {
+            setIsRefreshingGuilds(false);
+        }
+    };
+
+    // Cooldown timer effect
+    useEffect(() => {
+        if (refreshCooldown <= 0) return;
+        const timer = setInterval(() => {
+            setRefreshCooldown(prev => Math.max(0, prev - 1));
+        }, 1000);
+        return () => clearInterval(timer);
+    }, [refreshCooldown]);
 
     // Fetch user guilds when component mounts (for all users - shown when admin panel is hidden)
     useEffect(() => {
@@ -605,10 +659,32 @@ export const Home: React.FC = () => {
                             <>
                                 {/* Servers WITH Bot - Manageable */}
                                 <section className="mb-12">
-                                    <div className="flex items-center gap-3 mb-4">
-                                        <Server className="w-5 h-5 text-emerald-400" />
-                                        <h3 className="text-lg font-bold text-white">Your Servers</h3>
-                                        <span className="text-sm text-slate-500">({userGuildsWithBot.length} servers)</span>
+                                    <div className="flex items-center justify-between mb-4">
+                                        <div className="flex items-center gap-3">
+                                            <Server className="w-5 h-5 text-emerald-400" />
+                                            <h3 className="text-lg font-bold text-white">Your Servers</h3>
+                                            <span className="text-sm text-slate-500">({userGuildsWithBot.length} servers)</span>
+                                        </div>
+                                        <button
+                                            onClick={refreshUserGuilds}
+                                            disabled={isRefreshingGuilds || refreshCooldown > 0}
+                                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${refreshCooldown > 0
+                                                ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                                                : isRefreshingGuilds
+                                                    ? 'bg-slate-800 text-slate-400'
+                                                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white'
+                                                }`}
+                                            title={refreshCooldown > 0
+                                                ? `Wait ${Math.floor(refreshCooldown / 60)}:${(refreshCooldown % 60).toString().padStart(2, '0')}`
+                                                : 'Refresh your server list, channels, and roles from Discord'}
+                                        >
+                                            <RefreshCw className={`w-4 h-4 ${isRefreshingGuilds ? 'animate-spin' : ''}`} />
+                                            {refreshCooldown > 0 ? (
+                                                <span>{Math.floor(refreshCooldown / 60)}:{(refreshCooldown % 60).toString().padStart(2, '0')}</span>
+                                            ) : (
+                                                <span>Refresh</span>
+                                            )}
+                                        </button>
                                     </div>
 
                                     {userGuildsWithBot.length > 0 ? (

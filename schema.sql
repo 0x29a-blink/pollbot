@@ -82,7 +82,10 @@ CREATE TABLE IF NOT EXISTS dashboard_sessions (
     access_token TEXT NOT NULL,
     refresh_token TEXT,
     expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    -- Guild caching to prevent Discord API rate limits
+    cached_guilds JSONB,
+    guilds_cached_at TIMESTAMPTZ
 );
 
 -- ============================================================================
@@ -92,6 +95,7 @@ CREATE TABLE IF NOT EXISTS dashboard_sessions (
 CREATE INDEX IF NOT EXISTS idx_votes_poll_id ON votes(poll_id);
 CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_user_id ON dashboard_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_expires_at ON dashboard_sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_guilds_cached_at ON dashboard_sessions(guilds_cached_at);
 
 -- ============================================================================
 -- ROW LEVEL SECURITY

@@ -12,11 +12,18 @@ dotenv.config();
 const app = express();
 const port = 5000;
 
+// Body parser must be BEFORE routes
+app.use(express.json());
+
 // Store reference to sharding manager for sync operations
 let shardingManager: ShardingManager | null = null;
 
 export function setShardingManager(manager: ShardingManager) {
     shardingManager = manager;
+}
+
+export function getShardingManager(): ShardingManager | null {
+    return shardingManager;
 }
 
 // Dashboard Auth Routes (Discord OAuth)
@@ -30,14 +37,16 @@ app.use('/api/user', userGuildsRouter);
 import { userPollsRouter } from './webapp/userPolls';
 app.use('/api/user', userPollsRouter);
 
+// Poll Management Routes (channels, roles, poll CRUD)
+import { pollManagementRouter } from './webapp/pollManagement';
+app.use('/api/user', pollManagementRouter);
+
 // Top.gg Webhook
 const webhook = new Webhook(process.env.TOPGG_WEBHOOK_AUTH || 'default_auth');
 
 app.get('/health', (req, res) => {
     res.status(200).send('OK');
 });
-
-app.use(express.json());
 
 // Admin-only endpoint to sync all guilds from Discord
 // This triggers all shards to re-fetch guild data

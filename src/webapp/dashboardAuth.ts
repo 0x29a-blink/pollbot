@@ -166,6 +166,26 @@ router.get('/callback', async (req: Request, res: Response) => {
             expiresAt,
         });
 
+        // Fetch and cache user's guilds immediately at login
+        let cachedGuilds = null;
+        let guildsCachedAt = null;
+        try {
+            const guildsResponse = await fetch(`${DISCORD_API_BASE}/users/@me/guilds`, {
+                headers: {
+                    Authorization: `Bearer ${tokens.access_token}`,
+                },
+            });
+            if (guildsResponse.ok) {
+                cachedGuilds = await guildsResponse.json();
+                guildsCachedAt = new Date().toISOString();
+                logger.info(`[Dashboard Auth] Cached ${cachedGuilds.length} guilds for user ${discordUser.id}`);
+            } else {
+                logger.warn(`[Dashboard Auth] Failed to fetch guilds at login: ${guildsResponse.status}`);
+            }
+        } catch (guildErr) {
+            logger.warn(`[Dashboard Auth] Error fetching guilds at login:`, guildErr);
+        }
+
         // Store session in database for persistence across restarts
         await supabase.from('dashboard_sessions').upsert({
             id: sessionId,
@@ -173,6 +193,8 @@ router.get('/callback', async (req: Request, res: Response) => {
             access_token: tokens.access_token,
             refresh_token: tokens.refresh_token || null,
             expires_at: new Date(expiresAt).toISOString(),
+            cached_guilds: cachedGuilds,
+            guilds_cached_at: guildsCachedAt,
         }, {
             onConflict: 'id',
         });

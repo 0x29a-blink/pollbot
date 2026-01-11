@@ -51,11 +51,7 @@ export default {
                 .setRequired(false))
         .addRoleOption(option =>
             option.setName('allowed_role')
-                .setDescription('Limit who can vote to a specific role')
-                .setRequired(false))
-        .addStringOption(option =>
-            option.setName('weights')
-                .setDescription('Vote weights. e.g. @Admin=5, @Mod=2')
+                .setDescription('Limit voting to a specific role. Visit pollbot.win to add more roles!')
                 .setRequired(false)),
     async execute(interaction: ChatInputCommandInteraction) {
         if (!interaction.inGuild()) {
@@ -88,11 +84,10 @@ export default {
             maxVotes = Math.max(1, minVotes);
         }
         const targetRole = interaction.options.getRole('allowed_role');
-        const weightsRaw = interaction.options.getString('weights');
         const allowExports = interaction.options.getBoolean('allow_exports') ?? true;
 
         const allowedRoles = targetRole ? [targetRole.id] : [];
-        const voteWeights = weightsRaw ? PollManager.parseWeights(weightsRaw) : {};
+        const voteWeights = {}; // Vote weights now managed via dashboard at pollbot.win
 
         // Fetch Guild Settings
         let serverAllowsButtons = true;
@@ -273,6 +268,15 @@ export default {
 
             // 6. Save to Database
             if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
+                // Build role metadata for dashboard display
+                const roleMetadata: Record<string, { name: string; color: number }> = {};
+                if (targetRole) {
+                    roleMetadata[targetRole.id] = {
+                        name: targetRole.name,
+                        color: typeof targetRole.color === 'number' ? targetRole.color : 0
+                    };
+                }
+
                 const { error } = await supabase.from('polls').insert({
                     message_id: message.id,
                     channel_id: interaction.channelId,
@@ -289,7 +293,8 @@ export default {
                         min_votes: minVotes,
                         allowed_roles: allowedRoles,
                         vote_weights: voteWeights,
-                        allow_exports: allowExports
+                        allow_exports: allowExports,
+                        role_metadata: Object.keys(roleMetadata).length > 0 ? roleMetadata : undefined
                     },
                     active: true,
                     created_at: new Date().toISOString()
@@ -302,7 +307,7 @@ export default {
                         flags: MessageFlags.Ephemeral
                     });
                 } else {
-                    logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} created a poll with the following parameters "/poll title:${title} items:${items.join(', ')} max_votes:${maxVotes} min_votes:${minVotes} public:${isPublic} thread:${createThread} close_button:${allowClose} allowed_roles:${targetRole ? targetRole.name : 'None'} weights:${weightsRaw}"`);
+                    logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} created a poll with the following parameters "/poll title:${title} items:${items.join(', ')} max_votes:${maxVotes} min_votes:${minVotes} public:${isPublic} thread:${createThread} close_button:${allowClose} allowed_role:${targetRole ? targetRole.name : 'None'}"`);
                 }
             } else {
                 logger.warn('Skipping DB save (no credentials)');
