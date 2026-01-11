@@ -35,6 +35,7 @@ interface GuildWithBotStatus {
     name: string;
     icon_url: string | null;
     member_count?: number;
+    poll_count?: number;
     has_bot: boolean;
 }
 
@@ -95,6 +96,21 @@ async function processGuilds(userGuilds: DiscordGuild[], userId: string): Promis
 
     const botGuildIds = new Set(botGuilds?.map(g => g.id) || []);
 
+    // Get poll counts per guild
+    const pollCountMap: Record<string, number> = {};
+    if (botGuilds && botGuilds.length > 0) {
+        const { data: pollData } = await supabase
+            .from('polls')
+            .select('guild_id')
+            .in('guild_id', botGuilds.map(g => g.id));
+
+        if (pollData) {
+            for (const poll of pollData) {
+                pollCountMap[poll.guild_id] = (pollCountMap[poll.guild_id] || 0) + 1;
+            }
+        }
+    }
+
     // Split into two categories
     const withBot: GuildWithBotStatus[] = [];
     const withoutBot: GuildWithBotStatus[] = [];
@@ -112,6 +128,7 @@ async function processGuilds(userGuilds: DiscordGuild[], userId: string): Promis
                 name: dbGuild?.name || guild.name,
                 icon_url: dbGuild?.icon_url || iconUrl,
                 member_count: dbGuild?.member_count,
+                poll_count: pollCountMap[guild.id] || 0,
                 has_bot: true,
             });
         } else {
@@ -125,8 +142,13 @@ async function processGuilds(userGuilds: DiscordGuild[], userId: string): Promis
         }
     }
 
-    // Sort by name
-    withBot.sort((a, b) => a.name.localeCompare(b.name));
+    // Sort withBot by poll count (descending), then by name
+    withBot.sort((a, b) => {
+        const pollDiff = (b.poll_count || 0) - (a.poll_count || 0);
+        if (pollDiff !== 0) return pollDiff;
+        return a.name.localeCompare(b.name);
+    });
+    // Sort withoutBot by name
     withoutBot.sort((a, b) => a.name.localeCompare(b.name));
 
     return { withBot, withoutBot };

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Login } from './pages/Login';
+import { Landing } from './pages/Landing';
 import { AuthCallback } from './pages/AuthCallback';
 import { Home } from './pages/Home';
 import { ServerView } from './pages/ServerView';
@@ -157,7 +158,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-      <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      <Route path="/" element={<Landing />} />
     </Routes>
   );
 }

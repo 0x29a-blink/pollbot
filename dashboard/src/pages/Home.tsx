@@ -28,6 +28,7 @@ interface UserGuild {
     name: string;
     icon_url: string | null;
     member_count?: number;
+    poll_count?: number;
     has_bot: boolean;
 }
 
@@ -405,7 +406,7 @@ export const Home: React.FC = () => {
 
     const handleLogout = async () => {
         await logout();
-        navigate('/login');
+        navigate('/');
     };
 
     // State for showing admin telemetry panel
@@ -709,12 +710,24 @@ export const Home: React.FC = () => {
                                                         )}
                                                         <div className="flex-1 min-w-0">
                                                             <h4 className="text-white font-medium truncate group-hover:text-emerald-400 transition-colors">{guild.name}</h4>
-                                                            {guild.member_count && (
-                                                                <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
-                                                                    <Users className="w-3 h-3" />
-                                                                    <span>{guild.member_count.toLocaleString()} members</span>
-                                                                </div>
-                                                            )}
+                                                            <div className="flex items-center gap-2 text-xs mt-1">
+                                                                {guild.member_count && (
+                                                                    <span
+                                                                        className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-700/50 text-slate-400 border border-slate-600/30"
+                                                                        title={`${guild.member_count.toLocaleString()} members in this server`}
+                                                                    >
+                                                                        <Users className="w-3 h-3" />
+                                                                        {guild.member_count.toLocaleString()}
+                                                                    </span>
+                                                                )}
+                                                                <span
+                                                                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
+                                                                    title={`${guild.poll_count || 0} poll${(guild.poll_count || 0) !== 1 ? 's' : ''} created in this server`}
+                                                                >
+                                                                    <BarChart3 className="w-3 h-3" />
+                                                                    {guild.poll_count || 0}
+                                                                </span>
+                                                            </div>
                                                         </div>
                                                         <ExternalLink className="w-4 h-4 text-slate-500 group-hover:text-emerald-400 transition-colors" />
                                                     </div>

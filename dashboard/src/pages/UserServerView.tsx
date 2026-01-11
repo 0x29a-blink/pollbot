@@ -259,7 +259,20 @@ export const UserServerView: React.FC = () => {
                                 )}
                                 <div>
                                     <h1 className="text-lg font-bold text-white">{guild.name}</h1>
-                                    <span className="text-xs text-slate-500">{guild.member_count?.toLocaleString()} members</span>
+                                    <div className="flex items-center gap-2 text-xs">
+                                        <span className="text-slate-500">
+                                            {guild.member_count?.toLocaleString()} members
+                                        </span>
+                                        <span className="text-slate-600">•</span>
+                                        <span className="flex items-center gap-1 text-indigo-400">
+                                            <BarChart3 className="w-3 h-3" />
+                                            {polls.length} poll{polls.length !== 1 ? 's' : ''}
+                                        </span>
+                                        <span className="flex items-center gap-1 text-emerald-400">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                            Live
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
                         )}
@@ -301,11 +314,7 @@ export const UserServerView: React.FC = () => {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                 >
-                    <h2 className="text-2xl font-bold text-white mb-2">Server Polls</h2>
-                    <p className="text-slate-400 mb-8">
-                        {polls.length} poll{polls.length !== 1 ? 's' : ''} in this server
-                        <span className="text-xs ml-2 text-emerald-400">• Live updates enabled</span>
-                    </p>
+
 
                     {polls.length === 0 ? (
                         <div className="glass-panel p-12 text-center">
