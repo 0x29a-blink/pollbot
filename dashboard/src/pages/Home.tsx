@@ -676,7 +676,9 @@ export const Home: React.FC = () => {
                                                 }`}
                                             title={refreshCooldown > 0
                                                 ? `Wait ${Math.floor(refreshCooldown / 60)}:${(refreshCooldown % 60).toString().padStart(2, '0')}`
-                                                : 'Refresh your server list, channels, and roles from Discord'}
+                                                : lastGuildRefresh
+                                                    ? `Last refreshed: ${lastGuildRefresh.toLocaleString()} - Click to refresh`
+                                                    : 'Refresh your server list, channels, and roles from Discord'}
                                         >
                                             <RefreshCw className={`w-4 h-4 ${isRefreshingGuilds ? 'animate-spin' : ''}`} />
                                             {refreshCooldown > 0 ? (
