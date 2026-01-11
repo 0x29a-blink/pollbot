@@ -69,7 +69,7 @@ setTimeout(() => {
 
     // 4. Start Webhook Server (Top.gg & Cloudflare Tunnel)
     setTimeout(() => {
-        logger.info(`[Manager] Checking CLOUDFLARED_TOKEN: ${process.env.CLOUDFLARED_TOKEN ? 'EXISTS (' + process.env.CLOUDFLARED_TOKEN.substring(0, 5) + '...)' : 'MISSING'}`);
+        logger.info(`[Manager] Checking Tunnel Tokens: Webhook=${process.env.WEBHOOK_CLOUDFLARED_TOKEN ? 'EXISTS' : 'MISSING'}, Main=${process.env.MAIN_CLOUDFLARED_TOKEN ? 'EXISTS' : 'MISSING'}`);
         import('./webhook').then(({ startWebhookServer, setShardingManager }) => {
             setShardingManager(manager);
             startWebhookServer();
