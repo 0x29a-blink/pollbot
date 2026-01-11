@@ -19,10 +19,13 @@ app.use((req, res, next) => {
 // Proxy /api requests to the Bot/API process
 // Note: app.use('/api', ...) strips '/api' from the req.url
 // So we proxy to http://localhost:5000/api to restore it.
-app.use('/api', createProxyMiddleware({
-    target: 'http://localhost:5000/api',
+// Proxy /api requests to the Bot/API process
+// Use root mount + pathFilter to preserve the full URI (avoid Express stripping /api)
+app.use(createProxyMiddleware({
+    target: 'http://127.0.0.1:5000',
     changeOrigin: true,
     ws: true,
+    pathFilter: ['/api', '/api/**']
 }));
 
 // Proxy /supabase requests if we are proxying Supabase Realtime (optional, based on vite config)
