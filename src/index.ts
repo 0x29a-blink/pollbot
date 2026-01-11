@@ -47,7 +47,8 @@ renderService.on('error', (err) => {
 logger.info('[Manager] Spawning Dashboard Service...');
 const dashboardServiceFile = path.join(__dirname, 'services', `DashboardService.${extension}`);
 const dashboardService: ChildProcess = fork(dashboardServiceFile, [], {
-    execArgv: isTsNode ? ['-r', 'ts-node/register'] : []
+    execArgv: isTsNode ? ['-r', 'ts-node/register'] : [],
+    stdio: 'inherit' // Ensure stdout/stderr is visible
 });
 
 dashboardService.on('spawn', () => {
@@ -55,7 +56,11 @@ dashboardService.on('spawn', () => {
 });
 
 dashboardService.on('error', (err) => {
-    logger.error('[Manager] Dashboard Service failed:', err);
+    logger.error('[Manager] Dashboard Service failed to spawn:', err);
+});
+
+dashboardService.on('close', (code, signal) => {
+    logger.error(`[Manager] Dashboard Service exited with code ${code} and signal ${signal}`);
 });
 
 // 3. Spawn Shards (Delayed to allow Render Service to warm up)
