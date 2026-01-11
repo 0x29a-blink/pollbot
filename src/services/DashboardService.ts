@@ -17,24 +17,19 @@ app.use((req, res, next) => {
 });
 
 // Proxy /api requests to the Bot/API process
-// Note: app.use('/api', ...) strips '/api' from the req.url
-// So we proxy to http://localhost:5000/api to restore it.
-// Proxy /api requests to the Bot/API process
-// Root mount + pathFilter is the safest way to preserve paths
-app.use(createProxyMiddleware({
-    target: 'http://127.0.0.1:5000',
+// Explicitly mount on /api. Express strips '/api', so we add it back in the target.
+app.use('/api', createProxyMiddleware({
+    target: 'http://127.0.0.1:5000/api', // Re-adds /api prefix
     changeOrigin: true,
     ws: true,
-    pathFilter: ['/api', '/api/**'],
-    // @ts-ignore - v3 types might differ, but this is the standard error handler key
+    // @ts-ignore - v3 types might differ
     on: {
         error: (err: any, req: any, res: any) => {
             logger.error('[DashboardService] Proxy error:', err);
             res.status(502).json({ error: 'Proxy Error', details: err.message });
         },
         proxyReq: (proxyReq: any, req: any, res: any) => {
-            // Log outgoing proxy requests for debug
-            // console.log(`[DashboardService] Proxying ${req.method} ${req.url} -> ${proxyReq.path}`);
+            // log if needed
         }
     }
 }));
