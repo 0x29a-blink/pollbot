@@ -82,12 +82,7 @@ router.get('/callback', async (req: Request, res: Response) => {
         return res.redirect('/login?error=no_code');
     }
 
-    // Debug logging for credentials (redacted)
-    logger.info(`[Dashboard Auth] Exchanging token with:
-        Client ID: ${CLIENT_ID ? CLIENT_ID.substring(0, 5) + '...' : 'MISSING'}
-        Client Secret: ${CLIENT_SECRET ? CLIENT_SECRET.substring(0, 5) + '...' : 'MISSING'}
-        Redirect URI: ${REDIRECT_URI}
-    `);
+
 
     try {
         // Exchange code for tokens
