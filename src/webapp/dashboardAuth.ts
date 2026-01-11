@@ -7,8 +7,8 @@ const router = Router();
 
 // Discord OAuth2 configuration
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
-const CLIENT_ID = process.env.DISCORD_CLIENT_ID!;
-const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET!;
+const CLIENT_ID = (process.env.DISCORD_CLIENT_ID || '').trim();
+const CLIENT_SECRET = (process.env.DISCORD_CLIENT_SECRET || '').trim();
 const REDIRECT_URI = process.env.DISCORD_OAUTH_REDIRECT_URI || 'http://localhost:7500/api/auth/callback';
 
 // Admin user IDs from environment
