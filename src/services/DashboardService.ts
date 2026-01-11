@@ -17,11 +17,12 @@ app.use((req, res, next) => {
 });
 
 // Proxy /api requests to the Bot/API process
+// Note: app.use('/api', ...) strips '/api' from the req.url
+// So we proxy to http://localhost:5000/api to restore it.
 app.use('/api', createProxyMiddleware({
-    target: API_TARGET,
+    target: 'http://localhost:5000/api',
     changeOrigin: true,
-    ws: true, // Proxy websockets if needed (Supabase realtime might need this if proxied, though usually direct)
-    // logger: logger // v3 uses 'logger' but types might be strict, let's omit for now to fix lint as it has default logging
+    ws: true,
 }));
 
 // Proxy /supabase requests if we are proxying Supabase Realtime (optional, based on vite config)
