@@ -75,7 +75,8 @@ const dashboardDist = path.join(__dirname, '../../dashboard/dist');
 app.use(express.static(dashboardDist));
 
 // Fallback for SPA routing - send index.html for non-API 404s
-app.get('*', (req, res) => {
+// Express 5 requires '(.*)' instead of '*' for wildcard matching
+app.get('(.*)', (req, res) => {
     res.sendFile(path.join(dashboardDist, 'index.html'));
 });
 
