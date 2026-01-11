@@ -69,7 +69,7 @@ router.get('/polls/:guildId', async (req: Request, res: Response) => {
 
         // Check cached permission first to avoid Discord API rate limits
         const cachedPermission = getCachedPermission(session.user_id, guildId);
-        
+
         if (cachedPermission === false) {
             return res.status(403).json({ error: 'You need Manage Server permission' });
         }
@@ -138,21 +138,24 @@ router.get('/polls/:guildId', async (req: Request, res: Response) => {
 
         // Get vote counts for each poll
         const pollsWithVotes = await Promise.all((polls || []).map(async (poll) => {
-            // Get votes grouped by option
+            // Get votes grouped by option (including weight for weighted votes)
             const { data: votes } = await supabase
                 .from('votes')
-                .select('option_index')
+                .select('option_index, weight')
                 .eq('poll_id', poll.message_id);
 
             const voteCounts: Record<number, number> = {};
+            let totalWeight = 0;
             (votes || []).forEach(vote => {
-                voteCounts[vote.option_index] = (voteCounts[vote.option_index] || 0) + 1;
+                const weight = vote.weight || 1;
+                voteCounts[vote.option_index] = (voteCounts[vote.option_index] || 0) + weight;
+                totalWeight += weight;
             });
 
             return {
                 ...poll,
                 vote_counts: voteCounts,
-                total_votes: votes?.length || 0,
+                total_votes: totalWeight,
             };
         }));
 

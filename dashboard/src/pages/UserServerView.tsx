@@ -6,6 +6,7 @@ import { ArrowLeft, BarChart3, Users, Clock, CheckCircle, XCircle, Loader2, Eye,
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../App';
 import { CreatePollModal } from '../components/CreatePollModal';
+import { EditPollModal } from '../components/EditPollModal';
 
 interface PollSettings {
     public?: boolean;
@@ -33,6 +34,7 @@ interface Poll {
     settings: PollSettings;
     vote_counts: Record<number, number>;
     total_votes: number;
+    discord_deleted?: boolean; // Set when Discord message no longer exists
 }
 
 interface GuildInfo {
@@ -51,8 +53,9 @@ export const UserServerView: React.FC = () => {
     const [polls, setPolls] = useState<Poll[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [isRefreshing, setIsRefreshing] = useState(false);
     const [showCreateModal, setShowCreateModal] = useState(false);
+    const [editingPoll, setEditingPoll] = useState<Poll | null>(null);
+    const [roles, setRoles] = useState<Array<{ id: string; name: string; color: number; position: number; managed: boolean }>>([]);
     const hasInitialData = useRef(false);
 
     useEffect(() => {
@@ -91,10 +94,6 @@ export const UserServerView: React.FC = () => {
     }, [guildId]);
 
     const fetchPolls = async (isInitialLoad: boolean = false) => {
-        // Don't show loading state for background refreshes
-        if (!isInitialLoad && hasInitialData.current) {
-            setIsRefreshing(true);
-        }
 
         try {
             const session = localStorage.getItem('dashboard_session');
@@ -136,7 +135,6 @@ export const UserServerView: React.FC = () => {
             }
         } finally {
             setLoading(false);
-            setIsRefreshing(false);
         }
     };
 
@@ -148,6 +146,102 @@ export const UserServerView: React.FC = () => {
             hour: '2-digit',
             minute: '2-digit'
         });
+    };
+
+    const handleStatusChange = async (pollId: string, active: boolean) => {
+        const session = localStorage.getItem('dashboard_session');
+        try {
+            const res = await fetch(`/api/user/polls/${pollId}/status`, {
+                method: 'PATCH',
+                headers: {
+                    Authorization: `Bearer ${session}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ active }),
+            });
+
+            if (res.ok) {
+                // Update local state immediately
+                setPolls(prev => prev.map(p =>
+                    p.message_id === pollId ? { ...p, active } : p
+                ));
+            } else if (res.status === 410) {
+                // Discord message was deleted - mark the poll as deleted
+                setPolls(prev => prev.map(p =>
+                    p.message_id === pollId ? { ...p, discord_deleted: true } : p
+                ));
+            } else {
+                console.error('Failed to update poll status');
+            }
+        } catch (err) {
+            console.error('Error updating poll status:', err);
+        }
+    };
+
+    const handleDeletePoll = async (pollId: string) => {
+        const session = localStorage.getItem('dashboard_session');
+        try {
+            const res = await fetch(`/api/user/polls/${pollId}`, {
+                method: 'DELETE',
+                headers: {
+                    Authorization: `Bearer ${session}`,
+                },
+            });
+
+            if (res.ok) {
+                // Remove from local state
+                setPolls(prev => prev.filter(p => p.message_id !== pollId));
+            } else {
+                console.error('Failed to delete poll');
+            }
+        } catch (err) {
+            console.error('Error deleting poll:', err);
+        }
+    };
+
+    const handleEditPoll = async (poll: Poll) => {
+        // Fetch roles if we don't have them
+        if (roles.length === 0) {
+            const session = localStorage.getItem('dashboard_session');
+            try {
+                const res = await fetch(`/api/user/guilds/${guildId}/roles`, {
+                    headers: { Authorization: `Bearer ${session}` },
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    setRoles(data.roles || []);
+                }
+            } catch (err) {
+                console.error('Error fetching roles:', err);
+            }
+        }
+        setEditingPoll(poll);
+    };
+
+    const handleSaveSettings = async (pollId: string, newSettings: PollSettings) => {
+        const session = localStorage.getItem('dashboard_session');
+        try {
+            const res = await fetch(`/api/user/polls/${pollId}`, {
+                method: 'PATCH',
+                headers: {
+                    Authorization: `Bearer ${session}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ settings: newSettings }),
+            });
+
+            if (res.ok) {
+                const updatedPoll = await res.json();
+                // Update local state
+                setPolls(prev => prev.map(p =>
+                    p.message_id === pollId ? { ...p, settings: updatedPoll.settings } : p
+                ));
+            } else {
+                console.error('Failed to save poll settings');
+            }
+        } catch (err) {
+            console.error('Error saving poll settings:', err);
+        }
     };
 
     if (loading) {
@@ -258,20 +352,69 @@ export const UserServerView: React.FC = () => {
                     ) : (
                         <div className="grid gap-4">
                             {polls.map(poll => (
-                                <PollCard key={poll.message_id} poll={poll} formatDate={formatDate} />
+                                <PollCard
+                                    key={poll.message_id}
+                                    poll={poll}
+                                    formatDate={formatDate}
+                                    onStatusChange={handleStatusChange}
+                                    onDeletePoll={handleDeletePoll}
+                                    onEditPoll={handleEditPoll}
+                                />
                             ))}
                         </div>
                     )}
                 </motion.div>
             </main>
+
+            {/* Edit Poll Modal */}
+            {editingPoll && (
+                <EditPollModal
+                    isOpen={!!editingPoll}
+                    onClose={() => setEditingPoll(null)}
+                    poll={editingPoll}
+                    roles={roles}
+                    onSave={handleSaveSettings}
+                />
+            )}
         </div>
     );
 };
 
-const PollCard: React.FC<{ poll: Poll; formatDate: (d: string) => string }> = ({ poll, formatDate }) => {
+const PollCard: React.FC<{
+    poll: Poll;
+    formatDate: (d: string) => string;
+    onStatusChange: (pollId: string, active: boolean) => Promise<void>;
+    onDeletePoll: (pollId: string) => Promise<void>;
+    onEditPoll: (poll: Poll) => void;
+}> = ({ poll, formatDate, onStatusChange, onDeletePoll, onEditPoll }) => {
     const [isExpanded, setIsExpanded] = useState(false);
+    const [isUpdating, setIsUpdating] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
     const maxVotes = Math.max(...Object.values(poll.vote_counts), 1);
     const settings = poll.settings || {};
+
+    const handleStatusToggle = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setIsUpdating(true);
+        try {
+            await onStatusChange(poll.message_id, !poll.active);
+        } finally {
+            setIsUpdating(false);
+        }
+    };
+
+    const handleDelete = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!confirm('Are you sure you want to delete this poll from the database? This cannot be undone.')) {
+            return;
+        }
+        setIsDeleting(true);
+        try {
+            await onDeletePoll(poll.message_id);
+        } finally {
+            setIsDeleting(false);
+        }
+    };
 
     return (
         <motion.div
@@ -298,11 +441,18 @@ const PollCard: React.FC<{ poll: Poll; formatDate: (d: string) => string }> = ({
                     </div>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
-                    <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${!poll.active
-                        ? 'bg-slate-700 text-slate-400'
-                        : 'bg-emerald-500/20 text-emerald-400'
+                    <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${poll.discord_deleted
+                        ? 'bg-amber-500/20 text-amber-400'
+                        : !poll.active
+                            ? 'bg-slate-700 text-slate-400'
+                            : 'bg-emerald-500/20 text-emerald-400'
                         }`}>
-                        {!poll.active ? (
+                        {poll.discord_deleted ? (
+                            <>
+                                <XCircle className="w-3 h-3" />
+                                Deleted
+                            </>
+                        ) : !poll.active ? (
                             <>
                                 <XCircle className="w-3 h-3" />
                                 Closed
@@ -455,6 +605,73 @@ const PollCard: React.FC<{ poll: Poll; formatDate: (d: string) => string }> = ({
                                                 : undefined
                                             }
                                         />
+                                    </div>
+
+                                    {/* Actions */}
+                                    <div className="mt-4 pt-4 border-t border-slate-700/50 space-y-2">
+                                        {poll.discord_deleted ? (
+                                            <>
+                                                <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-center">
+                                                    <p className="text-amber-400 text-xs font-medium">
+                                                        ⚠️ Discord message deleted
+                                                    </p>
+                                                    <p className="text-slate-400 text-xs mt-1">
+                                                        This poll no longer exists in Discord
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    onClick={handleDelete}
+                                                    disabled={isDeleting}
+                                                    className="w-full py-2 px-4 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    {isDeleting ? (
+                                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                                    ) : (
+                                                        <>
+                                                            <XCircle className="w-4 h-4" />
+                                                            Delete from Database
+                                                        </>
+                                                    )}
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <button
+                                                onClick={handleStatusToggle}
+                                                disabled={isUpdating}
+                                                className={`w-full py-2 px-4 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 ${poll.active
+                                                    ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30'
+                                                    : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30'
+                                                    } disabled:opacity-50 disabled:cursor-not-allowed`}
+                                            >
+                                                {isUpdating ? (
+                                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                                ) : poll.active ? (
+                                                    <>
+                                                        <XCircle className="w-4 h-4" />
+                                                        Close Poll
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <CheckCircle className="w-4 h-4" />
+                                                        Reopen Poll
+                                                    </>
+                                                )}
+                                            </button>
+                                        )}
+
+                                        {/* Edit Settings Button */}
+                                        {!poll.discord_deleted && (
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onEditPoll(poll);
+                                                }}
+                                                className="w-full py-2 px-4 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 border border-indigo-500/30"
+                                            >
+                                                <Settings2 className="w-4 h-4" />
+                                                Edit Settings
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             </div>

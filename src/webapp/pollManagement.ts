@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { supabase } from '../lib/db';
 import { logger } from '../lib/logger';
+import { getShardingManager } from '../webhook';
 
 const router = Router();
 
@@ -574,4 +575,519 @@ router.post('/polls', async (req: Request, res: Response) => {
     }
 });
 
+/**
+ * PATCH /api/user/polls/:pollId/status
+ * Close or reopen a poll from the dashboard
+ */
+router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
+    const authHeader = req.headers.authorization;
+    const sessionId = authHeader?.replace('Bearer ', '');
+    const { pollId } = req.params;
+    const { active } = req.body as { active: boolean };
+
+    if (!sessionId) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    if (typeof active !== 'boolean') {
+        return res.status(400).json({ error: 'active must be a boolean' });
+    }
+
+    try {
+        // 1. Fetch poll and verify it exists
+        const { data: pollData, error: pollError } = await supabase
+            .from('polls')
+            .select('*')
+            .eq('message_id', pollId)
+            .single();
+
+        if (pollError || !pollData) {
+            return res.status(404).json({ error: 'Poll not found' });
+        }
+
+        // 2. Verify user has permission on this guild
+        const permCheck = await verifyUserPermission(sessionId, pollData.guild_id);
+        if (!permCheck.valid) {
+            return res.status(403).json({ error: permCheck.error || 'Permission denied' });
+        }
+
+        // 3. Update database
+        const { error: updateError } = await supabase
+            .from('polls')
+            .update({ active })
+            .eq('message_id', pollId);
+
+        if (updateError) {
+            logger.error('[PollManagement] Failed to update poll status:', updateError);
+            return res.status(500).json({ error: 'Failed to update poll status' });
+        }
+
+        // 4. Get vote data for re-rendering
+        const { data: voteCounts } = await supabase
+            .from('votes')
+            .select('option_index')
+            .eq('poll_id', pollId);
+
+        const counts = new Array(pollData.options.length).fill(0);
+        if (voteCounts) {
+            voteCounts.forEach((v: any) => {
+                if (v.option_index >= 0 && v.option_index < counts.length) counts[v.option_index]++;
+            });
+        }
+        const totalVotes = voteCounts ? voteCounts.length : 0;
+
+        // 5. Get user info for creator display
+        const { data: userData } = await supabase
+            .from('users')
+            .select('username')
+            .eq('id', pollData.creator_id)
+            .single();
+
+        const creatorName = userData?.username || 'Unknown';
+
+        // 6. Update Discord message via broadcastEval
+        const { Renderer } = await import('../lib/renderer');
+        const { getShardingManager } = await import('../webhook');
+
+        const shardingManager = getShardingManager();
+        if (!shardingManager) {
+            // Still return success since DB was updated
+            logger.warn('[PollManagement] Sharding manager not available, Discord message not updated');
+            return res.json({ ...pollData, active });
+        }
+
+        const showVotes = !active || (pollData.settings && pollData.settings.public);
+
+        const renderOptions: any = {
+            title: pollData.title,
+            description: pollData.description || '',
+            options: pollData.options,
+            totalVotes,
+            creator: creatorName,
+            closed: !active,
+        };
+
+        if (showVotes) {
+            renderOptions.votes = counts;
+        }
+
+        const imageBuffer = await Renderer.renderPoll(renderOptions);
+        const imageBase64 = imageBuffer.toString('base64');
+
+        const updateContext = {
+            channelId: pollData.channel_id,
+            messageId: pollId,
+            imageBase64,
+            active,
+            options: pollData.options,
+            settings: pollData.settings,
+        };
+
+        const broadcastResults = await shardingManager.broadcastEval(
+            async (client, context) => {
+                const { channelId, messageId, imageBase64, active, options, settings } = context;
+                const { ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = await import('discord.js');
+
+                const channel = client.channels.cache.get(channelId);
+                if (!channel || !channel.isTextBased()) return { success: false, error: 'Channel not found' };
+
+                try {
+                    const message = await (channel as any).messages.fetch(messageId);
+                    if (!message) return { success: false, error: 'Message not found' };
+
+                    const imageBufferFromBase64 = Buffer.from(imageBase64, 'base64');
+                    const attachment = new AttachmentBuilder(imageBufferFromBase64, { name: 'poll.png' });
+
+                    const components: any[] = [];
+
+                    if (active) {
+                        // Active poll: show vote menu + optional close button
+                        const maxVotes = Math.min(settings?.max_votes || 1, options.length);
+                        const minVotes = Math.min(settings?.min_votes || 1, maxVotes);
+
+                        const selectOptions = options.map((opt: string, i: number) => ({
+                            label: opt.substring(0, 100),
+                            value: i.toString(),
+                            description: `Vote for option ${i + 1}`,
+                        }));
+
+                        const selectMenu = new StringSelectMenuBuilder()
+                            .setCustomId('poll_vote')
+                            .setPlaceholder('Select your choice(s)...')
+                            .setMinValues(minVotes)
+                            .setMaxValues(maxVotes)
+                            .addOptions(selectOptions);
+
+                        components.push(new ActionRowBuilder().addComponents(selectMenu));
+
+                        if (settings?.allow_close !== false) {
+                            const closeButton = new ButtonBuilder()
+                                .setCustomId('poll_close')
+                                .setLabel('Close Poll')
+                                .setStyle(ButtonStyle.Secondary);
+
+                            const detailsButton = new ButtonBuilder()
+                                .setCustomId('view_details')
+                                .setLabel('View Details')
+                                .setStyle(ButtonStyle.Secondary);
+
+                            components.push(new ActionRowBuilder().addComponents(closeButton, detailsButton));
+                        }
+                    } else {
+                        // Closed poll: show reopen button
+                        const reopenButton = new ButtonBuilder()
+                            .setCustomId('poll_reopen')
+                            .setLabel('Reopen Poll')
+                            .setStyle(ButtonStyle.Primary);
+
+                        const detailsButton = new ButtonBuilder()
+                            .setCustomId('view_details')
+                            .setLabel('View Details')
+                            .setStyle(ButtonStyle.Secondary);
+
+                        components.push(new ActionRowBuilder().addComponents(reopenButton, detailsButton));
+                    }
+
+                    await message.edit({
+                        files: [attachment],
+                        components,
+                    });
+
+                    return { success: true };
+                } catch (err: any) {
+                    // Check if message was deleted (Unknown Message error)
+                    if (err.code === 10008 || err.message?.includes('Unknown Message')) {
+                        return { success: false, error: 'message_deleted' };
+                    }
+                    return { success: false, error: err.message };
+                }
+            },
+            { context: updateContext }
+        );
+
+        // Check if any shard reported the message as deleted
+        const results = Array.isArray(broadcastResults) ? broadcastResults : [broadcastResults];
+        const messageDeleted = results.some((r: any) => r?.error === 'message_deleted');
+
+        if (messageDeleted) {
+            logger.warn(`[PollManagement] Poll ${pollId} Discord message was deleted`);
+
+            // Persist the discord_deleted flag to database so it survives page refreshes
+            await supabase
+                .from('polls')
+                .update({ discord_deleted: true })
+                .eq('message_id', pollId);
+
+            return res.status(410).json({
+                error: 'Discord message deleted',
+                message_deleted: true,
+                poll: { ...pollData, discord_deleted: true }
+            });
+        }
+
+        logger.info(`[PollManagement] Poll ${pollId} status updated to ${active ? 'active' : 'closed'} by ${permCheck.userId}`);
+
+        return res.json({ ...pollData, active });
+    } catch (error) {
+        logger.error('[PollManagement] Error updating poll status:', error);
+        return res.status(500).json({ error: 'Failed to update poll status' });
+    }
+});
+
+/**
+ * DELETE /api/user/polls/:pollId
+ * Delete a poll from the database (useful for orphaned polls where Discord message was deleted)
+ */
+router.delete('/polls/:pollId', async (req: Request, res: Response) => {
+    const authHeader = req.headers.authorization;
+    const sessionId = authHeader?.replace('Bearer ', '');
+    const { pollId } = req.params;
+
+    if (!sessionId) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    try {
+        // 1. Fetch poll to verify it exists and get guild_id
+        const { data: pollData, error: pollError } = await supabase
+            .from('polls')
+            .select('guild_id, title')
+            .eq('message_id', pollId)
+            .single();
+
+        if (pollError || !pollData) {
+            return res.status(404).json({ error: 'Poll not found' });
+        }
+
+        // 2. Verify user has permission
+        const permCheck = await verifyUserPermission(sessionId, pollData.guild_id);
+        if (!permCheck.valid) {
+            return res.status(403).json({ error: permCheck.error || 'Permission denied' });
+        }
+
+        // 3. Delete votes first (foreign key constraint)
+        await supabase
+            .from('votes')
+            .delete()
+            .eq('poll_id', pollId);
+
+        // 4. Delete the poll
+        const { error: deleteError } = await supabase
+            .from('polls')
+            .delete()
+            .eq('message_id', pollId);
+
+        if (deleteError) {
+            logger.error('[PollManagement] Failed to delete poll:', deleteError);
+            return res.status(500).json({ error: 'Failed to delete poll' });
+        }
+
+        logger.info(`[PollManagement] Poll ${pollId} (${pollData.title}) deleted by ${permCheck.userId}`);
+
+        return res.json({ success: true, deleted: pollId });
+    } catch (error) {
+        logger.error('[PollManagement] Error deleting poll:', error);
+        return res.status(500).json({ error: 'Failed to delete poll' });
+    }
+});
+
+/**
+ * PATCH /api/user/polls/:pollId
+ * Edit poll settings (not title/options to preserve vote integrity)
+ */
+router.patch('/polls/:pollId', async (req: Request, res: Response) => {
+    const authHeader = req.headers.authorization;
+    const sessionId = authHeader?.replace('Bearer ', '');
+    const { pollId } = req.params;
+    const { settings: newSettings } = req.body as {
+        settings: {
+            public?: boolean;
+            allow_close?: boolean;
+            allow_exports?: boolean;
+            allowed_roles?: string[];
+            vote_weights?: Record<string, number>;
+            role_metadata?: Record<string, { name: string; color: number }>;
+        };
+    };
+
+    if (!sessionId) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    if (!newSettings || typeof newSettings !== 'object') {
+        return res.status(400).json({ error: 'settings object required' });
+    }
+
+    try {
+        // 1. Fetch poll
+        const { data: pollData, error: pollError } = await supabase
+            .from('polls')
+            .select('*')
+            .eq('message_id', pollId)
+            .single();
+
+        if (pollError || !pollData) {
+            return res.status(404).json({ error: 'Poll not found' });
+        }
+
+        // 2. Verify permissions
+        const permCheck = await verifyUserPermission(sessionId, pollData.guild_id);
+        if (!permCheck.valid) {
+            return res.status(403).json({ error: permCheck.error || 'Permission denied' });
+        }
+
+        // 3. Merge settings (only allowed fields)
+        const currentSettings = pollData.settings || {};
+        const updatedSettings = {
+            ...currentSettings,
+            public: newSettings.public ?? currentSettings.public,
+            allow_close: newSettings.allow_close ?? currentSettings.allow_close,
+            allow_exports: newSettings.allow_exports ?? currentSettings.allow_exports,
+            allowed_roles: newSettings.allowed_roles ?? currentSettings.allowed_roles,
+            vote_weights: newSettings.vote_weights ?? currentSettings.vote_weights,
+            role_metadata: newSettings.role_metadata ?? currentSettings.role_metadata,
+        };
+
+        // 4. Update database
+        const { error: updateError } = await supabase
+            .from('polls')
+            .update({ settings: updatedSettings })
+            .eq('message_id', pollId);
+
+        if (updateError) {
+            logger.error('[PollManagement] Failed to update poll settings:', updateError);
+            return res.status(500).json({ error: 'Failed to update poll settings' });
+        }
+
+        // 5. Recalculate vote weights if vote_weights changed
+        const oldWeights = JSON.stringify(currentSettings.vote_weights || {});
+        const newWeightsStr = JSON.stringify(updatedSettings.vote_weights || {});
+
+        if (oldWeights !== newWeightsStr) {
+            logger.info(`[PollManagement] Vote weights changed for poll ${pollId}, recalculating...`);
+
+            // Get all unique voters for this poll
+            const { data: votes } = await supabase
+                .from('votes')
+                .select('user_id')
+                .eq('poll_id', pollId);
+
+            if (votes && votes.length > 0) {
+                const uniqueUserIds = [...new Set(votes.map(v => v.user_id))];
+
+                const shardingManager = getShardingManager();
+                if (shardingManager) {
+                    // Use broadcastEval to get member roles for each user
+                    const memberWeights = await shardingManager.broadcastEval(
+                        async (client: any, context: { guildId: string; userIds: string[]; voteWeights: Record<string, number> }) => {
+                            const { guildId, userIds, voteWeights } = context;
+                            const guild = client.guilds.cache.get(guildId);
+                            if (!guild) return [];
+
+                            const results: Array<{ userId: string; weight: number }> = [];
+
+                            for (const userId of userIds) {
+                                try {
+                                    const member = await guild.members.fetch(userId).catch(() => null);
+                                    if (member) {
+                                        // Calculate weight based on member roles
+                                        let maxWeight = 1;
+                                        for (const roleId of member.roles.cache.keys()) {
+                                            const roleWeight = voteWeights[roleId];
+                                            if (roleWeight && roleWeight > maxWeight) {
+                                                maxWeight = roleWeight;
+                                            }
+                                        }
+                                        results.push({ userId, weight: maxWeight });
+                                    }
+                                } catch {
+                                    // Member not found, keep default weight
+                                }
+                            }
+
+                            return results;
+                        },
+                        {
+                            context: {
+                                guildId: pollData.guild_id,
+                                userIds: uniqueUserIds,
+                                voteWeights: updatedSettings.vote_weights || {},
+                            }
+                        }
+                    );
+
+                    // Flatten results from all shards
+                    const flatResults = (Array.isArray(memberWeights) ? memberWeights : [memberWeights])
+                        .flat()
+                        .filter((r): r is { userId: string; weight: number } => r !== null && typeof r === 'object');
+
+                    // Build a map of userId -> weight
+                    const weightMap = new Map<string, number>();
+                    for (const result of flatResults) {
+                        weightMap.set(result.userId, result.weight);
+                    }
+
+                    // Update votes with new weights
+                    for (const userId of uniqueUserIds) {
+                        const newWeight = weightMap.get(userId) || 1;
+                        await supabase
+                            .from('votes')
+                            .update({ weight: newWeight })
+                            .eq('poll_id', pollId)
+                            .eq('user_id', userId);
+                    }
+
+                    logger.info(`[PollManagement] Recalculated weights for ${uniqueUserIds.length} voters on poll ${pollId}`);
+
+                    // Update Discord message with new vote counts
+                    // First, get updated vote counts
+                    const { data: allVotes } = await supabase
+                        .from('votes')
+                        .select('option_index, weight')
+                        .eq('poll_id', pollId);
+
+                    const newVoteCounts: number[] = pollData.options.map(() => 0);
+                    (allVotes || []).forEach((v: { option_index: number; weight: number }) => {
+                        newVoteCounts[v.option_index] = (newVoteCounts[v.option_index] || 0) + (v.weight || 1);
+                    });
+
+                    // Calculate total votes
+                    const totalVotes = newVoteCounts.reduce((a, b) => a + b, 0);
+
+                    // Get creator name for rendering
+                    const { data: userData } = await supabase
+                        .from('discord_users')
+                        .select('username')
+                        .eq('id', pollData.creator_id)
+                        .single();
+                    const creatorName = userData?.username || 'Unknown';
+
+                    // Render updated poll image
+                    const { Renderer } = await import('../lib/renderer');
+                    const showVotes = !pollData.active || updatedSettings.public !== false;
+
+                    const renderOptions: any = {
+                        title: pollData.title,
+                        description: pollData.description || '',
+                        options: pollData.options,
+                        totalVotes,
+                        creator: creatorName,
+                        closed: !pollData.active,
+                    };
+
+                    if (showVotes) {
+                        renderOptions.votes = newVoteCounts;
+                    }
+
+                    const imageBuffer = await Renderer.renderPoll(renderOptions);
+                    const imageBase64 = imageBuffer.toString('base64');
+
+                    // Update Discord message
+                    await shardingManager.broadcastEval(
+                        async (client: any, context: any) => {
+                            const { channelId, messageId, imageBase64 } = context;
+                            const { AttachmentBuilder } = await import('discord.js');
+
+                            const channel = client.channels.cache.get(channelId);
+                            if (!channel || !channel.isTextBased()) return null;
+
+                            try {
+                                const message = await (channel as any).messages.fetch(messageId);
+                                if (!message) return null;
+
+                                const imageBufferFromBase64 = Buffer.from(imageBase64, 'base64');
+                                const attachment = new AttachmentBuilder(imageBufferFromBase64, { name: 'poll.png' });
+
+                                await message.edit({ files: [attachment] });
+                                return { success: true };
+                            } catch {
+                                return null;
+                            }
+                        },
+                        {
+                            context: {
+                                channelId: pollData.channel_id,
+                                messageId: pollId,
+                                imageBase64,
+                            }
+                        }
+                    );
+
+                    logger.info(`[PollManagement] Updated Discord message for poll ${pollId} after weight recalculation`);
+                }
+            }
+        }
+
+        logger.info(`[PollManagement] Poll ${pollId} settings updated by ${permCheck.userId}`);
+
+        return res.json({ ...pollData, settings: updatedSettings });
+    } catch (error) {
+        logger.error('[PollManagement] Error updating poll settings:', error);
+        return res.status(500).json({ error: 'Failed to update poll settings' });
+    }
+});
+
 export const pollManagementRouter = router;
+
+
+
