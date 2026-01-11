@@ -20,12 +20,13 @@ app.use((req, res, next) => {
 // Note: app.use('/api', ...) strips '/api' from the req.url
 // So we proxy to http://localhost:5000/api to restore it.
 // Proxy /api requests to the Bot/API process
-// Use root mount + pathFilter to preserve the full URI (avoid Express stripping /api)
-app.use(createProxyMiddleware({
-    target: 'http://127.0.0.1:5000',
+// Note: app.use('/api', ...) strips '/api' from the req.url.
+// We proxy to 'http://127.0.0.1:5000/api' so that the outgoing request becomes:
+// http://127.0.0.1:5000/api + /auth/discord (the stripped path)
+app.use('/api', createProxyMiddleware({
+    target: 'http://127.0.0.1:5000/api',
     changeOrigin: true,
     ws: true,
-    pathFilter: ['/api', '/api/**']
 }));
 
 // Proxy /supabase requests if we are proxying Supabase Realtime (optional, based on vite config)
