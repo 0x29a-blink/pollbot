@@ -20,14 +20,31 @@ app.use((req, res, next) => {
 // Note: app.use('/api', ...) strips '/api' from the req.url
 // So we proxy to http://localhost:5000/api to restore it.
 // Proxy /api requests to the Bot/API process
-// Note: app.use('/api', ...) strips '/api' from the req.url.
-// We proxy to 'http://127.0.0.1:5000/api' so that the outgoing request becomes:
-// http://127.0.0.1:5000/api + /auth/discord (the stripped path)
-app.use('/api', createProxyMiddleware({
-    target: 'http://127.0.0.1:5000/api',
+// Root mount + pathFilter is the safest way to preserve paths
+app.use(createProxyMiddleware({
+    target: 'http://127.0.0.1:5000',
     changeOrigin: true,
     ws: true,
+    pathFilter: ['/api', '/api/**'],
+    // @ts-ignore - v3 types might differ, but this is the standard error handler key
+    on: {
+        error: (err: any, req: any, res: any) => {
+            logger.error('[DashboardService] Proxy error:', err);
+            res.status(502).json({ error: 'Proxy Error', details: err.message });
+        },
+        proxyReq: (proxyReq: any, req: any, res: any) => {
+            // Log outgoing proxy requests for debug
+            // console.log(`[DashboardService] Proxying ${req.method} ${req.url} -> ${proxyReq.path}`);
+        }
+    }
 }));
+
+// Safety Net: If proxy falls through (shouldn't happen for /api), catch it here.
+// API requests should NEVER serve index.html
+app.use('/api', (req, res) => {
+    logger.warn(`[DashboardService] Unhandled API request fell through: ${req.url}`);
+    res.status(404).json({ error: 'Not Found', path: req.originalUrl });
+});
 
 // Proxy /supabase requests if we are proxying Supabase Realtime (optional, based on vite config)
 // The previous vite config proxied /supabase to the actual Supabase URL.
