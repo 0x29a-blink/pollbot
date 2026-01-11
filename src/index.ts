@@ -43,6 +43,21 @@ renderService.on('error', (err) => {
     logger.error('[Manager] Render Service failed:', err);
 });
 
+// 2.5 Spawn Dashboard Service (Serves Frontend + Proxy)
+logger.info('[Manager] Spawning Dashboard Service...');
+const dashboardServiceFile = path.join(__dirname, 'services', `DashboardService.${extension}`);
+const dashboardService: ChildProcess = fork(dashboardServiceFile, [], {
+    execArgv: isTsNode ? ['-r', 'ts-node/register'] : []
+});
+
+dashboardService.on('spawn', () => {
+    logger.info('[Manager] Dashboard Service process spawned.');
+});
+
+dashboardService.on('error', (err) => {
+    logger.error('[Manager] Dashboard Service failed:', err);
+});
+
 // 3. Spawn Shards (Delayed to allow Render Service to warm up)
 // Ideally we wait for a signal, but a short delay is usually sufficient/simpler for now.
 setTimeout(() => {
@@ -95,13 +110,15 @@ setTimeout(() => {
 
 // Handle Shutdown
 process.on('SIGINT', () => {
-    logger.info('[Manager] SIGINT received. Killing Render Service...');
+    logger.info('[Manager] SIGINT received. Killing Services...');
     renderService.kill();
+    dashboardService.kill();
     process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-    logger.info('[Manager] SIGTERM received. Killing Render Service...');
+    logger.info('[Manager] SIGTERM received. Killing Services...');
     renderService.kill();
+    dashboardService.kill();
     process.exit(0);
 });
