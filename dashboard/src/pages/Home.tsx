@@ -265,7 +265,7 @@ export const Home: React.FC = () => {
     // Bot invite URL with guild pre-selection
     const getBotInviteUrl = (guildId: string) => {
         const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID || '';
-        return `https://discord.com/oauth2/authorize?client_id=${clientId}&scope=bot+applications.commands&permissions=274878024768&guild_id=${guildId}`;
+        return `https://discord.com/oauth2/authorize?client_id=${clientId}&scope=bot+applications.commands&permissions=534992383040&guild_id=${guildId}`;
     };
 
     const fetchGuildsList = async () => {
