@@ -7,42 +7,8 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../App';
 import { CreatePollModal } from '../components/CreatePollModal';
 import { EditPollModal } from '../components/EditPollModal';
+import type { Poll, PollSettings, GuildInfo } from '../types';
 
-interface PollSettings {
-    public?: boolean;
-    allow_thread?: boolean;
-    allow_close?: boolean;
-    max_votes?: number;
-    min_votes?: number;
-    allowed_roles?: string[];
-    vote_weights?: Record<string, number>;
-    allow_exports?: boolean;
-    // Role metadata for dashboard display (name, color)
-    role_metadata?: Record<string, { name: string; color: number }>;
-}
-
-interface Poll {
-    message_id: string;
-    guild_id: string;
-    channel_id: string;
-    creator_id: string;
-    title: string;
-    description: string;
-    options: string[];
-    active: boolean;
-    created_at: string;
-    settings: PollSettings;
-    vote_counts: Record<number, number>;
-    total_votes: number;
-    discord_deleted?: boolean; // Set when Discord message no longer exists
-}
-
-interface GuildInfo {
-    id: string;
-    name: string;
-    icon_url: string | null;
-    member_count: number;
-}
 
 export const UserServerView: React.FC = () => {
     const { guildId } = useParams<{ guildId: string }>();
@@ -390,7 +356,8 @@ const PollCard: React.FC<{
     const [isExpanded, setIsExpanded] = useState(false);
     const [isUpdating, setIsUpdating] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
-    const maxVotes = Math.max(...Object.values(poll.vote_counts), 1);
+    const voteCounts = poll.vote_counts || {};
+    const maxVotes = Math.max(...Object.values(voteCounts), 1);
     const settings = poll.settings || {};
 
     const handleStatusToggle = async (e: React.MouseEvent) => {
@@ -495,8 +462,9 @@ const PollCard: React.FC<{
                                     {/* Options with vote bars */}
                                     <div className="space-y-2">
                                         {poll.options.map((option, index) => {
-                                            const votes = poll.vote_counts[index] || 0;
-                                            const percentage = poll.total_votes > 0 ? (votes / poll.total_votes) * 100 : 0;
+                                            const votes = voteCounts[index] || 0;
+                                            const totalVotes = poll.total_votes || 0;
+                                            const percentage = totalVotes > 0 ? (votes / totalVotes) * 100 : 0;
                                             const barWidth = (votes / maxVotes) * 100;
 
                                             return (

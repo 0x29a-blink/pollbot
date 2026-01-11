@@ -89,16 +89,16 @@ export const Home: React.FC = () => {
             }
 
             // Calculations for Totals (Servers & Members)
-            // Fetch ALL member counts (lightweight query) to sum them up on client
-            // Note: For millions of rows this is bad, but for 5100 it's instant.
-            const { data: allGuilds, count: totalGuildCount } = await supabase.from('guilds').select('member_count', { count: 'exact' }).limit(1000); // Limit data to 1000 to save bandwidth, but get true count
-            if (allGuilds) {
-                setTotalServerCount(totalGuildCount || allGuilds.length);
-                const sum = allGuilds.reduce((acc, curr) => acc + (curr.member_count || 0), 0);
-                // Note: This sum is only for the first 1000 guilds (approx). A true sum requires RPC or iterative fetch.
-                // For now, we accept this approximation or we could scale it.
-                setTotalMembers(sum);
+            // Get true server count
+            const { count: totalGuildCount } = await supabase.from('guilds').select('id', { count: 'exact', head: true });
+            setTotalServerCount(totalGuildCount || 0);
+
+            // Get true total members using RPC function (avoids 1000 row limit approximation)
+            const { data: memberSumData } = await supabase.rpc('get_total_members');
+            if (memberSumData !== null) {
+                setTotalMembers(memberSumData);
             }
+
 
             // Top Creators
             const { data: pollsData } = await supabase.from('polls').select('creator_id');

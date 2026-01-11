@@ -1,22 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, AlertCircle, Plus, Trash2, Users, Scale, Loader2, HelpCircle } from 'lucide-react';
+import type { Channel, Role } from '../types';
 
-interface Channel {
-    id: string;
-    name: string;
-    type: number;
-    position: number;
-    parent_id: string | null;
-    bot_can_post: boolean;
-}
 
-interface Role {
-    id: string;
-    name: string;
-    color: number;
-    position: number;
-}
 
 interface CreatePollModalProps {
     isOpen: boolean;

@@ -36,6 +36,73 @@ setInterval(() => {
 }, 60000); // Every minute
 
 /**
+ * Refresh Discord access token using refresh token
+ * Returns new access token or null if refresh failed
+ */
+async function refreshAccessToken(sessionId: string): Promise<string | null> {
+    try {
+        // Get session with refresh token from database
+        const { data: session, error: sessionError } = await supabase
+            .from('dashboard_sessions')
+            .select('refresh_token, user_id')
+            .eq('id', sessionId)
+            .single();
+
+        if (sessionError || !session?.refresh_token) {
+            logger.warn(`[Dashboard Auth] No refresh token for session ${sessionId.substring(0, 8)}...`);
+            return null;
+        }
+
+        // Request new tokens from Discord
+        const tokenResponse = await fetch(`${DISCORD_API_BASE}/oauth2/token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                client_id: CLIENT_ID,
+                client_secret: CLIENT_SECRET,
+                grant_type: 'refresh_token',
+                refresh_token: session.refresh_token,
+            }),
+        });
+
+        if (!tokenResponse.ok) {
+            const errorText = await tokenResponse.text();
+            logger.error(`[Dashboard Auth] Token refresh failed: ${errorText}`);
+            return null;
+        }
+
+        const tokens = await tokenResponse.json() as {
+            access_token: string;
+            refresh_token?: string;
+            expires_in: number;
+        };
+
+        // Update session in database with new tokens
+        const newExpiresAt = new Date(Date.now() + (7 * 24 * 60 * 60 * 1000)); // 7 days
+        await supabase
+            .from('dashboard_sessions')
+            .update({
+                access_token: tokens.access_token,
+                refresh_token: tokens.refresh_token || session.refresh_token,
+                expires_at: newExpiresAt.toISOString(),
+            })
+            .eq('id', sessionId);
+
+        // Update in-memory cache
+        sessions.set(sessionId, {
+            userId: session.user_id,
+            expiresAt: newExpiresAt.getTime(),
+        });
+
+        logger.info(`[Dashboard Auth] Refreshed token for session ${sessionId.substring(0, 8)}...`);
+        return tokens.access_token;
+    } catch (error) {
+        logger.error(`[Dashboard Auth] Error refreshing token:`, error);
+        return null;
+    }
+}
+
+/**
  * GET /api/auth/discord
  * Redirect user to Discord OAuth authorization page
  */

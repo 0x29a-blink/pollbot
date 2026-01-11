@@ -19,6 +19,59 @@ const GUILD_DATA_CACHE_TTL = 30 * 60 * 1000;
 // Refresh cooldown: 5 minutes
 const REFRESH_COOLDOWN = 5 * 60 * 1000;
 
+// Rate limiting for poll mutations
+const POLL_CREATE_LIMIT = 10; // max polls per window
+const POLL_CREATE_WINDOW = 10 * 60 * 1000; // 10 minutes
+const POLL_MUTATION_LIMIT = 30; // max status changes/deletes/edits per window  
+const POLL_MUTATION_WINDOW = 60 * 1000; // 1 minute
+
+// Rate limit tracking: Map<userId, { count: number, windowStart: number }>
+const pollCreateRates = new Map<string, { count: number; windowStart: number }>();
+const pollMutationRates = new Map<string, { count: number; windowStart: number }>();
+
+/**
+ * Check rate limit for a user action
+ * Returns true if allowed, false if rate limited
+ */
+function checkRateLimit(
+    userId: string,
+    rateMap: Map<string, { count: number; windowStart: number }>,
+    limit: number,
+    windowMs: number
+): { allowed: boolean; retryAfter?: number } {
+    const now = Date.now();
+    const userRate = rateMap.get(userId);
+
+    if (!userRate || now - userRate.windowStart > windowMs) {
+        // New window
+        rateMap.set(userId, { count: 1, windowStart: now });
+        return { allowed: true };
+    }
+
+    if (userRate.count >= limit) {
+        const retryAfter = Math.ceil((userRate.windowStart + windowMs - now) / 1000);
+        return { allowed: false, retryAfter };
+    }
+
+    userRate.count++;
+    return { allowed: true };
+}
+
+// Cleanup stale rate limit entries periodically
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, rate] of pollCreateRates) {
+        if (now - rate.windowStart > POLL_CREATE_WINDOW * 2) {
+            pollCreateRates.delete(key);
+        }
+    }
+    for (const [key, rate] of pollMutationRates) {
+        if (now - rate.windowStart > POLL_MUTATION_WINDOW * 2) {
+            pollMutationRates.delete(key);
+        }
+    }
+}, 60000);
+
 interface CachedGuildData {
     channels: CachedChannel[];
     roles: CachedRole[];
@@ -415,6 +468,16 @@ router.post('/polls', async (req: Request, res: Response) => {
         return res.status(permCheck.status || 403).json({ error: permCheck.error });
     }
 
+    // Rate limit check for poll creation
+    const rateCheck = checkRateLimit(permCheck.userId!, pollCreateRates, POLL_CREATE_LIMIT, POLL_CREATE_WINDOW);
+    if (!rateCheck.allowed) {
+        return res.status(429).json({
+            error: 'Rate limited',
+            retryAfter: rateCheck.retryAfter,
+            message: `You can create up to ${POLL_CREATE_LIMIT} polls every ${POLL_CREATE_WINDOW / 60000} minutes`,
+        });
+    }
+
     // Verify channel exists and bot can post
     const guildData = await getGuildData(body.guild_id);
     if (!guildData) {
@@ -609,6 +672,16 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
         const permCheck = await verifyUserPermission(sessionId, pollData.guild_id);
         if (!permCheck.valid) {
             return res.status(403).json({ error: permCheck.error || 'Permission denied' });
+        }
+
+        // Rate limit check for poll mutations
+        const rateCheck = checkRateLimit(permCheck.userId!, pollMutationRates, POLL_MUTATION_LIMIT, POLL_MUTATION_WINDOW);
+        if (!rateCheck.allowed) {
+            return res.status(429).json({
+                error: 'Rate limited',
+                retryAfter: rateCheck.retryAfter,
+                message: `Too many requests. Please wait ${rateCheck.retryAfter} seconds.`,
+            });
         }
 
         // 3. Update database
@@ -825,6 +898,16 @@ router.delete('/polls/:pollId', async (req: Request, res: Response) => {
             return res.status(403).json({ error: permCheck.error || 'Permission denied' });
         }
 
+        // Rate limit check for poll mutations
+        const rateCheck = checkRateLimit(permCheck.userId!, pollMutationRates, POLL_MUTATION_LIMIT, POLL_MUTATION_WINDOW);
+        if (!rateCheck.allowed) {
+            return res.status(429).json({
+                error: 'Rate limited',
+                retryAfter: rateCheck.retryAfter,
+                message: `Too many requests. Please wait ${rateCheck.retryAfter} seconds.`,
+            });
+        }
+
         // 3. Delete votes first (foreign key constraint)
         await supabase
             .from('votes')
@@ -894,6 +977,16 @@ router.patch('/polls/:pollId', async (req: Request, res: Response) => {
         const permCheck = await verifyUserPermission(sessionId, pollData.guild_id);
         if (!permCheck.valid) {
             return res.status(403).json({ error: permCheck.error || 'Permission denied' });
+        }
+
+        // Rate limit check for poll mutations
+        const rateCheck = checkRateLimit(permCheck.userId!, pollMutationRates, POLL_MUTATION_LIMIT, POLL_MUTATION_WINDOW);
+        if (!rateCheck.allowed) {
+            return res.status(429).json({
+                error: 'Rate limited',
+                retryAfter: rateCheck.retryAfter,
+                message: `Too many requests. Please wait ${rateCheck.retryAfter} seconds.`,
+            });
         }
 
         // 3. Merge settings (only allowed fields)
@@ -1016,7 +1109,7 @@ router.patch('/polls/:pollId', async (req: Request, res: Response) => {
 
                     // Get creator name for rendering
                     const { data: userData } = await supabase
-                        .from('discord_users')
+                        .from('users')
                         .select('username')
                         .eq('id', pollData.creator_id)
                         .single();

@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS polls (
     options JSONB NOT NULL DEFAULT '[]'::jsonb,
     settings JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    active BOOLEAN NOT NULL DEFAULT TRUE
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    discord_deleted BOOLEAN DEFAULT FALSE
 );
 
 -- 3. votes table
@@ -96,6 +97,11 @@ CREATE INDEX IF NOT EXISTS idx_votes_poll_id ON votes(poll_id);
 CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_user_id ON dashboard_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_expires_at ON dashboard_sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_guilds_cached_at ON dashboard_sessions(guilds_cached_at);
+
+-- Additional indexes for common queries
+CREATE INDEX IF NOT EXISTS idx_polls_guild_id ON polls(guild_id);
+CREATE INDEX IF NOT EXISTS idx_polls_creator_id ON polls(creator_id);
+CREATE INDEX IF NOT EXISTS idx_polls_created_at ON polls(created_at DESC);
 
 -- ============================================================================
 -- ROW LEVEL SECURITY
