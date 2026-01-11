@@ -76,8 +76,9 @@ app.use(express.static(dashboardDist));
 
 // Fallback for SPA routing - send index.html for non-API 404s
 // Fallback for SPA routing - send index.html for non-API 404s
-// Express 5 requires named parameters for wildcards: /:param(.*)
-app.get('/:pathMatch(.*)', (req, res) => {
+// Fallback for SPA routing - send index.html for non-API 404s
+// Using RegExp to bypass string path parsing issues in Express 5 / path-to-regexp
+app.get(/.*/, (req, res) => {
     res.sendFile(path.join(dashboardDist, 'index.html'));
 });
 
