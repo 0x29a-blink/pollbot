@@ -1,3 +1,4 @@
+import SimpleSolutionsLogo from '../assets/simplesolutions.webp';
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { motion } from 'framer-motion';
@@ -416,8 +417,8 @@ export const Home: React.FC = () => {
             <header className="glass-panel sticky top-0 z-50 border-t-0 border-r-0 border-l-0 rounded-none bg-opacity-80">
                 <div className="container-wide py-4 flex justify-between items-center">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center text-indigo-400">
-                            <Activity className="w-6 h-6" />
+                        <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center text-indigo-400 overflow-hidden">
+                            <img src={SimpleSolutionsLogo} alt="Logo" className="w-full h-full object-contain p-1" />
                         </div>
                         <h1 className="text-xl font-bold title-gradient">Simple Poll Bot Dashboard</h1>
                     </div>
