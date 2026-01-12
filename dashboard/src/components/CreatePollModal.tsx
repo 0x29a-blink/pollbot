@@ -3,7 +3,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, AlertCircle, Plus, Trash2, Users, Scale, Loader2, HelpCircle } from 'lucide-react';
 import type { Channel, Role } from '../types';
 
-
+// Helper to get CSRF token from cookie
+const getCsrfToken = (): string | null => {
+    const cookies = document.cookie.split(';');
+    for (const cookie of cookies) {
+        const [name, value] = cookie.trim().split('=');
+        if (name === 'csrf_token') return value;
+    }
+    return null;
+};
 
 interface CreatePollModalProps {
     isOpen: boolean;
@@ -77,13 +85,12 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
     const fetchGuildData = async () => {
         setDataLoading(true);
         try {
-            const session = localStorage.getItem('dashboard_session');
             const [channelsRes, rolesRes] = await Promise.all([
                 fetch(`/api/user/guilds/${guildId}/channels`, {
-                    headers: { Authorization: `Bearer ${session}` },
+                    credentials: 'include',
                 }),
                 fetch(`/api/user/guilds/${guildId}/roles`, {
-                    headers: { Authorization: `Bearer ${session}` },
+                    credentials: 'include',
                 }),
             ]);
 
@@ -180,12 +187,12 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
                 }
             });
 
-            const session = localStorage.getItem('dashboard_session');
             const res = await fetch('/api/user/polls', {
                 method: 'POST',
+                credentials: 'include',
                 headers: {
-                    Authorization: `Bearer ${session}`,
                     'Content-Type': 'application/json',
+                    'x-csrf-token': getCsrfToken() || '',
                 },
                 body: JSON.stringify({
                     guild_id: guildId,

@@ -8,6 +8,7 @@ import { ServerView } from './pages/ServerView';
 import { PollsView } from './pages/PollsView';
 import { VotersView } from './pages/VotersView';
 import { UserServerView } from './pages/UserServerView';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 // User context for sharing auth state
 interface User {
@@ -41,24 +42,17 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   }, []);
 
   const checkAuth = async () => {
-    const session = localStorage.getItem('dashboard_session');
-    if (!session) {
-      setLoading(false);
-      return;
-    }
-
     try {
+      // With httpOnly cookies, we just need to call /me and the cookie is sent automatically
       const res = await fetch('/api/auth/me', {
-        headers: { Authorization: `Bearer ${session}` },
+        credentials: 'include', // Send cookies
       });
 
       if (res.ok) {
         const userData = await res.json();
         setUser(userData);
-      } else {
-        // Session expired or invalid
-        localStorage.removeItem('dashboard_session');
       }
+      // If not ok, user is simply not logged in (no need to clear anything)
     } catch (error) {
       console.error('Auth check failed:', error);
     } finally {
@@ -67,18 +61,14 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   };
 
   const logout = async () => {
-    const session = localStorage.getItem('dashboard_session');
-    if (session) {
-      try {
-        await fetch('/api/auth/logout', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${session}` },
-        });
-      } catch (error) {
-        console.error('Logout failed:', error);
-      }
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include', // Send cookies
+      });
+    } catch (error) {
+      console.error('Logout failed:', error);
     }
-    localStorage.removeItem('dashboard_session');
     setUser(null);
   };
 
@@ -165,11 +155,13 @@ function AppRoutes() {
 
 function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <AppRoutes />
-      </AuthProvider>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }
 

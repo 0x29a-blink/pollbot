@@ -5,6 +5,17 @@ import crypto from 'crypto';
 
 const router = Router();
 
+// Cookie configuration
+const COOKIE_NAME = 'pollbot_session';
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const COOKIE_OPTIONS = {
+    httpOnly: true,
+    secure: IS_PRODUCTION, // Only HTTPS in production
+    sameSite: 'lax' as const,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
+    path: '/',
+};
+
 // Discord OAuth2 configuration
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 const CLIENT_ID = (process.env.DISCORD_CLIENT_ID || '').trim();
@@ -270,9 +281,9 @@ router.get('/callback', async (req: Request, res: Response) => {
 
         logger.info(`[Dashboard Auth] User ${discordUser.username} (${discordUser.id}) logged in, admin: ${isAdmin}`);
 
-        // Redirect to frontend with session token
-        // The frontend will store this in localStorage
-        res.redirect(`/auth/callback?session=${sessionId}`);
+        // Set session as httpOnly cookie and redirect to dashboard
+        res.cookie(COOKIE_NAME, sessionId, COOKIE_OPTIONS);
+        res.redirect('/auth/callback');
     } catch (err) {
         logger.error(`[Dashboard Auth] Unexpected error:`, err);
         return res.redirect('/login?error=unexpected');
@@ -284,8 +295,11 @@ router.get('/callback', async (req: Request, res: Response) => {
  * Return current user info from session
  */
 router.get('/me', async (req: Request, res: Response) => {
+    // Support both cookie and header auth for backwards compatibility during migration
+    const cookieSession = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers.authorization;
-    const sessionId = authHeader?.replace('Bearer ', '');
+    const headerSession = authHeader?.replace('Bearer ', '');
+    const sessionId = cookieSession || headerSession;
 
     if (!sessionId) {
         return res.status(401).json({ error: 'No session token provided' });
@@ -342,8 +356,11 @@ router.get('/me', async (req: Request, res: Response) => {
  * Clear session
  */
 router.post('/logout', async (req: Request, res: Response) => {
+    // Support both cookie and header auth
+    const cookieSession = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers.authorization;
-    const sessionId = authHeader?.replace('Bearer ', '');
+    const headerSession = authHeader?.replace('Bearer ', '');
+    const sessionId = cookieSession || headerSession;
 
     if (sessionId) {
         sessions.delete(sessionId);
@@ -351,6 +368,8 @@ router.post('/logout', async (req: Request, res: Response) => {
         logger.info(`[Dashboard Auth] Session ${sessionId.substring(0, 8)}... logged out`);
     }
 
+    // Clear the cookie
+    res.clearCookie(COOKIE_NAME, { path: '/' });
     return res.json({ success: true });
 });
 

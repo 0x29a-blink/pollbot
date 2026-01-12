@@ -13,22 +13,17 @@ export const Login: React.FC = () => {
 
     // Check if already logged in
     useEffect(() => {
-        const session = localStorage.getItem('dashboard_session');
-        if (session) {
-            // Verify session is still valid
-            fetch('/api/auth/me', {
-                headers: { Authorization: `Bearer ${session}` }
-            }).then(res => {
-                if (res.ok) {
-                    navigate('/dashboard', { replace: true });
-                } else {
-                    // Session expired, clear it
-                    localStorage.removeItem('dashboard_session');
-                }
-            }).catch(() => {
-                // Network error, try dashboard anyway
-            });
-        }
+        // With httpOnly cookies, just call /me to check if session exists
+        fetch('/api/auth/me', {
+            credentials: 'include' // Send cookies
+        }).then(res => {
+            if (res.ok) {
+                navigate('/dashboard', { replace: true });
+            }
+            // If not ok, user is not logged in (no need to clear anything)
+        }).catch(() => {
+            // Network error, stay on login page
+        });
     }, [navigate]);
 
     const handleDiscordLogin = () => {

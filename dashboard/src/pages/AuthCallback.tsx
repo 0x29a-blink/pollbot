@@ -10,7 +10,6 @@ export const AuthCallback: React.FC = () => {
     const navigate = useNavigate();
 
     useEffect(() => {
-        const session = searchParams.get('session');
         const error = searchParams.get('error');
 
         if (error) {
@@ -37,19 +36,31 @@ export const AuthCallback: React.FC = () => {
             return;
         }
 
-        if (session) {
-            // Store the session token
-            localStorage.setItem('dashboard_session', session);
-            setStatus('success');
+        // With httpOnly cookies, we don't get a session token in URL
+        // The cookie is already set by the backend, just verify the session works
+        const verifySession = async () => {
+            try {
+                const res = await fetch('/api/auth/me', {
+                    credentials: 'include', // Send cookies
+                });
 
-            // Redirect to dashboard after a brief delay
-            setTimeout(() => {
-                navigate('/dashboard', { replace: true });
-            }, 1500);
-        } else {
-            setStatus('error');
-            setErrorMessage('No session token received.');
-        }
+                if (res.ok) {
+                    setStatus('success');
+                    // Redirect to dashboard after a brief delay
+                    setTimeout(() => {
+                        navigate('/dashboard', { replace: true });
+                    }, 1500);
+                } else {
+                    setStatus('error');
+                    setErrorMessage('Session verification failed. Please try again.');
+                }
+            } catch (err) {
+                setStatus('error');
+                setErrorMessage('Network error. Please try again.');
+            }
+        };
+
+        verifySession();
     }, [searchParams, navigate]);
 
     return (

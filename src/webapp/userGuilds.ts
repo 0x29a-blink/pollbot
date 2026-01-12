@@ -4,6 +4,8 @@ import { logger } from '../lib/logger';
 
 const router = Router();
 
+// Cookie name must match dashboardAuth.ts
+const COOKIE_NAME = 'pollbot_session';
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 
 // Discord permission flags
@@ -161,8 +163,11 @@ async function processGuilds(userGuilds: DiscordGuild[], userId: string): Promis
  * Uses cached data if available and not stale (30 min TTL)
  */
 router.get('/guilds', async (req: Request, res: Response) => {
+    // Support both cookie and header auth
+    const cookieSession = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers.authorization;
-    const sessionId = authHeader?.replace('Bearer ', '');
+    const headerSession = authHeader?.replace('Bearer ', '');
+    const sessionId = cookieSession || headerSession;
 
     if (!sessionId) {
         return res.status(401).json({ error: 'Unauthorized' });
@@ -238,8 +243,11 @@ router.get('/guilds', async (req: Request, res: Response) => {
  * Rate limited to once per 5 minutes
  */
 router.post('/guilds/refresh', async (req: Request, res: Response) => {
+    // Support both cookie and header auth
+    const cookieSession = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers.authorization;
-    const sessionId = authHeader?.replace('Bearer ', '');
+    const headerSession = authHeader?.replace('Bearer ', '');
+    const sessionId = cookieSession || headerSession;
 
     if (!sessionId) {
         return res.status(401).json({ error: 'Unauthorized' });

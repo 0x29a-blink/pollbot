@@ -1,9 +1,11 @@
 import express from 'express';
+import cookieParser from 'cookie-parser';
 import { Webhook } from '@top-gg/sdk';
 import { tunnel } from 'cloudflared';
 import { logger } from './lib/logger';
 import { supabase } from './lib/db';
 import { dashboardAuthRouter } from './webapp/dashboardAuth';
+import { ensureCsrfToken, validateCsrfToken, getCsrfTokenHandler } from './webapp/csrf';
 import dotenv from 'dotenv';
 import { ShardingManager } from 'discord.js';
 
@@ -12,8 +14,11 @@ dotenv.config();
 const app = express();
 const port = 5000;
 
-// Body parser must be BEFORE routes
+// Middleware
 app.use(express.json());
+app.use(cookieParser()); // Required for httpOnly session cookies
+app.use(ensureCsrfToken); // Ensure CSRF token cookie is set
+app.use(validateCsrfToken); // Validate CSRF token on mutation requests
 
 // Store reference to sharding manager for sync operations
 let shardingManager: ShardingManager | null = null;
@@ -28,6 +33,9 @@ export function getShardingManager(): ShardingManager | null {
 
 // Dashboard Auth Routes (Discord OAuth)
 app.use('/api/auth', dashboardAuthRouter);
+
+// CSRF Token endpoint
+app.get('/api/auth/csrf', getCsrfTokenHandler);
 
 // User Guilds Routes (user's manageable servers)
 import { userGuildsRouter } from './webapp/userGuilds';
@@ -53,9 +61,11 @@ app.get('/health', (req, res) => {
 const ADMIN_IDS = (process.env.DISCORD_ADMIN_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
 
 app.post('/api/admin/sync-guilds', async (req, res) => {
-    // Verify admin session
+    // Support both cookie and header auth
+    const cookieSession = req.cookies?.['pollbot_session'];
     const authHeader = req.headers.authorization;
-    const sessionId = authHeader?.replace('Bearer ', '');
+    const headerSession = authHeader?.replace('Bearer ', '');
+    const sessionId = cookieSession || headerSession;
 
     if (!sessionId) {
         return res.status(401).json({ error: 'Unauthorized' });

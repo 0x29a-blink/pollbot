@@ -5,6 +5,9 @@ import { getShardingManager } from '../webhook';
 
 const router = Router();
 
+// Cookie name must match dashboardAuth.ts
+const COOKIE_NAME = 'pollbot_session';
+
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 const BOT_TOKEN = process.env.DISCORD_TOKEN;
 const MANAGE_GUILD = 0x20; // 32
@@ -323,8 +326,11 @@ async function verifyUserPermission(sessionId: string, guildId: string): Promise
  */
 router.get('/guilds/:id/channels', async (req: Request, res: Response) => {
     const guildId = req.params.id;
+    // Support both cookie and header auth
+    const cookieSession = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers.authorization;
-    const sessionId = authHeader?.replace('Bearer ', '');
+    const headerSession = authHeader?.replace('Bearer ', '');
+    const sessionId = cookieSession || headerSession;
 
     if (!sessionId || !guildId) {
         return res.status(401).json({ error: 'Unauthorized' });
@@ -352,8 +358,11 @@ router.get('/guilds/:id/channels', async (req: Request, res: Response) => {
  */
 router.get('/guilds/:id/roles', async (req: Request, res: Response) => {
     const guildId = req.params.id;
+    // Support both cookie and header auth
+    const cookieSession = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers.authorization;
-    const sessionId = authHeader?.replace('Bearer ', '');
+    const headerSession = authHeader?.replace('Bearer ', '');
+    const sessionId = cookieSession || headerSession;
 
     if (!sessionId || !guildId) {
         return res.status(401).json({ error: 'Unauthorized' });
@@ -381,8 +390,11 @@ router.get('/guilds/:id/roles', async (req: Request, res: Response) => {
  */
 router.post('/guilds/:id/refresh', async (req: Request, res: Response) => {
     const guildId = req.params.id;
+    // Support both cookie and header auth
+    const cookieSession = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers.authorization;
-    const sessionId = authHeader?.replace('Bearer ', '');
+    const headerSession = authHeader?.replace('Bearer ', '');
+    const sessionId = cookieSession || headerSession;
 
     if (!sessionId || !guildId) {
         return res.status(401).json({ error: 'Unauthorized' });
@@ -449,8 +461,11 @@ interface CreatePollRequest {
  * Create a new poll - renders image, posts to Discord, saves to database
  */
 router.post('/polls', async (req: Request, res: Response) => {
+    // Support both cookie and header auth
+    const cookieSession = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers.authorization;
-    const sessionId = authHeader?.replace('Bearer ', '');
+    const headerSession = authHeader?.replace('Bearer ', '');
+    const sessionId = cookieSession || headerSession;
 
     if (!sessionId) {
         return res.status(401).json({ error: 'Unauthorized' });
@@ -643,8 +658,11 @@ router.post('/polls', async (req: Request, res: Response) => {
  * Close or reopen a poll from the dashboard
  */
 router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
+    // Support both cookie and header auth
+    const cookieSession = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers.authorization;
-    const sessionId = authHeader?.replace('Bearer ', '');
+    const headerSession = authHeader?.replace('Bearer ', '');
+    const sessionId = cookieSession || headerSession;
     const { pollId } = req.params;
     const { active } = req.body as { active: boolean };
 
@@ -872,8 +890,11 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
  * Delete a poll from the database (useful for orphaned polls where Discord message was deleted)
  */
 router.delete('/polls/:pollId', async (req: Request, res: Response) => {
+    // Support both cookie and header auth
+    const cookieSession = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers.authorization;
-    const sessionId = authHeader?.replace('Bearer ', '');
+    const headerSession = authHeader?.replace('Bearer ', '');
+    const sessionId = cookieSession || headerSession;
     const { pollId } = req.params;
 
     if (!sessionId) {
@@ -939,8 +960,11 @@ router.delete('/polls/:pollId', async (req: Request, res: Response) => {
  * Edit poll settings (not title/options to preserve vote integrity)
  */
 router.patch('/polls/:pollId', async (req: Request, res: Response) => {
+    // Support both cookie and header auth
+    const cookieSession = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers.authorization;
-    const sessionId = authHeader?.replace('Bearer ', '');
+    const headerSession = authHeader?.replace('Bearer ', '');
+    const sessionId = cookieSession || headerSession;
     const { pollId } = req.params;
     const { settings: newSettings } = req.body as {
         settings: {

@@ -9,6 +9,16 @@ import { LanguagePieChart } from '../components/charts/LanguagePieChart';
 import { Leaderboard } from '../components/Leaderboard';
 import { useAuth } from '../App';
 
+// Helper to get CSRF token from cookie
+const getCsrfToken = (): string | null => {
+    const cookies = document.cookie.split(';');
+    for (const cookie of cookies) {
+        const [name, value] = cookie.trim().split('=');
+        if (name === 'csrf_token') return value;
+    }
+    return null;
+};
+
 interface GlobalStats {
     total_polls: number;
     total_votes: number;
@@ -140,12 +150,12 @@ export const Home: React.FC = () => {
         setSyncing(true);
 
         try {
-            const session = localStorage.getItem('dashboard_session');
             const res = await fetch('/api/admin/sync-guilds', {
                 method: 'POST',
+                credentials: 'include',
                 headers: {
-                    'Authorization': `Bearer ${session}`,
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'x-csrf-token': getCsrfToken() || '',
                 }
             });
 
@@ -181,11 +191,8 @@ export const Home: React.FC = () => {
         setUserGuildsError(null);
 
         try {
-            const session = localStorage.getItem('dashboard_session');
             const res = await fetch('/api/user/guilds', {
-                headers: {
-                    'Authorization': `Bearer ${session}`,
-                }
+                credentials: 'include'
             });
 
             if (res.ok) {
@@ -216,11 +223,11 @@ export const Home: React.FC = () => {
         setUserGuildsError(null);
 
         try {
-            const session = localStorage.getItem('dashboard_session');
             const res = await fetch('/api/user/guilds/refresh', {
                 method: 'POST',
+                credentials: 'include',
                 headers: {
-                    'Authorization': `Bearer ${session}`,
+                    'x-csrf-token': getCsrfToken() || '',
                 }
             });
 

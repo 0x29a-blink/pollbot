@@ -4,6 +4,9 @@ import { logger } from '../lib/logger';
 
 const router = Router();
 
+// Cookie name must match dashboardAuth.ts
+const COOKIE_NAME = 'pollbot_session';
+
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 const MANAGE_GUILD = 0x20; // 32
 const PERMISSION_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
@@ -40,8 +43,11 @@ function setCachedPermission(userId: string, guildId: string, hasPermission: boo
  */
 router.get('/polls/:guildId', async (req: Request, res: Response) => {
     const { guildId } = req.params;
+    // Support both cookie and header auth
+    const cookieSession = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers.authorization;
-    const sessionId = authHeader?.replace('Bearer ', '');
+    const headerSession = authHeader?.replace('Bearer ', '');
+    const sessionId = cookieSession || headerSession;
 
     if (!guildId) {
         return res.status(400).json({ error: 'Guild ID is required' });
@@ -124,12 +130,31 @@ router.get('/polls/:guildId', async (req: Request, res: Response) => {
             return res.status(404).json({ error: 'Bot is not in this server' });
         }
 
-        // Fetch all polls in this server
-        const { data: polls, error: pollsError } = await supabase
+                // Parse query parameters for filtering/pagination
+        const search = (req.query.search as string || '').trim().toLowerCase();
+        const status = req.query.status as string; // 'active' | 'closed' | undefined
+        const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+        const offset = parseInt(req.query.offset as string) || 0;
+
+        // Build query with filters
+        let query = supabase
             .from('polls')
             .select('*')
-            .eq('guild_id', guildId)
-            .order('created_at', { ascending: false });
+            .eq('guild_id', guildId);
+        
+        // Apply status filter
+        if (status === 'active') {
+            query = query.eq('active', true);
+        } else if (status === 'closed') {
+            query = query.eq('active', false);
+        }
+        
+        // Apply pagination and ordering
+        query = query
+            .order('created_at', { ascending: false })
+            .range(offset, offset + limit - 1);
+        
+        const { data: polls, error: pollsError, count } = await query;
 
         if (pollsError) {
             logger.error(`[UserPolls] Failed to fetch polls:`, pollsError);

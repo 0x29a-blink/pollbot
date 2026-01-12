@@ -10,15 +10,18 @@ export default {
 
         if (!process.env.SUPABASE_URL) return;
 
-        // Try to delete from polls table
-        // We handle "poll data" deletion.
-        const { error } = await supabase
+        // Soft-delete: Mark poll as deleted and close it
+        // This allows users to see deleted polls in dashboard and permanently delete them
+        const { data, error } = await supabase
             .from('polls')
-            .delete()
-            .eq('message_id', messageId);
+            .update({ discord_deleted: true, active: false })
+            .eq('message_id', messageId)
+            .select('id');
 
         if (error) {
-            logger.error(`[Persistence] Failed to delete poll data for message ${messageId}:`, error);
+            logger.error(`[Persistence] Failed to mark poll as deleted for message ${messageId}:`, error);
+        } else if (data && data.length > 0) {
+            logger.info(`[Persistence] Poll ${messageId} marked as discord_deleted`);
         }
     },
 };

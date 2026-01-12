@@ -9,6 +9,16 @@ import { CreatePollModal } from '../components/CreatePollModal';
 import { EditPollModal } from '../components/EditPollModal';
 import type { Poll, PollSettings, GuildInfo } from '../types';
 
+// Helper to get CSRF token from cookie
+const getCsrfToken = (): string | null => {
+    const cookies = document.cookie.split(';');
+    for (const cookie of cookies) {
+        const [name, value] = cookie.trim().split('=');
+        if (name === 'csrf_token') return value;
+    }
+    return null;
+};
+
 
 export const UserServerView: React.FC = () => {
     const { guildId } = useParams<{ guildId: string }>();
@@ -62,11 +72,8 @@ export const UserServerView: React.FC = () => {
     const fetchPolls = async (isInitialLoad: boolean = false) => {
 
         try {
-            const session = localStorage.getItem('dashboard_session');
             const res = await fetch(`/api/user/polls/${guildId}`, {
-                headers: {
-                    'Authorization': `Bearer ${session}`,
-                }
+                credentials: 'include'
             });
 
             if (res.ok) {
@@ -115,13 +122,13 @@ export const UserServerView: React.FC = () => {
     };
 
     const handleStatusChange = async (pollId: string, active: boolean) => {
-        const session = localStorage.getItem('dashboard_session');
         try {
             const res = await fetch(`/api/user/polls/${pollId}/status`, {
                 method: 'PATCH',
+                credentials: 'include',
                 headers: {
-                    Authorization: `Bearer ${session}`,
                     'Content-Type': 'application/json',
+                    'x-csrf-token': getCsrfToken() || '',
                 },
                 body: JSON.stringify({ active }),
             });
@@ -145,12 +152,12 @@ export const UserServerView: React.FC = () => {
     };
 
     const handleDeletePoll = async (pollId: string) => {
-        const session = localStorage.getItem('dashboard_session');
         try {
             const res = await fetch(`/api/user/polls/${pollId}`, {
                 method: 'DELETE',
+                credentials: 'include',
                 headers: {
-                    Authorization: `Bearer ${session}`,
+                    'x-csrf-token': getCsrfToken() || '',
                 },
             });
 
@@ -168,10 +175,9 @@ export const UserServerView: React.FC = () => {
     const handleEditPoll = async (poll: Poll) => {
         // Fetch roles if we don't have them
         if (roles.length === 0) {
-            const session = localStorage.getItem('dashboard_session');
             try {
                 const res = await fetch(`/api/user/guilds/${guildId}/roles`, {
-                    headers: { Authorization: `Bearer ${session}` },
+                    credentials: 'include',
                 });
                 if (res.ok) {
                     const data = await res.json();
@@ -185,13 +191,13 @@ export const UserServerView: React.FC = () => {
     };
 
     const handleSaveSettings = async (pollId: string, newSettings: PollSettings) => {
-        const session = localStorage.getItem('dashboard_session');
         try {
             const res = await fetch(`/api/user/polls/${pollId}`, {
                 method: 'PATCH',
+                credentials: 'include',
                 headers: {
-                    Authorization: `Bearer ${session}`,
                     'Content-Type': 'application/json',
+                    'x-csrf-token': getCsrfToken() || '',
                 },
                 body: JSON.stringify({ settings: newSettings }),
             });
