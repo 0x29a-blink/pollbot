@@ -16,7 +16,7 @@ export default {
             .from('polls')
             .update({ discord_deleted: true, active: false })
             .eq('message_id', messageId)
-            .select('id');
+            .select('message_id');
 
         if (error) {
             logger.error(`[Persistence] Failed to mark poll as deleted for message ${messageId}:`, error);
