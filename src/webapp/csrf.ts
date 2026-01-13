@@ -54,6 +54,12 @@ export function validateCsrfToken(req: Request, res: Response, next: NextFunctio
         return next();
     }
 
+    // Skip CSRF validation for external webhooks (e.g., Top.gg vote webhook)
+    // These endpoints use their own authentication (Authorization header with webhook secret)
+    if (req.path === '/vote') {
+        return next();
+    }
+
     const cookieToken = req.cookies?.[CSRF_COOKIE_NAME];
     const headerToken = req.headers[CSRF_HEADER_NAME] as string | undefined;
 
