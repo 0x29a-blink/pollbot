@@ -431,7 +431,10 @@ const PollCard: React.FC<{
         try {
             const res = await fetch('/api/user/premium/refresh', {
                 method: 'POST',
-                credentials: 'include'
+                credentials: 'include',
+                headers: {
+                    'x-csrf-token': getCsrfToken() || '',
+                }
             });
             if (res.ok) {
                 const data: PremiumStatus = await res.json();
