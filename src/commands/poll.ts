@@ -308,6 +308,12 @@ export default {
                     });
                 } else {
                     logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} created a poll with the following parameters "/poll title:${title} items:${items.join(', ')} max_votes:${maxVotes} min_votes:${minVotes} public:${isPublic} thread:${createThread} close_button:${allowClose} allowed_role:${targetRole ? targetRole.name : 'None'}"`);
+                    
+                    // Notify user about the web dashboard
+                    await interaction.followUp({
+                        content: '✨ **New!** Manage your polls and see votes in a cleaner, modern view on our web dashboard: https://pollbot.win',
+                        flags: MessageFlags.Ephemeral
+                    });
                 }
             } else {
                 logger.warn('Skipping DB save (no credentials)');
