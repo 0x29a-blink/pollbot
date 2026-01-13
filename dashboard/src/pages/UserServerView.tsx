@@ -2,12 +2,15 @@ import React, { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, BarChart3, Users, Clock, CheckCircle, XCircle, Loader2, Eye, EyeOff, Vote, Download, Lock, MessageSquare, Settings2, Scale, HelpCircle, ChevronDown, ChevronUp, Plus } from 'lucide-react';
+import { ArrowLeft, BarChart3, Users, Clock, CheckCircle, XCircle, Loader2, Eye, EyeOff, Vote, Download, Lock, MessageSquare, Settings2, Scale, HelpCircle, ChevronDown, ChevronUp, Plus, FileSpreadsheet } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../App';
 import { CreatePollModal } from '../components/CreatePollModal';
 import { EditPollModal } from '../components/EditPollModal';
-import type { Poll, PollSettings, GuildInfo } from '../types';
+import { PremiumGateModal } from '../components/PremiumGateModal';
+import { VoterViewModal } from '../components/VoterViewModal';
+import { ExportModal } from '../components/ExportModal';
+import type { Poll, PollSettings, GuildInfo, VoterResponse, PremiumStatus, ExportResponse, VoteUpdate } from '../types';
 
 // Helper to get CSRF token from cookie
 const getCsrfToken = (): string | null => {
@@ -32,6 +35,7 @@ export const UserServerView: React.FC = () => {
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [editingPoll, setEditingPoll] = useState<Poll | null>(null);
     const [roles, setRoles] = useState<Array<{ id: string; name: string; color: number; position: number; managed: boolean }>>([]);
+    const [lastVoteUpdate, setLastVoteUpdate] = useState<VoteUpdate | null>(null);
     const hasInitialData = useRef(false);
 
     useEffect(() => {
@@ -57,9 +61,32 @@ export const UserServerView: React.FC = () => {
             // Listen for vote changes
             .on('postgres_changes',
                 { event: '*', schema: 'public', table: 'votes' },
-                () => {
+                (payload) => {
                     // Refetch polls to get updated vote counts (silent refresh)
                     fetchPolls(false);
+
+                    // On new vote (INSERT), pass payload details for optimistic UI
+                    const newVote = payload.new as any;
+                    const oldVote = payload.old as any;
+
+                    if (payload.eventType === 'INSERT' && newVote) {
+                        setLastVoteUpdate({
+                            poll_id: newVote.poll_id,
+                            option_index: newVote.option_index,
+                            user_id: newVote.user_id,
+                            created_at: newVote.created_at,
+                            timestamp: Date.now()
+                        });
+                    } else {
+                        // For other events (delete/update), just trigger refresh with minimal info
+                        // We use index -1 to signal "refresh all/unknown"
+                        setLastVoteUpdate({
+                            poll_id: oldVote?.poll_id || '',
+                            option_index: -1,
+                            user_id: '',
+                            timestamp: Date.now()
+                        });
+                    }
                 }
             )
             .subscribe();
@@ -340,6 +367,7 @@ export const UserServerView: React.FC = () => {
                                     onStatusChange={handleStatusChange}
                                     onDeletePoll={handleDeletePoll}
                                     onEditPoll={handleEditPoll}
+                                    lastVoteUpdate={lastVoteUpdate}
                                 />
                             ))}
                         </div>
@@ -367,13 +395,100 @@ const PollCard: React.FC<{
     onStatusChange: (pollId: string, active: boolean) => Promise<void>;
     onDeletePoll: (pollId: string) => Promise<void>;
     onEditPoll: (poll: Poll) => void;
-}> = ({ poll, formatDate, onStatusChange, onDeletePoll, onEditPoll }) => {
+    lastVoteUpdate: VoteUpdate | null;
+}> = ({ poll, formatDate, onStatusChange, onDeletePoll, onEditPoll, lastVoteUpdate }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [isUpdating, setIsUpdating] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const voteCounts = poll.vote_counts || {};
     const maxVotes = Math.max(...Object.values(voteCounts), 1);
     const settings = poll.settings || {};
+
+    // View/Export modal states
+    const [showPremiumModal, setShowPremiumModal] = useState(false);
+    const [showVoterModal, setShowVoterModal] = useState(false);
+    const [showExportModal, setShowExportModal] = useState(false);
+    const [premiumStatus, setPremiumStatus] = useState<PremiumStatus | null>(null);
+    const [checkingPremium, setCheckingPremium] = useState(false);
+
+    // Check premium status
+    const checkPremium = async (): Promise<boolean> => {
+        try {
+            const res = await fetch('/api/user/premium/status', { credentials: 'include' });
+            if (res.ok) {
+                const data: PremiumStatus = await res.json();
+                setPremiumStatus(data);
+                return data.isPremium;
+            }
+        } catch (err) {
+            console.error('Failed to check premium status:', err);
+        }
+        return false;
+    };
+
+    // Refresh premium status (after voting)
+    const refreshPremium = async (): Promise<boolean> => {
+        try {
+            const res = await fetch('/api/user/premium/refresh', {
+                method: 'POST',
+                credentials: 'include'
+            });
+            if (res.ok) {
+                const data: PremiumStatus = await res.json();
+                setPremiumStatus(data);
+                return data.isPremium;
+            }
+        } catch (err) {
+            console.error('Failed to refresh premium status:', err);
+        }
+        return false;
+    };
+
+    // Handle View button click
+    const handleViewClick = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setCheckingPremium(true);
+        try {
+            const isPremium = await checkPremium();
+            if (isPremium) {
+                setShowVoterModal(true);
+            } else {
+                setShowPremiumModal(true);
+            }
+        } finally {
+            setCheckingPremium(false);
+        }
+    };
+
+    // Handle Export button click
+    const handleExportClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setShowExportModal(true);
+    };
+
+    // Fetch voters for a specific option
+    const fetchVoters = async (optionIndex: number): Promise<VoterResponse> => {
+        const res = await fetch(`/api/user/polls/${poll.message_id}/voters?option=${optionIndex}`, {
+            credentials: 'include'
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.message || err.error || 'Failed to fetch voters');
+        }
+        return res.json();
+    };
+
+    // Fetch export data
+    const fetchExport = async (): Promise<ExportResponse> => {
+        const res = await fetch(`/api/user/polls/${poll.message_id}/export`, {
+            credentials: 'include'
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.message || err.error || 'Failed to fetch export');
+        }
+        return res.json();
+    };
 
     const handleStatusToggle = async (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -655,6 +770,29 @@ const PollCard: React.FC<{
                                                 Edit Settings
                                             </button>
                                         )}
+
+                                        {/* View | Export Split Button */}
+                                        <div className="flex gap-0 w-full">
+                                            <button
+                                                onClick={handleViewClick}
+                                                disabled={checkingPremium}
+                                                className="flex-1 py-2 px-4 rounded-l-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 bg-violet-500/20 text-violet-400 hover:bg-violet-500/30 border border-violet-500/30 border-r-0 disabled:opacity-50"
+                                            >
+                                                {checkingPremium ? (
+                                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                                ) : (
+                                                    <Eye className="w-4 h-4" />
+                                                )}
+                                                View
+                                            </button>
+                                            <button
+                                                onClick={handleExportClick}
+                                                className="flex-1 py-2 px-4 rounded-r-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 bg-slate-600/30 text-slate-300 hover:bg-slate-600/50 border border-slate-600"
+                                            >
+                                                <FileSpreadsheet className="w-4 h-4" />
+                                                Export
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -662,6 +800,40 @@ const PollCard: React.FC<{
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            {/* Premium Gate Modal */}
+            <PremiumGateModal
+                isOpen={showPremiumModal}
+                onClose={() => setShowPremiumModal(false)}
+                voteUrl={premiumStatus?.voteUrl || 'https://top.gg/bot/911731627498041374/vote'}
+                onRefresh={async () => {
+                    const isPremium = await refreshPremium();
+                    if (isPremium) {
+                        setShowPremiumModal(false);
+                        setShowVoterModal(true);
+                    }
+                    return isPremium;
+                }}
+            />
+
+            {/* Voter View Modal */}
+            <VoterViewModal
+                isOpen={showVoterModal}
+                onClose={() => setShowVoterModal(false)}
+                pollId={poll.message_id}
+                pollTitle={poll.title}
+                options={poll.options}
+                fetchVoters={fetchVoters}
+                lastVoteUpdate={lastVoteUpdate}
+            />
+
+            {/* Export Modal */}
+            <ExportModal
+                isOpen={showExportModal}
+                onClose={() => setShowExportModal(false)}
+                pollTitle={poll.title}
+                fetchExport={fetchExport}
+            />
         </motion.div>
     );
 };

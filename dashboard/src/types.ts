@@ -87,3 +87,47 @@ export interface Role {
     position: number;
     managed?: boolean;
 }
+
+// ============================================================================
+// Voter & Premium Types (for View/Export feature)
+// ============================================================================
+
+export interface VoterInfo {
+    user_id: string;
+    username: string;
+    display_name: string;
+    nickname: string | null;
+    avatar_url: string | null;
+}
+
+export interface VoterResponse {
+    option_index: number;
+    option_name: string;
+    total_voters: number;
+    voters: VoterInfo[];
+}
+
+export interface PremiumStatus {
+    isPremium: boolean;
+    expiresAt?: string;
+    voteUrl: string;
+}
+
+export interface ExportResponse {
+    csv: string;
+    filename: string;
+    total_votes: number;
+}
+
+// ============================================================================
+// Realtime Updates
+// ============================================================================
+
+export interface VoteUpdate {
+    poll_id: string;
+    option_index: number;
+    user_id: string;
+    created_at?: string;
+    timestamp: number;
+}
+
