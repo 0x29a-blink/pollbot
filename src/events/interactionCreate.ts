@@ -293,10 +293,14 @@ export default {
                 if (loggableError.requestBody) {
                     loggableError.requestBody = '[Binary Data Omitted]';
                 }
-                logger.error('Voting Logic Error:', loggableError);
 
-                // Handle Missing Access / Permissions
+                // Handle Missing Access / Permissions - log at warn level since these are expected scenarios
                 if (err.code === 50001 || err.code === 50013) {
+                    logger.warn(`Vote update permission issue (${err.code}): ${err.message}`, {
+                        pollId,
+                        userId,
+                        channelUrl: err.url
+                    });
                     let missingPerms: string[] = [];
 
                     if (interaction.guild && interaction.channel && !interaction.channel.isDMBased()) {
@@ -320,7 +324,11 @@ export default {
                         ? `\nMissing permissions: **${missingPerms.join(', ')}**`
                         : '';
 
-                    const errorResponse = I18n.t('messages.common.missing_perms_channel', interaction.locale) + permMsg;
+                    // Choose the appropriate error message based on error code
+                    const baseMessage = err.code === 50001
+                        ? I18n.t('messages.common.missing_access_channel', interaction.locale)
+                        : I18n.t('messages.common.missing_perms_channel', interaction.locale);
+                    const errorResponse = baseMessage + permMsg;
 
                     try {
                         if (interaction.deferred && !interaction.replied) {
@@ -332,7 +340,8 @@ export default {
                     return;
                 }
 
-                // Generic Error
+                // Generic Error - log at error level for unexpected issues
+                logger.error('Voting Logic Error:', loggableError);
                 try {
                     if (interaction.deferred && !interaction.replied) {
                         await interaction.editReply({ content: I18n.t('messages.common.vote_error', interaction.locale) });

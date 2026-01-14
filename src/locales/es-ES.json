@@ -148,7 +148,8 @@
             "vote_error": "Ocurrió un error al votar.",
             "missing_perms_action": "¡Me faltan permisos para realizar esta acción! Por favor revisa mis permisos de rol.",
             "command_error": "¡Hubo un error al ejecutar este comando!",
-            "missing_perms_channel": "No puedo actualizar la imagen de la encuesta debido a falta de permisos en este canal."
+            "missing_perms_channel": "No puedo actualizar la imagen de la encuesta debido a falta de permisos en este canal.",
+            "missing_access_channel": "Ya no tengo acceso al canal donde se encuentra esta encuesta. Por favor asegúrate de que tenga el permiso 'Ver Canal'."
         },
         "poll": {
             "title_too_long": "¡El título es demasiado largo! ({{length}}/256 caracteres)",

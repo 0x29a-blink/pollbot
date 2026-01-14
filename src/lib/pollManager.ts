@@ -208,7 +208,36 @@ export class PollManager {
                 }
             }
 
-        } catch (err) {
+        } catch (err: any) {
+            // Handle Missing Access / Missing Permissions gracefully
+            if (err.code === 50001 || err.code === 50013) {
+                // Log at warn level since these are expected scenarios (permissions changed, channel deleted, etc.)
+                logger.warn(`PollManager permission issue (${err.code}): ${err.message}`, {
+                    pollId,
+                    channelUrl: err.url
+                });
+
+                // Determine which error message to show
+                let errorMsg: string;
+                if (err.code === 50001) {
+                    // Missing Access - bot can't see the channel
+                    errorMsg = I18n.t('messages.common.missing_access_channel', interaction.locale);
+                } else {
+                    // Missing Permissions - bot can't perform the action
+                    errorMsg = I18n.t('messages.common.missing_perms_channel', interaction.locale);
+                }
+
+                try {
+                    if (interaction.deferred || interaction.replied) {
+                        await interaction.editReply({ content: errorMsg });
+                    } else {
+                        await interaction.reply({ content: errorMsg, flags: MessageFlags.Ephemeral });
+                    }
+                } catch { /* ignore if we can't even reply */ }
+                return;
+            }
+
+            // For unexpected errors, log at error level
             logger.error('Error in PollManager:', err);
             // Try to notify user
             try {

@@ -148,7 +148,8 @@
             "vote_error": "An error occurred while voting.",
             "missing_perms_action": "I am missing permissions to perform this action! Please check my role permissions.",
             "command_error": "There was an error while executing this command!",
-            "missing_perms_channel": "I cannot update the poll image due to missing permissions in this channel."
+            "missing_perms_channel": "I cannot update the poll image due to missing permissions in this channel.",
+            "missing_access_channel": "I no longer have access to the channel where this poll is located. Please ensure I have the 'View Channel' permission."
         },
         "poll": {
             "title_too_long": "Title is too long! ({{length}}/256 characters)",
