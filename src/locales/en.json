@@ -171,7 +171,8 @@
             "orphaned": "This poll is no longer valid.",
             "db_missing": "This poll no longer exists in the database.",
             "perms_missing_bot": "I am missing permissions to update the poll image.",
-            "thread_fail": "Poll created, but failed to create a thread due to missing permissions."
+            "thread_fail": "Poll created, but failed to create a thread due to missing permissions.",
+            "missing_bot_perms": "I cannot create a poll in this channel because I am missing the following permissions: **{{permissions}}**\n\nPlease ask a server administrator to grant me these permissions in this channel."
         },
         "export": {
             "not_found": "Poll not found or no votes recorded.",
@@ -222,7 +223,11 @@
             "manage_fail": "An error occurred while managing the Poll Manager role.",
             "missing_perms_create": "I am missing permissions to create roles! Please ensure I have the \"Manage Roles\" permission.",
             "missing_perms_manage": "I am missing permissions to manage this user's roles! Please ensure I have the \"Manage Roles\" permission and that my highest role is above the \"Poll Manager\" role.",
-            "view_details_button": "View Details"
+            "view_details_button": "View Details",
+            "missing_access_votes_tracked": "✅ **Your action was recorded!** However, I no longer have access to view the channel where this poll is located.\n\n⚠️ The poll message could not be updated. Please ensure I have the following permissions in that channel: **{{permissions}}**\n\nOnce permissions are restored, the poll will update on the next action.",
+            "missing_perms_votes_tracked": "✅ **Your action was recorded!** However, I am missing permissions to update the poll message in that channel.\n\n⚠️ Please ensure I have the following permissions in the poll's channel: **{{permissions}}**\n\nOnce permissions are restored, the poll will update on the next action.",
+            "missing_access_no_update": "❌ **Could not update poll!** I no longer have access to view the channel where this poll is located.\n\n⚠️ Please ensure I have the following permissions in that channel: **{{permissions}}**\n\nThe poll status was not changed. Once permissions are fixed, try again.",
+            "missing_perms_no_update": "❌ **Could not update poll!** I am missing permissions to edit the poll message in that channel.\n\n⚠️ Please ensure I have the following permissions in the poll's channel: **{{permissions}}**\n\nThe poll status was not changed. Once permissions are fixed, try again."
         }
     },
     "stats": {

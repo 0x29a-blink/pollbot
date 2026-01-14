@@ -850,6 +850,38 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
                     if (err.code === 10008 || err.message?.includes('Unknown Message')) {
                         return { success: false, error: 'message_deleted' };
                     }
+                    // Check for permission errors
+                    // 50001: Missing Access (can't see the channel)
+                    // 50013: Missing Permissions (can see but can't perform action)
+                    if (err.code === 50001 || err.code === 50013) {
+                        // Determine which permissions are missing
+                        const missingPerms: string[] = [];
+                        if (err.code === 50001) {
+                            missingPerms.push('View Channel');
+                        } else {
+                            // Parse the error message to identify missing perms
+                            const errMsg = err.message?.toLowerCase() || '';
+                            if (errMsg.includes('send') || errMsg.includes('message')) {
+                                missingPerms.push('Send Messages');
+                            }
+                            if (errMsg.includes('attach') || errMsg.includes('file')) {
+                                missingPerms.push('Attach Files');
+                            }
+                            if (errMsg.includes('embed')) {
+                                missingPerms.push('Embed Links');
+                            }
+                            // Default if we can't parse specific permissions
+                            if (missingPerms.length === 0) {
+                                missingPerms.push('Send Messages', 'Attach Files');
+                            }
+                        }
+                        return {
+                            success: false,
+                            error: 'missing_permissions',
+                            missing_permissions: missingPerms,
+                            error_code: err.code,
+                        };
+                    }
                     return { success: false, error: err.message };
                 }
             },
@@ -873,6 +905,27 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
                 error: 'Discord message deleted',
                 message_deleted: true,
                 poll: { ...pollData, discord_deleted: true }
+            });
+        }
+
+        // Check for permission errors
+        const permissionError = results.find((r: any) => r?.error === 'missing_permissions');
+        if (permissionError) {
+            logger.warn(`[PollManagement] Poll ${pollId} has permission issues: ${JSON.stringify(permissionError.missing_permissions)}`);
+
+            // Revert DB state since Discord update failed - this prevents UI confusion
+            // where the button state changes but the Discord message wasn't updated
+            await supabase
+                .from('polls')
+                .update({ active: pollData.active }) // Revert to original state
+                .eq('message_id', pollId);
+
+            return res.status(403).json({
+                error: 'Bot missing permissions',
+                permission_error: true,
+                missing_permissions: permissionError.missing_permissions || ['View Channel', 'Send Messages', 'Attach Files'],
+                channel_id: pollData.channel_id,
+                poll: pollData // Return original poll data (with original active state)
             });
         }
 

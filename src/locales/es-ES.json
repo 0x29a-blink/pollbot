@@ -170,7 +170,8 @@
             "vote_fail": "Falló el registro de tu voto. Por favor intenta de nuevo.",
             "orphaned": "Esta encuesta ya no es válida.",
             "db_missing": "Esta encuesta ya no existe en la base de datos.",
-            "perms_missing_bot": "Me faltan permisos para actualizar la imagen de la encuesta."
+            "perms_missing_bot": "Me faltan permisos para actualizar la imagen de la encuesta.",
+            "missing_bot_perms": "No puedo crear una encuesta en este canal porque me faltan los siguientes permisos: **{{permissions}}**\n\nPor favor pide a un administrador del servidor que me otorgue estos permisos en este canal."
         },
         "export": {
             "not_found": "Encuesta no encontrada o sin votos registrados.",
@@ -221,7 +222,11 @@
             "manage_fail": "Ocurrió un error al gestionar el rol Poll Manager.",
             "missing_perms_create": "¡Me faltan permisos para crear roles! Por favor asegúrate de que tengo el permiso \"Gestionar Roles\".",
             "missing_perms_manage": "¡Me faltan permisos para gestionar los roles de este usuario! Por favor asegúrate de que tengo el permiso \"Gestionar Roles\" y que mi rol más alto está por encima del rol \"Poll Manager\".",
-            "view_details_button": "Ver Detalles"
+            "view_details_button": "Ver Detalles",
+            "missing_access_votes_tracked": "✅ **¡Tu acción fue registrada!** Sin embargo, ya no tengo acceso para ver el canal donde se encuentra esta encuesta.\n\n⚠️ El mensaje de la encuesta no pudo ser actualizado. Por favor asegúrate de que tengo los siguientes permisos en ese canal: **{{permissions}}**\n\nUna vez restaurados los permisos, la encuesta se actualizará en la próxima acción.",
+            "missing_perms_votes_tracked": "✅ **¡Tu acción fue registrada!** Sin embargo, me faltan permisos para actualizar el mensaje de la encuesta en ese canal.\n\n⚠️ Por favor asegúrate de que tengo los siguientes permisos en el canal de la encuesta: **{{permissions}}**\n\nUna vez restaurados los permisos, la encuesta se actualizará en la próxima acción.",
+            "missing_access_no_update": "❌ **¡No se pudo actualizar la encuesta!** Ya no tengo acceso para ver el canal donde se encuentra esta encuesta.\n\n⚠️ Por favor asegúrate de que tengo los siguientes permisos en ese canal: **{{permissions}}**\n\nEl estado de la encuesta no fue cambiado. Una vez corregidos los permisos, intenta de nuevo.",
+            "missing_perms_no_update": "❌ **¡No se pudo actualizar la encuesta!** Me faltan permisos para editar el mensaje de la encuesta en ese canal.\n\n⚠️ Por favor asegúrate de que tengo los siguientes permisos en el canal de la encuesta: **{{permissions}}**\n\nEl estado de la encuesta no fue cambiado. Una vez corregidos los permisos, intenta de nuevo."
         }
     },
     "stats": {

@@ -10,7 +10,8 @@ import { EditPollModal } from '../components/EditPollModal';
 import { PremiumGateModal } from '../components/PremiumGateModal';
 import { VoterViewModal } from '../components/VoterViewModal';
 import { ExportModal } from '../components/ExportModal';
-import type { Poll, PollSettings, GuildInfo, VoterResponse, PremiumStatus, ExportResponse, VoteUpdate } from '../types';
+import { PermissionErrorBanner } from '../components/PermissionErrorBanner';
+import type { Poll, PollSettings, GuildInfo, VoterResponse, PremiumStatus, ExportResponse, VoteUpdate, PermissionError } from '../types';
 
 // Helper to get CSRF token from cookie
 const getCsrfToken = (): string | null => {
@@ -36,6 +37,8 @@ export const UserServerView: React.FC = () => {
     const [editingPoll, setEditingPoll] = useState<Poll | null>(null);
     const [roles, setRoles] = useState<Array<{ id: string; name: string; color: number; position: number; managed: boolean }>>([]);
     const [lastVoteUpdate, setLastVoteUpdate] = useState<VoteUpdate | null>(null);
+    const [permissionError, setPermissionError] = useState<PermissionError | null>(null);
+    const [cooldownPolls, setCooldownPolls] = useState<Map<string, number>>(new Map()); // pollId -> cooldown end timestamp
     const hasInitialData = useRef(false);
 
     useEffect(() => {
@@ -148,7 +151,20 @@ export const UserServerView: React.FC = () => {
         });
     };
 
+    const COOLDOWN_DURATION = 30000; // 30 seconds cooldown
+
     const handleStatusChange = async (pollId: string, active: boolean) => {
+        // Check if poll is in cooldown
+        const cooldownEnd = cooldownPolls.get(pollId);
+        if (cooldownEnd && Date.now() < cooldownEnd) {
+            return; // Still in cooldown, ignore the request
+        }
+
+        // Clear any previous permission error for this poll
+        if (permissionError?.pollId === pollId) {
+            setPermissionError(null);
+        }
+        
         try {
             const res = await fetch(`/api/user/polls/${pollId}/status`, {
                 method: 'PATCH',
@@ -165,11 +181,38 @@ export const UserServerView: React.FC = () => {
                 setPolls(prev => prev.map(p =>
                     p.message_id === pollId ? { ...p, active } : p
                 ));
+                // Clear any cooldown for this poll on success
+                setCooldownPolls(prev => {
+                    const next = new Map(prev);
+                    next.delete(pollId);
+                    return next;
+                });
             } else if (res.status === 410) {
                 // Discord message was deleted - mark the poll as deleted
                 setPolls(prev => prev.map(p =>
                     p.message_id === pollId ? { ...p, discord_deleted: true } : p
                 ));
+            } else if (res.status === 403) {
+                // Check if this is a permission error
+                const errorData = await res.json();
+                if (errorData.permission_error) {
+                    const poll = polls.find(p => p.message_id === pollId);
+                    const cooldownEndTime = Date.now() + COOLDOWN_DURATION;
+                    
+                    // Set permission error
+                    setPermissionError({
+                        pollId,
+                        pollTitle: poll?.title || 'Unknown Poll',
+                        channelId: errorData.channel_id || poll?.channel_id || '',
+                        missingPermissions: errorData.missing_permissions || ['View Channel', 'Send Messages', 'Attach Files'],
+                        timestamp: Date.now(),
+                    });
+                    
+                    // Add poll to cooldown
+                    setCooldownPolls(prev => new Map(prev).set(pollId, cooldownEndTime));
+                } else {
+                    console.error('Failed to update poll status:', errorData.error);
+                }
             } else {
                 console.error('Failed to update poll status');
             }
@@ -218,6 +261,9 @@ export const UserServerView: React.FC = () => {
     };
 
     const handleSaveSettings = async (pollId: string, newSettings: PollSettings) => {
+        // Clear any previous permission error
+        setPermissionError(null);
+        
         try {
             const res = await fetch(`/api/user/polls/${pollId}`, {
                 method: 'PATCH',
@@ -235,6 +281,21 @@ export const UserServerView: React.FC = () => {
                 setPolls(prev => prev.map(p =>
                     p.message_id === pollId ? { ...p, settings: updatedPoll.settings } : p
                 ));
+            } else if (res.status === 403) {
+                // Check if this is a permission error
+                const errorData = await res.json();
+                if (errorData.permission_error) {
+                    const poll = polls.find(p => p.message_id === pollId);
+                    setPermissionError({
+                        pollId,
+                        pollTitle: poll?.title || 'Unknown Poll',
+                        channelId: errorData.channel_id || poll?.channel_id || '',
+                        missingPermissions: errorData.missing_permissions || ['View Channel', 'Send Messages', 'Attach Files'],
+                        timestamp: Date.now(),
+                    });
+                } else {
+                    console.error('Failed to save poll settings:', errorData.error);
+                }
             } else {
                 console.error('Failed to save poll settings');
             }
@@ -343,12 +404,22 @@ export const UserServerView: React.FC = () => {
             )}
 
             <main className="container-wide mt-8">
+                {/* Permission Error Banner */}
+                <PermissionErrorBanner
+                    error={permissionError}
+                    onDismiss={() => setPermissionError(null)}
+                    onRetry={permissionError ? () => {
+                        const poll = polls.find(p => p.message_id === permissionError.pollId);
+                        if (poll) {
+                            handleStatusChange(permissionError.pollId, !poll.active);
+                        }
+                    } : undefined}
+                />
+
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                 >
-
-
                     {polls.length === 0 ? (
                         <div className="glass-panel p-12 text-center">
                             <BarChart3 className="w-12 h-12 text-slate-500 mx-auto mb-4" />
@@ -368,6 +439,7 @@ export const UserServerView: React.FC = () => {
                                     onDeletePoll={handleDeletePoll}
                                     onEditPoll={handleEditPoll}
                                     lastVoteUpdate={lastVoteUpdate}
+                                    cooldownEndTime={cooldownPolls.get(poll.message_id)}
                                 />
                             ))}
                         </div>
@@ -396,10 +468,30 @@ const PollCard: React.FC<{
     onDeletePoll: (pollId: string) => Promise<void>;
     onEditPoll: (poll: Poll) => void;
     lastVoteUpdate: VoteUpdate | null;
-}> = ({ poll, formatDate, onStatusChange, onDeletePoll, onEditPoll, lastVoteUpdate }) => {
+    cooldownEndTime?: number;
+}> = ({ poll, formatDate, onStatusChange, onDeletePoll, onEditPoll, lastVoteUpdate, cooldownEndTime }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [isUpdating, setIsUpdating] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [cooldownRemaining, setCooldownRemaining] = useState(0);
+
+    // Cooldown timer effect
+    useEffect(() => {
+        if (!cooldownEndTime) {
+            setCooldownRemaining(0);
+            return;
+        }
+
+        const updateRemaining = () => {
+            const remaining = Math.max(0, Math.ceil((cooldownEndTime - Date.now()) / 1000));
+            setCooldownRemaining(remaining);
+        };
+
+        updateRemaining();
+        const interval = setInterval(updateRemaining, 1000);
+
+        return () => clearInterval(interval);
+    }, [cooldownEndTime]);
     const voteCounts = poll.vote_counts || {};
     const maxVotes = Math.max(...Object.values(voteCounts), 1);
     const settings = poll.settings || {};
@@ -738,14 +830,22 @@ const PollCard: React.FC<{
                                         ) : (
                                             <button
                                                 onClick={handleStatusToggle}
-                                                disabled={isUpdating}
-                                                className={`w-full py-2 px-4 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 ${poll.active
-                                                    ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30'
-                                                    : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30'
-                                                    } disabled:opacity-50 disabled:cursor-not-allowed`}
+                                                disabled={isUpdating || cooldownRemaining > 0}
+                                                className={`w-full py-2 px-4 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 ${
+                                                    cooldownRemaining > 0
+                                                        ? 'bg-slate-700/50 text-slate-400 border border-slate-600 cursor-not-allowed'
+                                                        : poll.active
+                                                            ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30'
+                                                            : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30'
+                                                } disabled:opacity-50 disabled:cursor-not-allowed`}
                                             >
                                                 {isUpdating ? (
                                                     <Loader2 className="w-4 h-4 animate-spin" />
+                                                ) : cooldownRemaining > 0 ? (
+                                                    <>
+                                                        <Clock className="w-4 h-4" />
+                                                        {poll.active ? 'Close Poll' : 'Reopen Poll'} ({cooldownRemaining}s)
+                                                    </>
                                                 ) : poll.active ? (
                                                     <>
                                                         <XCircle className="w-4 h-4" />

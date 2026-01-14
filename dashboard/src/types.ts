@@ -131,3 +131,14 @@ export interface VoteUpdate {
     timestamp: number;
 }
 
+// ============================================================================
+// Permission Errors
+// ============================================================================
+
+export interface PermissionError {
+    pollId: string;
+    pollTitle: string;
+    channelId: string;
+    missingPermissions: string[];
+    timestamp: number;
+}

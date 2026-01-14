@@ -52,23 +52,7 @@ export class PollManager {
                 }
             }
 
-            // 3. Update Database
-            const { error: updateError } = await supabase
-                .from('polls')
-                .update({ active: active })
-                .eq('message_id', pollId);
-
-            if (updateError) {
-                logger.error('Failed to update poll state:', updateError);
-                // Use server locale for response if possible, or interaction
-                const msg = I18n.t('messages.manager.update_state_fail', interaction.locale);
-                if (interaction.deferred || interaction.replied) {
-                    return interaction.editReply({ content: msg });
-                }
-                return interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
-            }
-
-            // 4. Fetch Vote Data for Render
+            // 3. Fetch Vote Data for Render
             const { data: voteCounts } = await supabase
                 .from('votes')
                 .select('option_index')
@@ -117,7 +101,7 @@ export class PollManager {
 
             const attachment = new AttachmentBuilder(imageBuffer, { name: 'poll.png' });
 
-            // 5. Update Components
+            // 4. Build Components for the new state
             const components: ActionRowBuilder<any>[] = [];
 
             if (active) {
@@ -163,30 +147,43 @@ export class PollManager {
                 }
             }
 
-            // Input check for poll interaction type
+            // 5. Get the message to edit
             let messageToEdit;
             if (interaction.isButton()) {
                 messageToEdit = interaction.message;
             } else {
                 // Must fetch channel then message
-                // pollData.channel_id
                 const channel = await interaction.client.channels.fetch(pollData.channel_id);
                 if (channel?.isTextBased()) {
                     messageToEdit = await channel.messages.fetch(pollId);
                 }
             }
 
-            if (messageToEdit) {
-                await messageToEdit.edit({
-                    files: [attachment],
-                    components: components
-                });
-            } else {
+            if (!messageToEdit) {
                 const msg = I18n.t('messages.manager.msg_update_fail', interaction.locale);
                 if (interaction.deferred || interaction.replied) {
                     return interaction.editReply({ content: msg });
                 }
                 return interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
+            }
+
+            // 6. Update Discord message FIRST (before database)
+            // This ensures the poll state only changes if the message update succeeds
+            await messageToEdit.edit({
+                files: [attachment],
+                components: components
+            });
+
+            // 7. Only update database AFTER Discord message was successfully updated
+            const { error: updateError } = await supabase
+                .from('polls')
+                .update({ active: active })
+                .eq('message_id', pollId);
+
+            if (updateError) {
+                logger.error('Failed to update poll state in DB (Discord was updated):', updateError);
+                // Note: Discord message was updated but DB failed - this is an edge case
+                // We still report success to the user since the visible state changed
             }
 
             // Interaction Response
@@ -217,14 +214,16 @@ export class PollManager {
                     channelUrl: err.url
                 });
 
-                // Determine which error message to show
+                // Database was NOT updated because Discord message update failed first
+                // Inform the user that the action could not be completed
+                const requiredPerms = 'View Channel, Send Messages, Attach Files, Embed Links';
                 let errorMsg: string;
                 if (err.code === 50001) {
                     // Missing Access - bot can't see the channel
-                    errorMsg = I18n.t('messages.common.missing_access_channel', interaction.locale);
+                    errorMsg = I18n.t('messages.manager.missing_access_no_update', interaction.locale, { permissions: requiredPerms });
                 } else {
                     // Missing Permissions - bot can't perform the action
-                    errorMsg = I18n.t('messages.common.missing_perms_channel', interaction.locale);
+                    errorMsg = I18n.t('messages.manager.missing_perms_no_update', interaction.locale, { permissions: requiredPerms });
                 }
 
                 try {

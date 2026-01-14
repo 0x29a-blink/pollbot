@@ -172,6 +172,30 @@ export default {
             });
         }
 
+        // Check bot permissions in this channel before creating the poll
+        const botMember = interaction.guild?.members.me;
+        const channel = interaction.channel;
+        
+        if (botMember && channel && 'permissionsFor' in channel) {
+            const botPerms = channel.permissionsFor(botMember);
+            const requiredPerms = [
+                { flag: PermissionsBitField.Flags.ViewChannel, name: 'View Channel' },
+                { flag: PermissionsBitField.Flags.SendMessages, name: 'Send Messages' },
+                { flag: PermissionsBitField.Flags.AttachFiles, name: 'Attach Files' },
+                { flag: PermissionsBitField.Flags.EmbedLinks, name: 'Embed Links' },
+            ];
+            
+            const missingPerms = requiredPerms.filter(p => !botPerms?.has(p.flag));
+            
+            if (missingPerms.length > 0) {
+                const missingList = missingPerms.map(p => p.name).join(', ');
+                return interaction.reply({
+                    content: I18n.t('messages.poll.missing_bot_perms', interaction.locale, { permissions: missingList }),
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+        }
+
         await interaction.deferReply();
 
         try {
