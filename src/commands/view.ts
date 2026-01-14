@@ -172,22 +172,20 @@ export async function handleViewPoll(interaction: ChatInputCommandInteraction | 
         // OR: Show the list for "All"? My plan said "Paginated + Filter by Option".
         // Let's keep it simple: Select option -> Show list. 
 
-        await interaction.editReply({
+        const message = await interaction.editReply({
             embeds: [embed],
             files: [attachment],
             components: [selectRow]
         });
 
-        // Initialize Collector for this ephemeral session
+        // Initialize Collector for this ephemeral message
         // This connects the interactive components to our handler
         const filter = (i: any) => i.customId.startsWith(`view_${pollId}`);
-        const collector = interaction.channel?.createMessageComponentCollector({ filter, time: 900000 }); // 15 mins
+        const collector = message.createMessageComponentCollector({ filter, time: 900000 }); // 15 mins
 
-        if (collector) {
-            collector.on('collect', async (i: any) => {
-                await ViewInteractionHandler.handle(i);
-            });
-        }
+        collector.on('collect', async (i: any) => {
+            await ViewInteractionHandler.handle(i);
+        });
 
     } catch (error) {
         logger.error('Failed to render view:', error);

@@ -103,8 +103,8 @@ export class ViewInteractionHandler {
         try {
             await interaction.deferUpdate();
         } catch (error: any) {
-            if (error.code === 10062) { // Unknown interaction
-                logger.warn('ViewInteractionHandler: Unknown interaction (already handled or expired)');
+            if (error.code === 10062 || error.code === 40060) { // Unknown interaction or already acknowledged
+                logger.warn('ViewInteractionHandler: Interaction already handled or expired');
                 return;
             }
             throw error;
