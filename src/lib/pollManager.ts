@@ -3,6 +3,7 @@ import { supabase } from './db';
 import { Renderer } from './renderer';
 import { logger } from './logger';
 import { I18n } from './i18n';
+import { aggregateVotes } from './voteUtils';
 
 export class PollManager {
     static async setPollStatus(interaction: ChatInputCommandInteraction | ButtonInteraction, pollId: string, active: boolean) {
@@ -52,19 +53,10 @@ export class PollManager {
                 }
             }
 
-            // 3. Fetch Vote Data for Render
-            const { data: voteCounts } = await supabase
-                .from('votes')
-                .select('option_index')
-                .eq('poll_id', pollId);
-
-            const counts = new Array(pollData.options.length).fill(0);
-            if (voteCounts) {
-                voteCounts.forEach((v: any) => {
-                    if (v.option_index >= 0 && v.option_index < counts.length) counts[v.option_index]++;
-                });
-            }
-            const totalVotes = voteCounts ? voteCounts.length : 0;
+            // 3. Fetch Vote Data for Render using centralized utility
+            const voteData = await aggregateVotes(pollId, pollData.options.length);
+            const counts = voteData.counts;
+            const totalVotes = voteData.totalWeight;
 
             // Fetch Creator Tag
             let creatorTag = I18n.t('messages.manager.unknown_user', serverLocale); // Use Server Locale

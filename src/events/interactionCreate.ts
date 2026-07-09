@@ -5,6 +5,7 @@ import { Renderer } from '../lib/renderer';
 import { logger } from '../lib/logger';
 import { PollManager } from '../lib/pollManager';
 import { I18n } from '../lib/i18n';
+import { aggregateVotes } from '../lib/voteUtils';
 import { AttachmentBuilder } from 'discord.js';
 
 export default {
@@ -210,82 +211,66 @@ export default {
                 logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} voted on poll ${pollId} with the following item: ${votedOptions} weight:${voteWeight}`);
 
                 // 7. Update the Poll Image (Always, to show updated Total Votes or Breakdown)
-                // Fetch Vote Counts calling new logic? Or just raw aggregation?
-                // We need sum of weights now.
-                const { data: allVotes, error: countError } = await supabase
-                    .from('votes')
-                    .select('option_index, weight')
-                    .eq('poll_id', pollId);
+                // Use centralized vote aggregation utility
+                const voteAggregation = await aggregateVotes(pollId, pollData.options.length);
+                const counts = voteAggregation.counts;
+                const totalEffectiveVotes = voteAggregation.totalWeight;
 
-                if (!countError && allVotes) {
-                    // Calculate Total Votes (Effective)
-                    let totalEffectiveVotes = 0;
-                    const counts = new Array(pollData.options.length).fill(0);
-
-                    allVotes.forEach((v: any) => {
-                        const w = v.weight || 1; // Default to 1 if null (shouldn't happen with default)
-                        if (v.option_index >= 0 && v.option_index < counts.length) {
-                            counts[v.option_index] += w;
-                            totalEffectiveVotes += w;
-                        }
-                    });
-
-                    // Fetch Creator Tag
-                    let creatorTag = "Unknown User";
-                    try {
-                        const user = await interaction.client.users.fetch(pollData.creator_id);
-                        creatorTag = user.tag;
-                    } catch (e) {
-                        logger.warn(`Failed to fetch creator ${pollData.creator_id}`, e);
-                    }
-
-                    // Re-render
-                    const resolvedTitle = await PollManager.resolveMentions(pollData.title, interaction.guild);
-                    const resolvedDescription = await PollManager.resolveMentions(pollData.description, interaction.guild);
-                    const resolvedOptions = await Promise.all(
-                        pollData.options.map(async (opt: string) => await PollManager.resolveMentions(opt, interaction.guild))
-                    );
-
-                    // Determine if we show the bar graph
-                    // Show if Public == true
-                    const showVotes = pollData.settings.public;
-
-                    // Fetch server locale
-                    let serverLocale = 'en';
-                    if (interaction.guildId) {
-                        const { data: guildSettings } = await supabase
-                            .from('guild_settings')
-                            .select('locale')
-                            .eq('guild_id', interaction.guildId)
-                            .single();
-                        if (guildSettings?.locale) {
-                            serverLocale = guildSettings.locale;
-                        }
-                    }
-
-                    const renderOptions: any = {
-                        title: resolvedTitle,
-                        description: resolvedDescription,
-                        options: resolvedOptions,
-                        totalVotes: totalEffectiveVotes,
-                        creator: creatorTag,
-                        closed: false,
-                        locale: serverLocale // Pass Server Locale
-                    };
-
-                    if (showVotes) {
-                        renderOptions.votes = counts;
-                    }
-
-                    const imageBuffer = await Renderer.renderPoll(renderOptions);
-
-                    // Let's create an attachment
-                    const attachment = new AttachmentBuilder(imageBuffer, { name: 'poll.png' });
-
-                    await interaction.message.edit({
-                        files: [attachment],
-                    });
+                // Fetch Creator Tag
+                let creatorTag = "Unknown User";
+                try {
+                    const user = await interaction.client.users.fetch(pollData.creator_id);
+                    creatorTag = user.tag;
+                } catch (e) {
+                    logger.warn(`Failed to fetch creator ${pollData.creator_id}`, e);
                 }
+
+                // Re-render
+                const resolvedTitle = await PollManager.resolveMentions(pollData.title, interaction.guild);
+                const resolvedDescription = await PollManager.resolveMentions(pollData.description, interaction.guild);
+                const resolvedOptions = await Promise.all(
+                    pollData.options.map(async (opt: string) => await PollManager.resolveMentions(opt, interaction.guild))
+                );
+
+                // Determine if we show the bar graph
+                // Show if Public == true
+                const showVotes = pollData.settings.public;
+
+                // Fetch server locale
+                let serverLocale = 'en';
+                if (interaction.guildId) {
+                    const { data: guildSettings } = await supabase
+                        .from('guild_settings')
+                        .select('locale')
+                        .eq('guild_id', interaction.guildId)
+                        .single();
+                    if (guildSettings?.locale) {
+                        serverLocale = guildSettings.locale;
+                    }
+                }
+
+                const renderOptions: any = {
+                    title: resolvedTitle,
+                    description: resolvedDescription,
+                    options: resolvedOptions,
+                    totalVotes: totalEffectiveVotes,
+                    creator: creatorTag,
+                    closed: false,
+                    locale: serverLocale // Pass Server Locale
+                };
+
+                if (showVotes) {
+                    renderOptions.votes = counts;
+                }
+
+                const imageBuffer = await Renderer.renderPoll(renderOptions);
+
+                // Let's create an attachment
+                const attachment = new AttachmentBuilder(imageBuffer, { name: 'poll.png' });
+
+                await interaction.message.edit({
+                    files: [attachment],
+                });
 
             } catch (err: any) {
                 // Sanitize error log to avoid dumping raw request body (binary data)

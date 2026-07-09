@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { supabase } from '../lib/db';
 import { logger } from '../lib/logger';
+import { getVoteCountsForPoll } from '../lib/voteUtils';
 
 const router = Router();
 
@@ -419,26 +420,17 @@ router.get('/polls/:guildId', async (req: Request, res: Response) => {
             return res.status(500).json({ error: 'Failed to fetch polls' });
         }
 
-        // Get vote counts for each poll
+        // Get vote counts for each poll using centralized utility
         const pollsWithVotes = await Promise.all((polls || []).map(async (poll) => {
-            // Get votes grouped by option (including weight for weighted votes)
-            const { data: votes } = await supabase
-                .from('votes')
-                .select('option_index, weight')
-                .eq('poll_id', poll.message_id);
-
-            const voteCounts: Record<number, number> = {};
-            let totalWeight = 0;
-            (votes || []).forEach(vote => {
-                const weight = vote.weight || 1;
-                voteCounts[vote.option_index] = (voteCounts[vote.option_index] || 0) + weight;
-                totalWeight += weight;
-            });
+            const { voteCounts, totalVotes } = await getVoteCountsForPoll(
+                poll.message_id,
+                poll.options as string[]
+            );
 
             return {
                 ...poll,
                 vote_counts: voteCounts,
-                total_votes: totalWeight,
+                total_votes: totalVotes,
             };
         }));
 
