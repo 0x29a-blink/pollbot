@@ -1,5 +1,6 @@
 -- PollBot Database Schema
 -- Source of truth for database structure
+-- Last Updated: 2026-01-15
 
 -- ============================================================================
 -- TABLES
@@ -28,8 +29,14 @@ CREATE TABLE IF NOT EXISTS polls (
     settings JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     active BOOLEAN NOT NULL DEFAULT TRUE,
-    discord_deleted BOOLEAN DEFAULT FALSE
+    discord_deleted BOOLEAN DEFAULT FALSE,
+    -- Poll scheduling (future feature)
+    ends_at TIMESTAMPTZ,
+    scheduled_start TIMESTAMPTZ
 );
+
+COMMENT ON COLUMN polls.ends_at IS 'When the poll should automatically close. NULL means no auto-close.';
+COMMENT ON COLUMN polls.scheduled_start IS 'When the poll should automatically start. NULL means start immediately.';
 
 -- 3. votes table
 CREATE TABLE IF NOT EXISTS votes (
@@ -86,22 +93,38 @@ CREATE TABLE IF NOT EXISTS dashboard_sessions (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     -- Guild caching to prevent Discord API rate limits
     cached_guilds JSONB,
-    guilds_cached_at TIMESTAMPTZ
+    guilds_cached_at TIMESTAMPTZ,
+    -- Discord token expiry tracking for proactive refresh
+    access_token_expires_at TIMESTAMPTZ
 );
+
+COMMENT ON COLUMN dashboard_sessions.access_token_expires_at IS 
+    'When the Discord access token expires. Used for proactive refresh.';
 
 -- ============================================================================
 -- INDEXES
 -- ============================================================================
 
+-- Vote queries
 CREATE INDEX IF NOT EXISTS idx_votes_poll_id ON votes(poll_id);
+CREATE INDEX IF NOT EXISTS idx_votes_user_id ON votes(user_id);
+
+-- Session management
 CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_user_id ON dashboard_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_expires_at ON dashboard_sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_guilds_cached_at ON dashboard_sessions(guilds_cached_at);
 
--- Additional indexes for common queries
+-- Poll queries
 CREATE INDEX IF NOT EXISTS idx_polls_guild_id ON polls(guild_id);
 CREATE INDEX IF NOT EXISTS idx_polls_creator_id ON polls(creator_id);
 CREATE INDEX IF NOT EXISTS idx_polls_created_at ON polls(created_at DESC);
+
+-- Poll scheduling (partial indexes for efficiency)
+CREATE INDEX IF NOT EXISTS idx_polls_ends_at ON polls(ends_at) 
+WHERE ends_at IS NOT NULL AND active = true;
+
+CREATE INDEX IF NOT EXISTS idx_polls_scheduled_start ON polls(scheduled_start) 
+WHERE scheduled_start IS NOT NULL AND active = false;
 
 -- ============================================================================
 -- ROW LEVEL SECURITY
@@ -181,8 +204,25 @@ FOR EACH ROW
 EXECUTE FUNCTION update_global_vote_count();
 
 -- ============================================================================
+-- RPC FUNCTIONS
+-- ============================================================================
+
+-- Get total member count across all guilds (avoids query limits)
+CREATE OR REPLACE FUNCTION get_total_members()
+RETURNS BIGINT
+LANGUAGE SQL
+STABLE
+SECURITY DEFINER
+AS $$
+    SELECT COALESCE(SUM(member_count), 0)::BIGINT FROM guilds;
+$$;
+
+GRANT EXECUTE ON FUNCTION get_total_members() TO public;
+
+-- ============================================================================
 -- REALTIME
 -- ============================================================================
 
 ALTER PUBLICATION supabase_realtime ADD TABLE polls;
 ALTER PUBLICATION supabase_realtime ADD TABLE global_stats;
+ALTER PUBLICATION supabase_realtime ADD TABLE votes;
