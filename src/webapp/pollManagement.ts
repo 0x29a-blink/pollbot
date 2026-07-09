@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { supabase } from '../lib/db';
 import { logger } from '../lib/logger';
+import { upsertGuildRow } from '../lib/guildUtils';
 import { getShardingManager } from '../webhook';
 
 const router = Router();
@@ -607,6 +608,15 @@ router.post('/polls', async (req: Request, res: Response) => {
                 return {
                     messageId: message.id,
                     channelId: message.channel.id,
+                    // Guild data so the DB layer can recover if the guilds row is missing
+                    guild: {
+                        id: guild.id,
+                        name: guild.name,
+                        member_count: guild.memberCount,
+                        icon_url: guild.iconURL({ forceStatic: false }) || null,
+                        locale: guild.preferredLocale,
+                        joined_at: guild.joinedAt?.toISOString() || new Date().toISOString(),
+                    },
                 };
             },
             { context: pollData }
@@ -619,21 +629,36 @@ router.post('/polls', async (req: Request, res: Response) => {
         }
 
         // Save poll to database
-        const { data: savedPoll, error: dbError } = await supabase
+        const pollRow = {
+            message_id: successResult.messageId,
+            channel_id: successResult.channelId,
+            guild_id: body.guild_id,
+            creator_id: permCheck.userId,
+            title: body.title,
+            description: body.description || '',
+            options: body.options,
+            settings,
+            active: true,
+        };
+
+        let { data: savedPoll, error: dbError } = await supabase
             .from('polls')
-            .insert({
-                message_id: successResult.messageId,
-                channel_id: successResult.channelId,
-                guild_id: body.guild_id,
-                creator_id: permCheck.userId,
-                title: body.title,
-                description: body.description || '',
-                options: body.options,
-                settings,
-                active: true,
-            })
+            .insert(pollRow)
             .select()
             .single();
+
+        // FK violation (23503): the guild row can be missing if the bot joined this
+        // guild while offline or the sync failed. Sync it and retry once.
+        if (dbError?.code === '23503' && successResult.guild) {
+            logger.warn(`[PollManagement] Guild ${body.guild_id} missing from guilds table. Syncing and retrying poll insert...`);
+            if (await upsertGuildRow(successResult.guild)) {
+                ({ data: savedPoll, error: dbError } = await supabase
+                    .from('polls')
+                    .insert(pollRow)
+                    .select()
+                    .single());
+            }
+        }
 
         if (dbError) {
             logger.error('[PollManagement] Failed to save poll to database:', dbError);

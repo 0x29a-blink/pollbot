@@ -4,6 +4,7 @@ import { Renderer } from '../lib/renderer';
 import { logger } from '../lib/logger';
 import { PollManager } from '../lib/pollManager';
 import { I18n } from '../lib/i18n';
+import { upsertGuildRow, guildToRow } from '../lib/guildUtils';
 
 export default {
     data: new SlashCommandBuilder()
@@ -301,7 +302,7 @@ export default {
                     };
                 }
 
-                const { error } = await supabase.from('polls').insert({
+                const pollRow = {
                     message_id: message.id,
                     channel_id: interaction.channelId,
                     guild_id: interaction.guildId,
@@ -322,7 +323,18 @@ export default {
                     },
                     active: true,
                     created_at: new Date().toISOString()
-                });
+                };
+
+                let { error } = await supabase.from('polls').insert(pollRow);
+
+                // FK violation (23503): the guild row can be missing if the bot joined
+                // this guild while offline or the sync failed. Sync it and retry once.
+                if (error?.code === '23503' && interaction.guild) {
+                    logger.warn(`Guild ${interaction.guildId} missing from guilds table. Syncing and retrying poll insert...`);
+                    if (await upsertGuildRow(guildToRow(interaction.guild))) {
+                        ({ error } = await supabase.from('polls').insert(pollRow));
+                    }
+                }
 
                 if (error) {
                     logger.error('Failed to save poll to DB:', error);

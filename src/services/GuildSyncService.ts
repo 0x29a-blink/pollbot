@@ -1,6 +1,6 @@
 import { Client, Events, Guild } from 'discord.js';
-import { supabase } from '../lib/db';
 import { logger } from '../lib/logger';
+import { upsertGuildRow, guildToRow } from '../lib/guildUtils';
 
 export class GuildSyncService {
     private client: Client;
@@ -64,24 +64,7 @@ export class GuildSyncService {
 
     private async syncGuild(guild: Guild) {
         try {
-            const iconUrl = guild.iconURL({ extension: 'png', forceStatic: false }) || guild.iconURL({ extension: 'png' }); // dynamic: true is deprecated in v14 favor of forceStatic: false? 
-            // Correct for v14: guild.iconURL({ dynamic: true }) is deprecated? No, it's still there but let's check.
-            // Checking docs memory: v14 uses `guild.iconURL({ forceStatic: false })` to get dynamic if available.
-            // Actually, let's just use `guild.iconURL()` - wait, to get GIF we need to specify.
-            // Code: guild.iconURL() returns string | null. options: ImageURLOptions.
-            // ImageURLOptions: { forceStatic?: boolean, extension?: string, size?: number }
-
-            const processedIconUrl = guild.iconURL({ forceStatic: false }) || null;
-
-            await supabase.from('guilds').upsert({
-                id: guild.id,
-                name: guild.name,
-                member_count: guild.memberCount,
-                icon_url: processedIconUrl,
-                locale: guild.preferredLocale,
-                joined_at: guild.joinedAt?.toISOString() || new Date().toISOString(),
-                updated_at: new Date().toISOString()
-            });
+            await upsertGuildRow(guildToRow(guild));
         } catch (error) {
             logger.error(`[GuildSync] Failed to sync guild ${guild.id}:`, error);
         }
