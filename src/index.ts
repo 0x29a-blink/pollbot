@@ -107,11 +107,40 @@ setTimeout(() => {
         });
     }
 
-    // Increase Timeout to 5 MINUTES
-    manager.spawn({ timeout: 300000 }).catch(error => {
-        logger.error('[Manager] Failed to spawn shards:', error);
-    });
+    spawnShardsWithRetry(manager);
 }, 2000); // Wait 2s for Render Service
+
+// Spawn shards with retries. The manager fetches the recommended shard count from
+// Discord before spawning; if that fails (e.g. DNS not ready right after boot) and
+// we merely log it, the manager keeps running with zero shards while the dashboard
+// and tunnels look healthy. Retry transient failures, and exit on give-up so the
+// service manager restarts the whole process.
+async function spawnShardsWithRetry(manager: ShardingManager, maxAttempts = 5) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            await manager.spawn({ timeout: 300000 }); // 5 minute timeout per attempt
+            return;
+        } catch (error) {
+            logger.error(`[Manager] Shard spawn attempt ${attempt}/${maxAttempts} failed:`, error);
+
+            // Retrying spawn() on a partially spawned manager is unreliable —
+            // restart the whole process cleanly instead.
+            if (manager.shards.size > 0) {
+                logger.error('[Manager] Shards partially spawned. Exiting for a clean restart.');
+                process.exit(1);
+            }
+
+            if (attempt < maxAttempts) {
+                const delayMs = Math.min(5000 * 2 ** (attempt - 1), 60000);
+                logger.warn(`[Manager] Retrying shard spawn in ${delayMs / 1000}s...`);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+        }
+    }
+
+    logger.error('[Manager] All shard spawn attempts failed. Exiting so the service manager can restart the bot.');
+    process.exit(1);
+}
 
 // Handle Shutdown
 process.on('SIGINT', () => {
