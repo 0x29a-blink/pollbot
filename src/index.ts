@@ -3,6 +3,7 @@ import { AutoPoster } from 'topgg-autoposter';
 import dotenv from 'dotenv';
 import path from 'path';
 import { logger } from './lib/logger';
+import { checkDbConnectionWithRetry } from './lib/db';
 import { fork, ChildProcess } from 'child_process';
 import { setGlobalDispatcher, Agent } from 'undici';
 
@@ -15,100 +16,131 @@ setGlobalDispatcher(new Agent({
     }
 }));
 
-const token = process.env.DISCORD_TOKEN;
+// 0. Verify Database Connection Before Startup
+(async () => {
+    logger.info('[Manager] Verifying database connection...');
+    const dbHealthy = await checkDbConnectionWithRetry(5, 1000);
+    if (!dbHealthy) {
+        logger.error('[Manager] Database connection failed after retries. Exiting.');
+        process.exit(1);
+    }
 
-if (!token) {
-    logger.error("DISCORD_TOKEN is not defined in the environment variables.");
-    process.exit(1);
-}
+    // Continue with normal startup after DB is verified
+    startServices();
+})();
 
-// Detect if we are running in TS-Node (Development) or Node (Production)
-const isTsNode = (process as any)[Symbol.for('ts-node.register.instance')] || process.env.TS_NODE_DEV;
-const extension = isTsNode ? 'ts' : 'js';
-const botFile = path.join(__dirname, `bot.${extension}`);
-const renderServiceFile = path.join(__dirname, 'services', `renderService.${extension}`);
+function startServices() {
 
-// 2. Spawn Render Service
-logger.info('[Manager] Spawning Render Service...');
+    const token = process.env.DISCORD_TOKEN;
 
-const renderService: ChildProcess = fork(renderServiceFile, [], {
-    execArgv: isTsNode ? ['-r', 'ts-node/register'] : []
-});
+    if (!token) {
+        logger.error("DISCORD_TOKEN is not defined in the environment variables.");
+        process.exit(1);
+    }
 
-renderService.on('spawn', () => {
-    logger.info('[Manager] Render Service process spawned.');
-});
+    // Detect if we are running in TS-Node (Development) or Node (Production)
+    const isTsNode = (process as any)[Symbol.for('ts-node.register.instance')] || process.env.TS_NODE_DEV;
+    const extension = isTsNode ? 'ts' : 'js';
+    const botFile = path.join(__dirname, `bot.${extension}`);
+    const renderServiceFile = path.join(__dirname, 'services', `renderService.${extension}`);
 
-renderService.on('error', (err) => {
-    logger.error('[Manager] Render Service failed:', err);
-});
+    // 2. Spawn Render Service
+    logger.info('[Manager] Spawning Render Service...');
 
-// 2.5 Spawn Dashboard Service (Serves Frontend + Proxy)
-logger.info('[Manager] Spawning Dashboard Service...');
-const dashboardServiceFile = path.join(__dirname, 'services', `DashboardService.${extension}`);
-const dashboardService: ChildProcess = fork(dashboardServiceFile, [], {
-    execArgv: isTsNode ? ['-r', 'ts-node/register'] : [],
-    stdio: 'inherit' // Ensure stdout/stderr is visible
-});
-
-dashboardService.on('spawn', () => {
-    logger.info('[Manager] Dashboard Service process spawned.');
-});
-
-dashboardService.on('error', (err) => {
-    logger.error('[Manager] Dashboard Service failed to spawn:', err);
-});
-
-dashboardService.on('close', (code, signal) => {
-    logger.error(`[Manager] Dashboard Service exited with code ${code} and signal ${signal}`);
-});
-
-// 3. Spawn Shards (Delayed to allow Render Service to warm up)
-// Ideally we wait for a signal, but a short delay is usually sufficient/simpler for now.
-setTimeout(() => {
-    const manager = new ShardingManager(botFile, {
-        token: token,
-        totalShards: 'auto',
-        // Pass execution args to shard if using ts-node
-        ...(isTsNode ? { execArgv: ['-r', 'ts-node/register'] } : {})
+    const renderService: ChildProcess = fork(renderServiceFile, [], {
+        execArgv: isTsNode ? ['-r', 'ts-node/register'] : []
     });
 
-    manager.on('shardCreate', shard => logger.info(`[Manager] Launched shard ${shard.id}`));
+    renderService.on('spawn', () => {
+        logger.info('[Manager] Render Service process spawned.');
+    });
 
-    // Integrated Top.gg AutoPoster
-    const topggToken = process.env.TOPGG_TOKEN;
-    if (topggToken) {
-        const ap = AutoPoster(topggToken, manager);
-        ap.on('posted', () => {
-            logger.debug('[AutoPoster] Posted stats to Top.gg!');
-        });
-        ap.on('error', (err: any) => {
-            logger.error('[AutoPoster] Error posting stats:', err);
-        });
-    }
+    renderService.on('error', (err) => {
+        logger.error('[Manager] Render Service failed:', err);
+    });
 
-    // 4. Start Webhook Server (Top.gg & Cloudflare Tunnel)
+    // 2.5 Spawn Dashboard Service (Serves Frontend + Proxy)
+    logger.info('[Manager] Spawning Dashboard Service...');
+    const dashboardServiceFile = path.join(__dirname, 'services', `DashboardService.${extension}`);
+    const dashboardService: ChildProcess = fork(dashboardServiceFile, [], {
+        execArgv: isTsNode ? ['-r', 'ts-node/register'] : [],
+        stdio: 'inherit' // Ensure stdout/stderr is visible
+    });
+
+    dashboardService.on('spawn', () => {
+        logger.info('[Manager] Dashboard Service process spawned.');
+    });
+
+    dashboardService.on('error', (err) => {
+        logger.error('[Manager] Dashboard Service failed to spawn:', err);
+    });
+
+    dashboardService.on('close', (code, signal) => {
+        logger.error(`[Manager] Dashboard Service exited with code ${code} and signal ${signal}`);
+    });
+
+    // 3. Spawn Shards (Delayed to allow Render Service to warm up)
+    // Ideally we wait for a signal, but a short delay is usually sufficient/simpler for now.
     setTimeout(() => {
-        logger.info(`[Manager] Checking Tunnel Tokens: Webhook=${process.env.WEBHOOK_CLOUDFLARED_TOKEN ? 'EXISTS' : 'MISSING'}, Main=${process.env.MAIN_CLOUDFLARED_TOKEN ? 'EXISTS' : 'MISSING'}`);
-        import('./webhook').then(({ startWebhookServer, setShardingManager }) => {
-            setShardingManager(manager);
-            startWebhookServer();
-        }).catch(err => {
-            logger.error('[Manager] Failed to start Webhook Server:', err);
+        const manager = new ShardingManager(botFile, {
+            token: token,
+            totalShards: 'auto',
+            // Pass execution args to shard if using ts-node
+            ...(isTsNode ? { execArgv: ['-r', 'ts-node/register'] } : {})
         });
-    }, 5000); // Start after shards to ensure bot is ready-ish
 
-    // 5. Start Telemetry Tunnel
-    if (process.env.TELEMETRY_TOKEN) {
-        import('./services/TelemetryTunnelService').then(({ TelemetryTunnelService }) => {
-            new TelemetryTunnelService();
-        }).catch(err => {
-            logger.error('[Manager] Failed to start Telemetry Tunnel:', err);
-        });
-    }
+        manager.on('shardCreate', shard => logger.info(`[Manager] Launched shard ${shard.id}`));
 
-    spawnShardsWithRetry(manager);
-}, 2000); // Wait 2s for Render Service
+        // Integrated Top.gg AutoPoster
+        const topggToken = process.env.TOPGG_TOKEN;
+        if (topggToken) {
+            const ap = AutoPoster(topggToken, manager);
+            ap.on('posted', () => {
+                logger.debug('[AutoPoster] Posted stats to Top.gg!');
+            });
+            ap.on('error', (err: any) => {
+                logger.error('[AutoPoster] Error posting stats:', err);
+            });
+        }
+
+        // 4. Start Webhook Server (Top.gg & Cloudflare Tunnel)
+        setTimeout(() => {
+            logger.info(`[Manager] Checking Tunnel Tokens: Webhook=${process.env.WEBHOOK_CLOUDFLARED_TOKEN ? 'EXISTS' : 'MISSING'}, Main=${process.env.MAIN_CLOUDFLARED_TOKEN ? 'EXISTS' : 'MISSING'}`);
+            import('./webhook').then(({ startWebhookServer, setShardingManager }) => {
+                setShardingManager(manager);
+                startWebhookServer();
+            }).catch(err => {
+                logger.error('[Manager] Failed to start Webhook Server:', err);
+            });
+        }, 5000); // Start after shards to ensure bot is ready-ish
+
+        // 5. Start Telemetry Tunnel
+        if (process.env.TELEMETRY_TOKEN) {
+            import('./services/TelemetryTunnelService').then(({ TelemetryTunnelService }) => {
+                new TelemetryTunnelService();
+            }).catch(err => {
+                logger.error('[Manager] Failed to start Telemetry Tunnel:', err);
+            });
+        }
+
+        spawnShardsWithRetry(manager);
+    }, 2000); // Wait 2s for Render Service
+
+    // Handle Shutdown
+    process.on('SIGINT', () => {
+        logger.info('[Manager] SIGINT received. Killing Services...');
+        renderService.kill();
+        dashboardService.kill();
+        process.exit(0);
+    });
+
+    process.on('SIGTERM', () => {
+        logger.info('[Manager] SIGTERM received. Killing Services...');
+        renderService.kill();
+        dashboardService.kill();
+        process.exit(0);
+    });
+} // End of startServices function
 
 // Spawn shards with retries. The manager fetches the recommended shard count from
 // Discord before spawning; if that fails (e.g. DNS not ready right after boot) and
@@ -141,18 +173,3 @@ async function spawnShardsWithRetry(manager: ShardingManager, maxAttempts = 5) {
     logger.error('[Manager] All shard spawn attempts failed. Exiting so the service manager can restart the bot.');
     process.exit(1);
 }
-
-// Handle Shutdown
-process.on('SIGINT', () => {
-    logger.info('[Manager] SIGINT received. Killing Services...');
-    renderService.kill();
-    dashboardService.kill();
-    process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-    logger.info('[Manager] SIGTERM received. Killing Services...');
-    renderService.kill();
-    dashboardService.kill();
-    process.exit(0);
-});
