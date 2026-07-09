@@ -1,4 +1,4 @@
-import { Client, Collection, GatewayIntentBits, REST, Routes } from 'discord.js';
+import { Client, Collection, GatewayIntentBits, Options, Partials, REST, Routes } from 'discord.js';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -28,7 +28,40 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         // GatewayIntentBits.MessageContent // Requires toggling in Dev Portal
-    ]
+    ],
+    // Polls are always fetched explicitly (channel.messages.fetch), so nothing reads
+    // the message cache. Partials.Message keeps messageDelete firing for uncached
+    // messages so deleted polls still get marked in the DB.
+    partials: [Partials.Message],
+    makeCache: Options.cacheWithLimits({
+        ...Options.DefaultMakeCacheSettings,
+        MessageManager: 0,
+        ReactionManager: 0,
+        ReactionUserManager: 0,
+        PresenceManager: 0,
+        VoiceStateManager: 0,
+        ThreadMemberManager: 0,
+        // Per-guild cap; guild.members.me must survive eviction
+        GuildMemberManager: {
+            maxSize: 200,
+            keepOverLimit: member => member.id === member.client.user?.id,
+        },
+        UserManager: {
+            maxSize: 200,
+            keepOverLimit: user => user.id === user.client.user?.id,
+        },
+    }),
+    sweepers: {
+        ...Options.DefaultSweeperSettings,
+        guildMembers: {
+            interval: 3600,
+            filter: () => member => member.id !== member.client.user?.id,
+        },
+        users: {
+            interval: 3600,
+            filter: () => user => user.id !== user.client.user?.id,
+        },
+    },
 }) as ExtendedClient;
 
 client.commands = new Collection();
