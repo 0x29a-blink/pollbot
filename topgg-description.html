@@ -1,0 +1,279 @@
+<style>
+    /*
+    Site-wide theming for the Top.gg bot page.
+    Keep it light-touch: only colors/accents, do not hide or reposition UI.
+    Align the brand to Discord's blurple while preserving Top.gg structure.
+  */
+
+    :root,
+    [data-theme="dark"],
+    [data-theme="light"] {
+        /* Brand palette (Discord Blurple + tints) */
+        --color-brand: #5865f2;
+        --color-brand-100: #5865f2;
+        /* base */
+        --color-brand-80: #6b76f6;
+        /* +12% */
+        --color-brand-60: #7e88f9;
+        /* +24% */
+        --color-brand-40: #a1a9ff;
+        /* +40% */
+        --color-brand-20: #d6dbff;
+        /* subtle bg/gradients */
+        --color-brand-10: #ebedff;
+        --color-brand-5: #f6f7ff;
+
+        /* Mirror Top.gg brand tokens to ensure consistent usage across Chakra UI */
+        --top-gg-colors-brand-100: #5865f2;
+        --top-gg-colors-brand-80: #6b76f6;
+        --top-gg-colors-brand-60: #7e88f9;
+        --top-gg-colors-brand-40: #a1a9ff;
+        --top-gg-colors-brand-20: #d6dbff;
+        --top-gg-colors-brand-10: #ebedff;
+        --top-gg-colors-brand-5: #f6f7ff;
+
+        /* Progress bar and focus accents derive from brand */
+        --bprogress-color: var(--color-brand);
+        --bprogress-box-shadow: 0 0 10px var(--color-brand), 0 0 5px var(--color-brand);
+    }
+
+    /* Tone down the Top.gg full-page overlay gradient (top-left to bottom-right) */
+    div.w-full.h-screen.inset-0.-z-10.absolute.pointer-events-none {
+        background: linear-gradient(170deg,
+                rgba(12, 18, 48, 0.92) 0%,
+                rgba(12, 18, 48, 0.65) 28%,
+                transparent 60%) !important;
+    }
+
+    /* Gentle, accessible link styling to match brand (scoped) */
+    [data-theme] a {
+        color: var(--color-brand-80);
+    }
+
+    [data-theme] a:hover {
+        color: var(--color-brand-100);
+    }
+
+    [data-theme] a:focus-visible {
+        outline: 2px solid var(--color-brand-60);
+        outline-offset: 2px;
+    }
+
+    /* Primary buttons and chips (generic selectors to avoid breaking layout) */
+    [data-theme] .chakra-button,
+    [data-theme] button[role="button"] {
+        --btn-bg: var(--color-brand-80);
+        --btn-bg-hover: var(--color-brand-100);
+        --btn-fg: white;
+        color: var(--btn-fg);
+    }
+
+    [data-theme] .chakra-button:not([disabled]) {
+        background: var(--btn-bg);
+        border-color: var(--color-brand-80);
+    }
+
+    [data-theme] .chakra-button:not([disabled]):hover {
+        background: var(--btn-bg-hover);
+        border-color: var(--color-brand-100);
+    }
+
+    /* Badges, switches, tabs and sliders often use brand tokens */
+    [data-color="brand"],
+    [data-theme] .chakra-switch[data-checked] {
+        --switch-bg: var(--top-gg-colors-brand-200, var(--color-brand-60));
+    }
+
+    /* Non-invasive scrollbar accent (respects OS width) */
+    ::-webkit-scrollbar-thumb {
+        background: var(--color-brand-40);
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: var(--color-brand-60);
+    }
+
+    /* Form controls focus states */
+    [data-theme] input:focus,
+    [data-theme] textarea:focus,
+    [data-theme] select:focus {
+        outline: 2px solid var(--color-brand-60);
+        outline-offset: 1px;
+        box-shadow: 0 0 0 2px rgba(88, 101, 242, 0.3);
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-brand-60) 30%, transparent);
+        border-color: var(--color-brand-60);
+    }
+
+    /* Text selection */
+    ::selection {
+        background: var(--color-brand-60);
+        color: #fff;
+    }
+
+    ::-moz-selection {
+        background: var(--color-brand-60);
+        color: #fff;
+    }
+
+    /* Native controls accent (checkboxes/radios/progress) */
+    [data-theme] input[type="checkbox"],
+    [data-theme] input[type="radio"],
+    [data-theme] progress {
+        accent-color: var(--color-brand-80);
+    }
+
+    [data-theme] progress::-webkit-progress-value {
+        background: var(--color-brand-80);
+    }
+
+    [data-theme] progress::-moz-progress-bar {
+        background: var(--color-brand-80);
+    }
+
+    /* Subtle hr and divider tints */
+    [data-theme] hr {
+        border-color: rgba(88, 101, 242, .35);
+    }
+
+    /* Card and surface subtle border tints when allowed by site tokens */
+    :root {
+        --top-gg-colors-chakra-border-color: rgba(88, 101, 242, 0.35);
+    }
+</style>
+<div
+    style="--bg:#0b1020;--card:#121935;--ink:#e8ecff;--muted:#aab3d0;--accent:#5865f2;--accent2:#8ea0ff;--ok:#2ecc71;--warn:#ffb020;--bad:#ff6b6b; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: var(--ink); background: radial-gradient(1100px 620px at 85% -10%, rgba(20,28,70,.35), transparent), radial-gradient(1000px 800px at 0% 120%, rgba(40,52,120,.22), transparent), var(--bg); padding: 20px; border-radius: 14px; box-shadow: 0 8px 40px rgba(0,0,0,.32); max-width: 860px; margin: 0 auto;">
+    <!-- Hero -->
+    <div style="display:flex; flex-wrap:wrap; align-items:center; gap:14px;">
+        <div style="flex:1 1 380px; min-width: 260px;">
+            <div
+                style="display:inline-flex; align-items:center; gap:6px; padding:5px 8px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08); border-radius:999px; font-size:11px; color:var(--muted); margin-bottom:8px;">
+                <span>🗳️ Beautiful image-based polling</span>
+            </div>
+            <h1 style="margin:0 0 6px 0; font-size:28px; line-height:1.12; letter-spacing:.2px; max-width:22ch;">Simple Poll Bot — polls that look amazing</h1>
+            <p style="margin:0 0 12px 0; color:var(--muted); font-size:13.5px; line-height:1.45; max-width:60ch;">Create stunning, image-rendered polls in seconds! Features single & multi-vote options, role restrictions, weighted voting, real-time updates, and full internationalization. Think of it like traditional polls... but beautiful!</p>
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <a href="https://discord.com/api/oauth2/authorize?client_id=911731627498041374&permissions=534992383040&scope=applications.commands%20bot"
+                    target="_blank"
+                    style="background: linear-gradient(90deg, var(--accent), var(--accent2)); color:white; text-decoration:none; padding:10px 14px; border-radius:10px; font-weight:800; font-size:13.5px; box-shadow:0 8px 20px rgba(87,101,242,.32);">➕ Invite Bot</a>
+                <a href="https://pollbot.win" target="_blank"
+                    style="background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12); color:var(--ink); text-decoration:none; padding:10px 14px; border-radius:10px; font-weight:700; font-size:13.5px;">🌐 Web Dashboard</a>
+                <a href="https://discord.gg/MYRqdNFQfk" target="_blank"
+                    style="background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12); color:var(--ink); text-decoration:none; padding:10px 14px; border-radius:10px; font-weight:700; font-size:13.5px;">💬 Support Server</a>
+            </div>
+            <div style="margin-top:10px; color:var(--muted); font-size:12px;">No complicated setup — just /poll and you're ready to go!</div>
+        </div>
+        <div style="flex:1 1 340px; min-width:260px;">
+            <div
+                style="background:linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.12); border-radius:14px; padding:12px; display:grid; grid-template-columns:repeat(2,1fr); gap:8px;">
+                <div style="background:rgba(0,0,0,.18); border-radius:10px; padding:10px;">
+                    <div style="font-size:20px">🎨</div>
+                    <div style="margin-top:6px; font-weight:800;">Image Polls</div>
+                    <div style="color:var(--muted); font-size:11px;">Beautiful rendered images, not boring embeds.</div>
+                </div>
+                <div style="background:rgba(0,0,0,.18); border-radius:10px; padding:10px;">
+                    <div style="font-size:20px">🔢</div>
+                    <div style="margin-top:6px; font-weight:800;">Multi-select</div>
+                    <div style="color:var(--muted); font-size:11px;">Pick 1, pick 3, or anything in between.</div>
+                </div>
+                <div style="background:rgba(0,0,0,.18); border-radius:10px; padding:10px;">
+                    <div style="font-size:20px">⚖️</div>
+                    <div style="margin-top:6px; font-weight:800;">Weighted votes</div>
+                    <div style="color:var(--muted); font-size:11px;">@Admin = 5 votes, @Member = 1, your rules.</div>
+                </div>
+                <div style="background:rgba(0,0,0,.18); border-radius:10px; padding:10px;">
+                    <div style="font-size:20px">🌍</div>
+                    <div style="margin-top:6px; font-weight:800;">Multi-language</div>
+                    <div style="color:var(--muted); font-size:11px;">Full i18n support for your community.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Why cards -->
+    <div style="margin-top:20px; display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:10px;">
+        <div
+            style="background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.10); border-radius:12px; padding:14px;">
+            <div style="font-size:18px; margin-bottom:4px;">⚡ Instant setup</div>
+            <div style="color:var(--muted); font-size:12px;">Just type /poll — no config needed. Add title, options, done!</div>
+        </div>
+        <div
+            style="background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.10); border-radius:12px; padding:14px;">
+            <div style="font-size:18px; margin-bottom:4px;">🔒 Role restrictions</div>
+            <div style="color:var(--muted); font-size:12px;">Limit voting to specific roles. @Members only? No problem.</div>
+        </div>
+        <div
+            style="background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.10); border-radius:12px; padding:14px;">
+            <div style="font-size:18px; margin-bottom:4px;">📊 Live updates</div>
+            <div style="color:var(--muted); font-size:12px;">Watch votes roll in with real-time image updates.</div>
+        </div>
+        <div
+            style="background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.10); border-radius:12px; padding:14px;">
+            <div style="font-size:18px; margin-bottom:4px;">💬 Thread support</div>
+            <div style="color:var(--muted); font-size:12px;">Auto-create discussion threads for your polls.</div>
+        </div>
+        <div
+            style="background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.10); border-radius:12px; padding:14px;">
+            <div style="font-size:18px; margin-bottom:4px;">🔐 Private polls</div>
+            <div style="color:var(--muted); font-size:12px;">Hide votes until the poll closes. No peeking!</div>
+        </div>
+        <div
+            style="background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.10); border-radius:12px; padding:14px;">
+            <div style="font-size:18px; margin-bottom:4px;">🛠️ Full control</div>
+            <div style="color:var(--muted); font-size:12px;">/close, /reopen, /config — manage polls with ease.</div>
+        </div>
+    </div>
+
+    <!-- How it works -->
+    <div
+        style="margin-top:22px; background:linear-gradient(180deg, rgba(88,101,242,.16), rgba(154,164,191,.08)); border:1px solid rgba(88,101,242,.25); border-radius:14px; padding:14px;">
+        <div style="font-weight:900; letter-spacing:.3px; margin-bottom:10px;">How it works</div>
+        <div style="display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:8px;">
+            <div
+                style="background:rgba(0,0,0,.18); border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:12px;">
+                <div style="font-size:24px;">①</div>
+                <div style="margin-top:6px; font-weight:800;">Create</div>
+                <div style="color:var(--muted); font-size:12px;">Use /poll with your title and options — simple slash command.</div>
+            </div>
+            <div
+                style="background:rgba(0,0,0,.18); border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:12px;">
+                <div style="font-size:24px;">②</div>
+                <div style="margin-top:6px; font-weight:800;">Vote</div>
+                <div style="color:var(--muted); font-size:12px;">Members click buttons to cast votes. It's quick and visual.</div>
+            </div>
+            <div
+                style="background:rgba(0,0,0,.18); border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:12px;">
+                <div style="font-size:24px;">③</div>
+                <div style="margin-top:6px; font-weight:800;">Results</div>
+                <div style="color:var(--muted); font-size:12px;">Beautiful image updates in real-time. Close when ready!</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Commands reference -->
+    <div
+        style="margin-top:18px; background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.10); border-radius:12px; padding:14px;">
+        <div style="font-weight:800; margin-bottom:8px;">📜 Commands</div>
+        <div style="display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:6px; font-size:12px;">
+            <div style="color:var(--muted);"><code style="color:var(--accent2);">/poll</code> — Create a new poll</div>
+            <div style="color:var(--muted);"><code style="color:var(--accent2);">/close</code> — Close an active poll</div>
+            <div style="color:var(--muted);"><code style="color:var(--accent2);">/reopen</code> — Reopen a closed poll</div>
+            <div style="color:var(--muted);"><code style="color:var(--accent2);">/config</code> — Server settings & locale</div>
+            <div style="color:var(--muted);"><code style="color:var(--accent2);">/stats</code> — View bot statistics</div>
+            <div style="color:var(--muted);"><code style="color:var(--accent2);">/view</code> — Export poll results</div>
+        </div>
+    </div>
+
+    <!-- Micro FAQs -->
+    <div style="margin-top:18px; display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px;">
+        <div
+            style="background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.10); border-radius:12px; padding:12px;">
+            <div style="font-weight:800; margin-bottom:6px;">Is it easy to start?</div>
+            <div style="color:var(--muted); font-size:12px;">Yes! Just /poll title: Your Question items: Option 1, Option 2 and you're done.</div>
+        </div>
+        <div
+            style="background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.10); border-radius:12px; padding:12px;">
+            <div style="font-weight:800; margin-bottom:6px;">What makes it different?</div>
+            <div style="color:var(--muted); font-size:12px;">Image-rendered polls that look professional, not plain text embeds. More options available compared to Discord's system for polls!</div>
+        </div>
+    </div>
+</div>
