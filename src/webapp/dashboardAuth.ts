@@ -90,12 +90,14 @@ async function refreshAccessToken(sessionId: string): Promise<string | null> {
 
         // Update session in database with new tokens
         const newExpiresAt = new Date(Date.now() + (7 * 24 * 60 * 60 * 1000)); // 7 days
+        const accessTokenExpiresAt = new Date(Date.now() + tokens.expires_in * 1000);
         await supabase
             .from('dashboard_sessions')
             .update({
                 access_token: tokens.access_token,
                 refresh_token: tokens.refresh_token || session.refresh_token,
                 expires_at: newExpiresAt.toISOString(),
+                access_token_expires_at: accessTokenExpiresAt.toISOString(),
             })
             .eq('id', sessionId);
 
@@ -240,6 +242,7 @@ router.get('/callback', async (req: Request, res: Response) => {
         // Create session token
         const sessionId = crypto.randomBytes(32).toString('hex');
         const expiresAt = Date.now() + (7 * 24 * 60 * 60 * 1000); // 7 days
+        const accessTokenExpiresAt = new Date(Date.now() + tokens.expires_in * 1000); // Discord token expiry
 
         sessions.set(sessionId, {
             userId: discordUser.id,
@@ -273,6 +276,7 @@ router.get('/callback', async (req: Request, res: Response) => {
             access_token: tokens.access_token,
             refresh_token: tokens.refresh_token || null,
             expires_at: new Date(expiresAt).toISOString(),
+            access_token_expires_at: accessTokenExpiresAt.toISOString(),
             cached_guilds: cachedGuilds,
             guilds_cached_at: guildsCachedAt,
         }, {
