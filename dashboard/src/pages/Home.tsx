@@ -95,14 +95,18 @@ export const Home: React.FC = () => {
             }
 
             // Calculations for Totals (Servers & Members)
-            // Get true server count
-            const { count: totalGuildCount } = await supabase.from('guilds').select('id', { count: 'exact', head: true });
+            // Current server count — excludes guilds the bot has left
+            const { count: totalGuildCount } = await supabase
+                .from('guilds')
+                .select('id', { count: 'exact', head: true })
+                .is('left_at', null);
             setTotalServerCount(totalGuildCount || 0);
 
-            // Get true total members using RPC function (avoids 1000 row limit approximation)
+            // Get true total members using RPC function (avoids 1000 row limit approximation).
+            // Coerce: Postgres BIGINT aggregates can arrive as strings.
             const { data: memberSumData } = await supabase.rpc('get_total_members');
-            if (memberSumData !== null) {
-                setTotalMembers(memberSumData);
+            if (memberSumData !== null && memberSumData !== undefined) {
+                setTotalMembers(Number(memberSumData));
             }
 
 
@@ -295,7 +299,8 @@ export const Home: React.FC = () => {
                 }
             }
 
-            let query = supabase.from('guilds').select('*', { count: 'exact' });
+            // Exclude guilds the bot has left (left_at set on GuildDelete)
+            let query = supabase.from('guilds').select('*', { count: 'exact' }).is('left_at', null);
 
             // Apply manual filter if needed
             if (showCurated) {
@@ -519,9 +524,9 @@ export const Home: React.FC = () => {
                             <StatsCard title="Total Polls" value={stats?.total_polls || 0} icon={<BarChart3 className="text-blue-400" />} color="blue" />
                             <StatsCard title="Total Votes" value={stats?.total_votes || 0} icon={<Users className="text-emerald-400" />} color="emerald" />
                             <StatsCard
-                                title="Active Servers"
+                                title="Servers"
                                 value={totalServerCount}
-                                subLabel={`${totalMembers.toLocaleString()} Users`}
+                                subLabel={`${totalMembers.toLocaleString()} members`}
                                 icon={<Server className="text-violet-400" />}
                                 color="violet"
                             />

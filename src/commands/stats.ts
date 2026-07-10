@@ -45,16 +45,14 @@ export default {
                 }
             }
 
-            // Check and update peak
-            if (activeServers > peakActiveServers) {
-                peakActiveServers = activeServers;
-                // Fire and forget update
-                supabase.from('global_stats')
-                    .update({ peak_active_servers: peakActiveServers })
-                    .eq('id', 1)
-                    .then(({ error }) => {
-                        if (error) console.error('Failed to update peak_active_servers:', error);
-                    });
+            // Atomically raise the stored peak (GREATEST server-side) and read
+            // it back — concurrent /stats runs can no longer lose updates.
+            const { data: newPeak, error: peakError } = await supabase
+                .rpc('bump_peak_active_servers', { p_current: activeServers });
+            if (peakError) {
+                logger.error('Failed to update peak_active_servers:', peakError);
+            } else if (typeof newPeak === 'number') {
+                peakActiveServers = newPeak;
             }
 
             const uptimeSeconds = process.uptime();

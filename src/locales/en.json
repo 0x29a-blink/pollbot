@@ -235,7 +235,7 @@
         "subtitle": "System Analytics",
         "uptime": "Uptime",
         "shards": "Shards",
-        "active_servers": "Active Servers",
+        "active_servers": "Active Servers (Peak)",
         "total_votes": "Total Votes",
         "total_polls": "Total Polls",
         "cpu_load": "CPU Load",

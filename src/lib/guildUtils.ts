@@ -13,6 +13,7 @@ export interface GuildRow {
     icon_url?: string | null;
     locale?: string;
     joined_at?: string;
+    left_at?: string | null;
 }
 
 /**
@@ -46,5 +47,8 @@ export function guildToRow(guild: Guild): GuildRow {
         icon_url: guild.iconURL({ forceStatic: false }) || null,
         locale: guild.preferredLocale,
         joined_at: guild.joinedAt?.toISOString() || new Date().toISOString(),
+        // The bot can only sync a guild it is currently in, so every sync
+        // clears the left marker (covers re-joins without a separate query).
+        left_at: null,
     };
 }

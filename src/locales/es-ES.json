@@ -234,7 +234,7 @@
         "subtitle": "Analíticas del Sistema",
         "uptime": "Tiempo de actividad",
         "shards": "Shards",
-        "active_servers": "Servidores Activos",
+        "active_servers": "Servidores Activos (Máximo)",
         "total_votes": "Votos Totales",
         "total_polls": "Encuestas Totales",
         "cpu_load": "Carga de CPU",

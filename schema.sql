@@ -14,8 +14,11 @@ CREATE TABLE IF NOT EXISTS guilds (
     icon_url TEXT,
     locale TEXT DEFAULT 'en-US'::text,
     joined_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    left_at TIMESTAMPTZ
 );
+
+COMMENT ON COLUMN guilds.left_at IS 'Set when the bot leaves the guild; NULL while the bot is a member. Cleared on re-join.';
 
 -- 2. polls table
 CREATE TABLE IF NOT EXISTS polls (
@@ -123,8 +126,11 @@ CREATE INDEX IF NOT EXISTS idx_polls_created_at ON polls(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_polls_ends_at ON polls(ends_at) 
 WHERE ends_at IS NOT NULL AND active = true;
 
-CREATE INDEX IF NOT EXISTS idx_polls_scheduled_start ON polls(scheduled_start) 
+CREATE INDEX IF NOT EXISTS idx_polls_scheduled_start ON polls(scheduled_start)
 WHERE scheduled_start IS NOT NULL AND active = false;
+
+-- Guilds the bot has left (partial: most rows have left_at NULL)
+CREATE INDEX IF NOT EXISTS idx_guilds_left_at ON guilds(left_at) WHERE left_at IS NOT NULL;
 
 -- ============================================================================
 -- ROW LEVEL SECURITY
@@ -207,17 +213,32 @@ EXECUTE FUNCTION update_global_vote_count();
 -- RPC FUNCTIONS
 -- ============================================================================
 
--- Get total member count across all guilds (avoids query limits)
+-- Get total member count across current guilds (excludes guilds the bot left)
 CREATE OR REPLACE FUNCTION get_total_members()
 RETURNS BIGINT
 LANGUAGE SQL
 STABLE
 SECURITY DEFINER
 AS $$
-    SELECT COALESCE(SUM(member_count), 0)::BIGINT FROM guilds;
+    SELECT COALESCE(SUM(member_count), 0)::BIGINT FROM guilds WHERE left_at IS NULL;
 $$;
 
 GRANT EXECUTE ON FUNCTION get_total_members() TO public;
+
+-- Atomic peak update: GREATEST server-side, no read-modify-write race.
+CREATE OR REPLACE FUNCTION bump_peak_active_servers(p_current INT)
+RETURNS INT
+LANGUAGE SQL
+AS $$
+    UPDATE global_stats
+    SET peak_active_servers = GREATEST(peak_active_servers, p_current),
+        last_updated = NOW()
+    WHERE id = 1
+    RETURNING peak_active_servers;
+$$;
+
+REVOKE ALL ON FUNCTION bump_peak_active_servers(INT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION bump_peak_active_servers(INT) TO service_role;
 
 -- Atomically replace a user's votes on a poll (delete old + insert new in one
 -- transaction) so a failed insert can never erase the user's prior vote.
