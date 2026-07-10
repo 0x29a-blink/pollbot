@@ -660,6 +660,12 @@ export const Home: React.FC = () => {
                                             <Server className="w-5 h-5 text-emerald-400" />
                                             <h3 className="text-lg font-bold text-white">Your Servers</h3>
                                             <span className="text-sm text-slate-500">({userGuildsWithBot.length} servers)</span>
+                                            <button
+                                                onClick={() => navigate('/my-votes')}
+                                                className="text-sm font-bold text-indigo-400 hover:text-indigo-300 transition-colors"
+                                            >
+                                                My Votes
+                                            </button>
                                         </div>
                                         <button
                                             onClick={refreshUserGuilds}

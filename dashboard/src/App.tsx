@@ -13,6 +13,7 @@ const ServerView = lazy(() => import('./pages/ServerView').then(m => ({ default:
 const PollsView = lazy(() => import('./pages/PollsView').then(m => ({ default: m.PollsView })));
 const VotersView = lazy(() => import('./pages/VotersView').then(m => ({ default: m.VotersView })));
 const UserServerView = lazy(() => import('./pages/UserServerView').then(m => ({ default: m.UserServerView })));
+const MyVotesView = lazy(() => import('./pages/MyVotesView').then(m => ({ default: m.MyVotesView })));
 
 // User context for sharing auth state
 interface User {
@@ -156,6 +157,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <UserServerView />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/my-votes"
+        element={
+          <ProtectedRoute>
+            <MyVotesView />
           </ProtectedRoute>
         }
       />

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { supabase } from '../lib/db';
 import { logger } from '../lib/logger';
 import { getVoteCountsForPoll } from '../lib/voteUtils';
+import { groupVoteRows, MyVoteRow } from './voteGrouping';
 
 const router = Router();
 
@@ -300,6 +301,48 @@ async function fetchVoterData(pollId: string, optionIndex: number, guildId: stri
  * GET /api/user/polls/:guildId
  * Returns all polls in a server (requires Manage Guild permission)
  */
+/**
+ * GET /api/user/votes
+ * All polls the authenticated user has voted in, across servers.
+ * Paginated (limit counts vote rows, not polls — multi-select rows group
+ * client-side into one entry per poll). No guild permission check needed:
+ * users read only their own votes.
+ */
+router.get('/votes', async (req: Request, res: Response) => {
+    const session = await getSession(req);
+    if (!session) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const limitRaw = parseInt((req.query.limit as string) ?? '25', 10);
+    const offsetRaw = parseInt((req.query.offset as string) ?? '0', 10);
+    if (Number.isNaN(limitRaw) || Number.isNaN(offsetRaw)) {
+        return res.status(400).json({ error: 'limit and offset must be numbers' });
+    }
+    const limit = Math.min(Math.max(limitRaw, 1), 100);
+    const offset = Math.max(offsetRaw, 0);
+
+    try {
+        const { data, error, count } = await supabase
+            .from('votes')
+            .select('poll_id, option_index, weight, created_at, polls!inner(message_id, title, guild_id, channel_id, active, options, guilds!inner(name, icon_url))', { count: 'exact' })
+            .eq('user_id', session.user_id)
+            .order('created_at', { ascending: false })
+            .range(offset, offset + limit - 1);
+
+        if (error) {
+            logger.error('[UserPolls] Failed to fetch user votes:', error);
+            return res.status(500).json({ error: 'Failed to fetch votes' });
+        }
+
+        const votes = groupVoteRows((data ?? []) as unknown as MyVoteRow[]);
+        return res.json({ votes, total: count ?? 0, limit, offset });
+    } catch (err) {
+        logger.error('[UserPolls] Unexpected error fetching user votes:', err);
+        return res.status(500).json({ error: 'Failed to fetch votes' });
+    }
+});
+
 router.get('/polls/:guildId', async (req: Request, res: Response) => {
     const guildId = req.params.guildId as string;
     // Support both cookie and header auth

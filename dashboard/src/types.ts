@@ -46,6 +46,24 @@ export interface Poll {
 }
 
 // ============================================================================
+// My Votes
+// ============================================================================
+
+/** One poll the current user voted in (from GET /api/user/votes) */
+export interface MyVote {
+    poll_id: string;
+    title: string;
+    guild_id: string;
+    guild_name: string;
+    guild_icon_url: string | null;
+    channel_id: string;
+    active: boolean;
+    chosen_options: string[];
+    weight: number;
+    voted_at: string;
+}
+
+// ============================================================================
 // Guild Data
 // ============================================================================
 
