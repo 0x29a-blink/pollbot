@@ -14,15 +14,15 @@ before planning.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 001 | [Stats accuracy: /stats vs dashboard counts](001-stats-accuracy.md) | P1 | M | — | TODO |
-| 002 | [PollCard shows real poll settings](002-pollcard-settings-accuracy.md) | P1 | S | — | TODO |
-| 003 | [Dashboard design foundation (tokens, font, dead config)](003-design-foundation.md) | P1 | M | — | TODO |
-| 004 | [Shared UI primitives + polish (Modal/Toast/EmptyState/a11y)](004-ui-primitives-polish.md) | P2 | L | 003 | TODO |
-| 005 | [Poll auto-close (scheduling Phase 1)](005-poll-auto-close.md) | P2 | M-L | 001 (shardUtils only) | TODO |
-| 006 | [My Votes page](006-my-votes-page.md) | P2 | M | — (004 nice-to-have) | TODO |
-| 007 | [Dashboard-vs-commands usage analytics](007-usage-source-analytics.md) | P3 | M | — | TODO |
-| 008 | [Premium vote analytics](008-premium-vote-analytics.md) | P3 | M-L | — | TODO |
-| 009 | [Duplicate poll + share-card spike](009-duplicate-poll-and-share-cards.md) | P3 | S-M | — | TODO |
+| 001 | [Stats accuracy: /stats vs dashboard counts](001-stats-accuracy.md) | P1 | M | — | DONE (2026-07-10, branch plan-execution; migration 19 pending manual apply) |
+| 002 | [PollCard shows real poll settings](002-pollcard-settings-accuracy.md) | P1 | S | — | DONE (2026-07-10) |
+| 003 | [Dashboard design foundation (tokens, font, dead config)](003-design-foundation.md) | P1 | M | — | DONE (2026-07-10) |
+| 004 | [Shared UI primitives + polish (Modal/Toast/EmptyState/a11y)](004-ui-primitives-polish.md) | P2 | L | 003 | DONE (2026-07-10) |
+| 005 | [Poll auto-close (scheduling Phase 1)](005-poll-auto-close.md) | P2 | M-L | 001 (shardUtils only) | DONE (2026-07-10; requires `npm run deploy` for the new /poll option) |
+| 006 | [My Votes page](006-my-votes-page.md) | P2 | M | — (004 nice-to-have) | DONE (2026-07-10) |
+| 007 | [Dashboard-vs-commands usage analytics](007-usage-source-analytics.md) | P3 | M | — | DONE (2026-07-10; migration 20 pending manual apply) |
+| 008 | [Premium vote analytics](008-premium-vote-analytics.md) | P3 | M-L | — | DONE (2026-07-10; migration 21 pending manual apply) |
+| 009 | [Duplicate poll + share-card spike](009-duplicate-poll-and-share-cards.md) | P3 | S-M | — | DONE (2026-07-10; spike doc at docs/share-cards-spike.md) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale)
 
