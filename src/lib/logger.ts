@@ -38,8 +38,21 @@ export const logger = winston.createLogger({
         // - Write all logs with importance level of `error` or less to `error.log`
         // - Write all logs with importance level of `info` or less to `combined.log`
         //
-        new winston.transports.File({ filename: 'error.log', level: 'error' }),
-        new winston.transports.File({ filename: 'combined.log' }),
+        // maxsize + maxFiles cap on-disk log growth (the bot logs a line per vote,
+        // so without rotation these files grow until they fill the host disk).
+        new winston.transports.File({
+            filename: 'error.log',
+            level: 'error',
+            maxsize: 10 * 1024 * 1024, // 10 MB per file
+            maxFiles: 5,
+            tailable: true,
+        }),
+        new winston.transports.File({
+            filename: 'combined.log',
+            maxsize: 20 * 1024 * 1024, // 20 MB per file
+            maxFiles: 5,
+            tailable: true,
+        }),
     ],
 });
 

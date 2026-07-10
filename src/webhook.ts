@@ -49,9 +49,6 @@ app.use('/api/user', userPollsRouter);
 import { pollManagementRouter } from './webapp/pollManagement';
 app.use('/api/user', pollManagementRouter);
 
-// Top.gg Webhook
-const webhook = new Webhook(process.env.TOPGG_WEBHOOK_AUTH || 'default_auth');
-
 app.get('/health', (req, res) => {
     res.status(200).send('OK');
 });
@@ -90,12 +87,18 @@ app.post('/api/admin/sync-guilds', async (req, res) => {
     try {
         logger.info(`[Webhook] Admin sync triggered by user ${session.user_id}`);
 
-        // Broadcast to all shards to sync their guilds
-        await shardingManager.broadcastEval(client => {
-            // Send message to trigger sync in GuildSyncService
-            process.send?.({ type: 'SYNC_ALL_GUILDS' });
-            return true;
-        });
+        // Send the sync trigger from the manager to each shard process. The
+        // shard-side GuildSyncService listens on process 'message' for messages
+        // FROM the manager, so we must use shard.send() here. (The previous
+        // broadcastEval + process.send ran inside the shard and delivered the
+        // message back to the manager, where nothing listens — a silent no-op.)
+        await Promise.all(
+            [...shardingManager.shards.values()].map(shard =>
+                shard.send({ type: 'SYNC_ALL_GUILDS' }).catch(err =>
+                    logger.warn(`[Webhook] Failed to signal shard ${shard.id} to sync:`, err)
+                )
+            )
+        );
 
         return res.json({ success: true, message: 'Guild sync initiated on all shards' });
     } catch (error) {
@@ -104,28 +107,41 @@ app.post('/api/admin/sync-guilds', async (req, res) => {
     }
 });
 
-app.post('/vote', webhook.listener(async (vote) => {
-    logger.info(`[Webhook] Received vote from user: ${vote.user}`);
+// Top.gg vote webhook. The Authorization-header secret is the ONLY authenticity
+// check on this route (CSRF is intentionally skipped for it), so we require a
+// real secret rather than falling back to a guessable default. If the secret is
+// not configured, the route is not registered at all — better a disabled webhook
+// than one that accepts a well-known literal and lets anyone grant premium.
+const TOPGG_WEBHOOK_AUTH = process.env.TOPGG_WEBHOOK_AUTH;
 
-    try {
-        const { error } = await supabase
-            .from('users')
-            .upsert({
-                id: vote.user,
-                last_vote_at: new Date().toISOString()
-            }, {
-                onConflict: 'id'
-            });
+if (TOPGG_WEBHOOK_AUTH) {
+    const webhook = new Webhook(TOPGG_WEBHOOK_AUTH);
 
-        if (error) {
-            logger.error(`[Webhook] Failed to update vote timestamp for user ${vote.user}:`, error);
-        } else {
-            logger.info(`[Webhook] Successfully updated vote timestamp for user ${vote.user}`);
+    app.post('/vote', webhook.listener(async (vote) => {
+        logger.info(`[Webhook] Received vote from user: ${vote.user}`);
+
+        try {
+            const { error } = await supabase
+                .from('users')
+                .upsert({
+                    id: vote.user,
+                    last_vote_at: new Date().toISOString()
+                }, {
+                    onConflict: 'id'
+                });
+
+            if (error) {
+                logger.error(`[Webhook] Failed to update vote timestamp for user ${vote.user}:`, error);
+            } else {
+                logger.info(`[Webhook] Successfully updated vote timestamp for user ${vote.user}`);
+            }
+        } catch (err) {
+            logger.error(`[Webhook] Unexpected error processing vote for user ${vote.user}:`, err);
         }
-    } catch (err) {
-        logger.error(`[Webhook] Unexpected error processing vote for user ${vote.user}:`, err);
-    }
-}));
+    }));
+} else {
+    logger.warn('[Webhook] TOPGG_WEBHOOK_AUTH is not set — the /vote webhook endpoint is DISABLED. Set it to enable Top.gg vote processing.');
+}
 
 import { spawn } from 'child_process';
 import path from 'path';

@@ -68,13 +68,20 @@ Monitor your bot's health with a generated dashboard image.
    ```bash
    cp .env.example .env
    ```
-   **`.env` variables:**
+   **`.env` variables** (see [`.env.example`](.env.example) for the full list):
    - `DISCORD_TOKEN`: Your bot token.
    - `DISCORD_CLIENT_ID`: Application ID.
    - `SUPABASE_URL`: Your Supabase project URL.
-   - `SUPABASE_KEY`: Your Supabase service_role or anon key (ensure row level security is configured if using anon, otherwise service_role for backend).
+   - `SUPABASE_KEY`: Your Supabase **service_role** key (the backend bypasses RLS).
    - `DEV_ONLY_MODE`: `true` or `false` (limits commands to a specific guild for testing).
    - `DEV_GUILD_ID`: ID of the testing guild (required if DEV_ONLY_MODE is true).
+   - `NODE_ENV`: set to `production` on the deployed host (marks the session cookie Secure).
+   - **Dashboard OAuth**: `DISCORD_CLIENT_SECRET`, `DISCORD_OAUTH_REDIRECT_URI`, `DISCORD_ADMIN_IDS`.
+   - **Top.gg**: `TOPGG_TOKEN`, `TOPGG_WEBHOOK_AUTH` (the webhook is disabled if this is unset).
+   - **Tunnels**: `WEBHOOK_CLOUDFLARED_TOKEN`, `MAIN_CLOUDFLARED_TOKEN`.
+
+   The dashboard has its own [`dashboard/.env.example`](dashboard/.env.example)
+   (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`).
 
 4. **Database Setup**
    Execute the `schema.sql` file in your Supabase SQL editor to create the necessary tables (`polls`, `guild_settings`, `global_stats`, etc.).
@@ -95,6 +102,18 @@ Monitor your bot's health with a generated dashboard image.
    npm start
    ```
 
+### 🧪 Development & Verification
+
+```bash
+npm run typecheck   # tsc --noEmit (backend)
+npm test            # vitest unit tests
+npm run lint        # ESLint (advisory)
+```
+
+CI runs these plus the dashboard typecheck/build on every pull request. Database
+changes live in `schema.sql` and the numbered files in `supabase/migrations/`
+(applied manually in the Supabase SQL editor).
+
 ---
 
 ## 🛠️ Commands
@@ -102,10 +121,24 @@ Monitor your bot's health with a generated dashboard image.
 | Command | Description | Options |
 |---------|-------------|---------|
 | `/poll` | Create a new poll | `title`, `items`, `description`, `max_votes`, `min_votes`, `public`, `thread`, `allowed_role`, `close_button` |
+| `/view` | View detailed poll results, voter breakdown, and export (premium — unlocked by voting on Top.gg) | `poll_id` |
+| `/export` | Export a poll's votes as CSV | `poll_id` |
 | `/stats` | View bot statistics | None |
 | `/config` | Manage server settings | `poll-buttons`, `locale`, `weights (set/remove/view/clear)` |
 | `/close` | Close an active poll | `id` (Message ID of the poll) |
 | `/reopen` | Reopen a closed poll | `id` (Message ID of the poll) |
+| `/pollmanager` | Manage the Poll Manager role | role management options |
+
+There are also right-click **context-menu** commands for viewing and exporting a
+poll message directly.
+
+## 🖥️ Web Dashboard
+
+A separate React SPA in [`dashboard/`](dashboard/) lets server managers create and
+manage polls, view voter breakdowns, and export results in a browser. It
+authenticates with Discord OAuth (httpOnly cookie sessions) and talks to the
+bot's Express API. Run it with `cd dashboard && npm install && npm run dev`
+(build with `npm run build`).
 
 ### 🔍 `/poll` Options Detail
 

@@ -8,9 +8,16 @@ const router = Router();
 // Cookie configuration
 const COOKIE_NAME = 'pollbot_session';
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+// The dashboard is served over HTTPS (cloudflared) in production, so the session
+// cookie must carry Secure there. COOKIE_SECURE lets the deployment force it on
+// explicitly (independent of NODE_ENV); it defaults to on in production and off
+// for local HTTP development so login still works when testing over http://.
+const COOKIE_SECURE = process.env.COOKIE_SECURE !== undefined
+    ? process.env.COOKIE_SECURE === 'true'
+    : IS_PRODUCTION;
 const COOKIE_OPTIONS = {
     httpOnly: true,
-    secure: IS_PRODUCTION, // Only HTTPS in production
+    secure: COOKIE_SECURE,
     sameSite: 'lax' as const,
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
     path: '/',

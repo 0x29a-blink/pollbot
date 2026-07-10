@@ -5,7 +5,8 @@ import { Renderer } from '../lib/renderer';
 import { logger } from '../lib/logger';
 import { PollManager } from '../lib/pollManager';
 import { I18n } from '../lib/i18n';
-import { aggregateVotes } from '../lib/voteUtils';
+import { aggregateVotes, replaceUserVotes } from '../lib/voteUtils';
+import { scheduleRender } from '../lib/renderQueue';
 import { AttachmentBuilder } from 'discord.js';
 
 export default {
@@ -118,6 +119,24 @@ export default {
                     }
                 }
 
+                // Fetch guild settings once (weights + locale) — reused for the
+                // weight calculation below and the re-render further down.
+                let globalWeights = {};
+                let serverLocale = 'en';
+                if (interaction.guildId) {
+                    const { data: guildSettings } = await supabase
+                        .from('guild_settings')
+                        .select('vote_weights, locale')
+                        .eq('guild_id', interaction.guildId)
+                        .single();
+                    if (guildSettings?.vote_weights) {
+                        globalWeights = guildSettings.vote_weights;
+                    }
+                    if (guildSettings?.locale) {
+                        serverLocale = guildSettings.locale;
+                    }
+                }
+
                 // 3. Check for Existing Vote
                 const { data: existingVotes } = await supabase
                     .from('votes')
@@ -135,50 +154,15 @@ export default {
                 }
 
                 // 4. Calculate Weight
-                // Fetch Global Weights
-                let globalWeights = {};
-                if (interaction.guildId) {
-                    const { data: guildSettings } = await supabase
-                        .from('guild_settings')
-                        .select('vote_weights')
-                        .eq('guild_id', interaction.guildId)
-                        .single();
-                    if (guildSettings?.vote_weights) {
-                        globalWeights = guildSettings.vote_weights;
-                    }
-                }
-
                 const pollWeights = pollData.settings?.vote_weights || {};
                 const voteWeight = PollManager.calculateUserWeight(member, globalWeights, pollWeights);
 
-                // 5. Record Vote (Delete old, insert new)
-                // Delete all previous votes for this user on this poll
-                const { error: deleteError } = await supabase
-                    .from('votes')
-                    .delete()
-                    .eq('poll_id', pollId)
-                    .eq('user_id', userId);
+                // 5. Record Vote atomically (replace the user's previous votes).
+                // A partial failure here can never erase the user's prior vote.
+                const replaceResult = await replaceUserVotes(pollId, userId, selectedIndices, voteWeight);
 
-                if (deleteError) {
-                    logger.error('Vote Delete Error:', deleteError);
-                    await interaction.editReply({ content: I18n.t('messages.poll.vote_fail', interaction.locale) });
-                    return;
-                }
-
-                // Insert new votes
-                const rowsToInsert = selectedIndices.map(index => ({
-                    poll_id: pollId,
-                    user_id: userId,
-                    option_index: index,
-                    weight: voteWeight
-                }));
-
-                const { error: insertError } = await supabase
-                    .from('votes')
-                    .insert(rowsToInsert);
-
-                if (insertError) {
-                    if (insertError.code === '23503') { // Foreign Key Violation (Poll missing)
+                if (!replaceResult.ok) {
+                    if (replaceResult.fkViolation) { // Poll row missing
                         logger.info(`Handled orphaned poll vote attempt (Poll ID: ${pollId})`);
 
                         const disabledRow = new ActionRowBuilder<ButtonBuilder>()
@@ -199,7 +183,6 @@ export default {
                         return;
                     }
 
-                    logger.error('Vote Insert Error:', insertError);
                     await interaction.editReply({ content: I18n.t('messages.poll.vote_fail', interaction.locale) });
                     return;
                 }
@@ -210,66 +193,67 @@ export default {
                 await interaction.editReply({ content: I18n.t('messages.poll.voted', interaction.locale, { options: votedOptions }) + weightMsg });
                 logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} voted on poll ${pollId} with the following item: ${votedOptions} weight:${voteWeight}`);
 
-                // 7. Update the Poll Image (Always, to show updated Total Votes or Breakdown)
-                // Use centralized vote aggregation utility
-                const voteAggregation = await aggregateVotes(pollId, pollData.options.length);
-                const counts = voteAggregation.counts;
-                const totalEffectiveVotes = voteAggregation.totalWeight;
-
-                // Fetch Creator Tag
-                let creatorTag = "Unknown User";
-                try {
-                    const user = await interaction.client.users.fetch(pollData.creator_id);
-                    creatorTag = user.tag;
-                } catch (e) {
-                    logger.warn(`Failed to fetch creator ${pollData.creator_id}`, e);
-                }
-
-                // Re-render
-                const resolvedTitle = await PollManager.resolveMentions(pollData.title, interaction.guild);
-                const resolvedDescription = await PollManager.resolveMentions(pollData.description, interaction.guild);
-                const resolvedOptions = await Promise.all(
-                    pollData.options.map(async (opt: string) => await PollManager.resolveMentions(opt, interaction.guild))
-                );
-
-                // Determine if we show the bar graph
-                // Show if Public == true
+                // 7. Update the Poll Image — coalesced per poll so a burst of votes
+                // collapses to a single render + Discord edit (the voter already got
+                // their ephemeral confirmation above). The job re-reads the current
+                // totals when it runs, so the final image reflects every vote in the
+                // burst rather than each intermediate state.
+                const messageToEdit = interaction.message;
                 const showVotes = pollData.settings.public;
 
-                // Fetch server locale
-                let serverLocale = 'en';
-                if (interaction.guildId) {
-                    const { data: guildSettings } = await supabase
-                        .from('guild_settings')
-                        .select('locale')
-                        .eq('guild_id', interaction.guildId)
-                        .single();
-                    if (guildSettings?.locale) {
-                        serverLocale = guildSettings.locale;
+                scheduleRender(pollId, async () => {
+                    const voteAggregation = await aggregateVotes(pollId, pollData.options.length);
+
+                    // If the count query failed, skip the refresh rather than
+                    // overwriting the live poll with a zero-filled fallback.
+                    if (voteAggregation.error) {
+                        logger.warn(`[Vote] Skipping poll image refresh for ${pollId} due to a vote aggregation error (vote was recorded).`);
+                        return;
                     }
-                }
 
-                const renderOptions: any = {
-                    title: resolvedTitle,
-                    description: resolvedDescription,
-                    options: resolvedOptions,
-                    totalVotes: totalEffectiveVotes,
-                    creator: creatorTag,
-                    closed: false,
-                    locale: serverLocale // Pass Server Locale
-                };
+                    let creatorTag = "Unknown User";
+                    try {
+                        const user = await interaction.client.users.fetch(pollData.creator_id);
+                        creatorTag = user.tag;
+                    } catch (e) {
+                        logger.warn(`Failed to fetch creator ${pollData.creator_id}`, e);
+                    }
 
-                if (showVotes) {
-                    renderOptions.votes = counts;
-                }
+                    const resolvedTitle = await PollManager.resolveMentions(pollData.title, interaction.guild);
+                    const resolvedDescription = await PollManager.resolveMentions(pollData.description, interaction.guild);
+                    const resolvedOptions = await Promise.all(
+                        pollData.options.map(async (opt: string) => await PollManager.resolveMentions(opt, interaction.guild))
+                    );
 
-                const imageBuffer = await Renderer.renderPoll(renderOptions);
+                    const renderOptions: any = {
+                        title: resolvedTitle,
+                        description: resolvedDescription,
+                        options: resolvedOptions,
+                        totalVotes: voteAggregation.totalWeight,
+                        creator: creatorTag,
+                        closed: false,
+                        locale: serverLocale // Pass Server Locale
+                    };
 
-                // Let's create an attachment
-                const attachment = new AttachmentBuilder(imageBuffer, { name: 'poll.png' });
+                    if (showVotes) {
+                        renderOptions.votes = voteAggregation.counts;
+                    }
 
-                await interaction.message.edit({
-                    files: [attachment],
+                    const imageBuffer = await Renderer.renderPoll(renderOptions);
+                    const attachment = new AttachmentBuilder(imageBuffer, { name: 'poll.png' });
+
+                    try {
+                        await messageToEdit.edit({ files: [attachment] });
+                    } catch (editErr: any) {
+                        // The vote is already recorded; a failed image edit (e.g. the
+                        // bot lost channel permissions) is logged, not surfaced to the
+                        // voter, who cannot act on it anyway.
+                        if (editErr?.code === 50001 || editErr?.code === 50013) {
+                            logger.warn(`[Vote] Could not update poll image for ${pollId} (missing permissions ${editErr.code}).`);
+                        } else {
+                            throw editErr;
+                        }
+                    }
                 });
 
             } catch (err: any) {

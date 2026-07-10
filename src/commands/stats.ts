@@ -112,7 +112,10 @@ export default {
             const buffer = await Renderer.renderStats({
                 totalPolls,
                 totalVotes,
-                activeServers, // This is now peak active servers logic from previous step + current fallback
+                // Display the all-time peak (computed/stored above) to match the
+                // "Active Servers (Peak)" label; previously the current count was
+                // passed here, so the stored peak was never shown.
+                activeServers: peakActiveServers,
                 uptime: uptimeString,
                 shards,
                 cpuLoad,

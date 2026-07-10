@@ -1,14 +1,17 @@
-import React, { useEffect, useState, createContext, useContext } from 'react';
+import React, { useEffect, useState, createContext, useContext, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Login } from './pages/Login';
 import { Landing } from './pages/Landing';
 import { AuthCallback } from './pages/AuthCallback';
-import { Home } from './pages/Home';
-import { ServerView } from './pages/ServerView';
-import { PollsView } from './pages/PollsView';
-import { VotersView } from './pages/VotersView';
-import { UserServerView } from './pages/UserServerView';
 import { ErrorBoundary } from './components/ErrorBoundary';
+
+// Heavy, auth-gated pages (charts, framer-motion, large views) are code-split so
+// the public Landing/Login entry points don't download them on first load.
+const Home = lazy(() => import('./pages/Home').then(m => ({ default: m.Home })));
+const ServerView = lazy(() => import('./pages/ServerView').then(m => ({ default: m.ServerView })));
+const PollsView = lazy(() => import('./pages/PollsView').then(m => ({ default: m.PollsView })));
+const VotersView = lazy(() => import('./pages/VotersView').then(m => ({ default: m.VotersView })));
+const UserServerView = lazy(() => import('./pages/UserServerView').then(m => ({ default: m.UserServerView })));
 
 // User context for sharing auth state
 interface User {
@@ -103,8 +106,15 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; adminOnly?: boolean 
   return <>{children}</>;
 };
 
+const RouteFallback = () => (
+  <div className="min-h-screen flex items-center justify-center bg-slate-950">
+    <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+  </div>
+);
+
 function AppRoutes() {
   return (
+    <Suspense fallback={<RouteFallback />}>
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
@@ -150,6 +160,7 @@ function AppRoutes() {
       />
       <Route path="/" element={<Landing />} />
     </Routes>
+    </Suspense>
   );
 }
 

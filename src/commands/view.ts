@@ -4,6 +4,7 @@ import { logger } from '../lib/logger';
 import { I18n } from '../lib/i18n';
 import { Renderer } from '../lib/renderer';
 import { ViewInteractionHandler } from '../lib/viewInteraction';
+import { aggregateVotes } from '../lib/voteUtils';
 
 export const data = new SlashCommandBuilder()
     .setName('view')
@@ -21,6 +22,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
 export async function handleViewPoll(interaction: ChatInputCommandInteraction | any, pollId: string) {
     const userId = interaction.user.id;
+
+    // Acknowledge immediately: everything below performs several DB queries and a
+    // Playwright render that can easily exceed Discord's 3-second reply window.
+    await interaction.deferReply({ ephemeral: true });
 
     // 1. Check Premium Status (Voted in last 12 hours)
     const { data: userData, error: userError } = await supabase
@@ -57,10 +62,9 @@ export async function handleViewPoll(interaction: ChatInputCommandInteraction | 
                     .setStyle(ButtonStyle.Success)
             );
 
-        await interaction.reply({
+        await interaction.editReply({
             embeds: [embed],
             components: [row],
-            ephemeral: true
         });
         return;
     }
@@ -81,7 +85,7 @@ export async function handleViewPoll(interaction: ChatInputCommandInteraction | 
                 logger.error('Failed to remove buttons from orphaned poll:', error);
             }
         }
-        await interaction.reply({ content: I18n.t('messages.manager.poll_not_found', interaction.locale), ephemeral: true });
+        await interaction.editReply({ content: I18n.t('messages.manager.poll_not_found', interaction.locale) });
         return;
     }
 
@@ -97,36 +101,21 @@ export async function handleViewPoll(interaction: ChatInputCommandInteraction | 
         const isCreator = poll.creator_id === interaction.user.id;
 
         if (!isCreator && !hasRole && !hasPermission) {
-            await interaction.reply({ content: I18n.t('view.export_restricted', interaction.locale), ephemeral: true });
+            await interaction.editReply({ content: I18n.t('view.export_restricted', interaction.locale) });
             return;
         }
     }
 
-    // 3. Fetch Vote Data (Just indexes for aggregate counts)
-    const { data: votes, error: voteError } = await supabase
-        .from('votes')
-        .select('option_index')
-        .eq('poll_id', pollId);
+    // 3. Aggregate Votes (weighted — consistent with the live poll image)
+    const options = poll.options as string[];
+    const voteData = await aggregateVotes(pollId, options.length);
 
-    if (voteError) {
-        logger.error('Error fetching votes for view:', voteError);
-        await interaction.reply({ content: I18n.t('messages.common.generic_error', interaction.locale), ephemeral: true });
+    if (voteData.error) {
+        await interaction.editReply({ content: I18n.t('messages.common.generic_error', interaction.locale) });
         return;
     }
 
-    // 4. Aggregate Votes
-    const options = poll.options as string[];
-    const voteCounts = new Array(options.length).fill(0);
-
-    if (votes) {
-        votes.forEach(v => {
-            if (voteCounts[v.option_index] !== undefined) {
-                voteCounts[v.option_index]++;
-            }
-        });
-    }
-
-    await interaction.deferReply({ ephemeral: true });
+    const voteCounts = voteData.counts;
 
     try {
         // 5. Generate Dashboard Image
@@ -135,7 +124,7 @@ export async function handleViewPoll(interaction: ChatInputCommandInteraction | 
             description: poll.description,
             options: options,
             votes: voteCounts,
-            totalVotes: votes ? votes.length : 0,
+            totalVotes: voteData.totalWeight,
             creator: (await interaction.client.users.fetch(poll.creator_id).catch(() => ({ username: I18n.t('messages.manager.unknown_user', interaction.locale) }))).username,
             locale: interaction.locale,
             closed: !poll.active

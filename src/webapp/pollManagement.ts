@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { supabase } from '../lib/db';
 import { logger } from '../lib/logger';
 import { upsertGuildRow } from '../lib/guildUtils';
+import { aggregateVotes } from '../lib/voteUtils';
+import { validateCreatePoll, validateUpdatePollSettings } from './validation';
 import { getShardingManager } from '../webhook';
 
 const router = Router();
@@ -283,8 +285,20 @@ async function getGuildData(guildId: string, forceRefresh = false): Promise<Cach
     return fetchGuildData(guildId);
 }
 
+// Short-TTL cache of live Manage-Guild checks, so mutations re-verify against
+// current Discord permissions (not just the login-time cached_guilds snapshot)
+// without hammering the Discord API. Key: `${userId}:${guildId}`.
+const mutationPermissionCache = new Map<string, { allowed: boolean; timestamp: number }>();
+const MUTATION_PERMISSION_TTL = 5 * 60 * 1000; // 5 minutes
+
 /**
- * Helper: Verify user has Manage Guild permission
+ * Helper: Verify the session user currently has Manage Guild on the target guild.
+ *
+ * Poll mutations (create/close/delete/edit) are sensitive, so this verifies
+ * against Discord live (cached for 5 minutes) rather than trusting the possibly
+ * days-old `cached_guilds` snapshot taken at login. If Discord is unreachable it
+ * falls back to that snapshot so a Discord outage does not lock legitimate users
+ * out of managing their polls.
  */
 async function verifyUserPermission(sessionId: string, guildId: string): Promise<{ valid: boolean; userId?: string; error?: string; status?: number }> {
     const { data: session, error: sessionError } = await supabase
@@ -301,20 +315,46 @@ async function verifyUserPermission(sessionId: string, guildId: string): Promise
         return { valid: false, error: 'Session expired', status: 401 };
     }
 
-    // Check cached guilds for permission
+    const denied = { valid: false as const, error: 'You need Manage Server permission', status: 403 };
+    const cacheKey = `${session.user_id}:${guildId}`;
+    const cached = mutationPermissionCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < MUTATION_PERMISSION_TTL) {
+        return cached.allowed ? { valid: true, userId: session.user_id } : denied;
+    }
+
+    // Live-verify against Discord using the session's access token.
+    try {
+        const resp = await fetch(`${DISCORD_API_BASE}/users/@me/guilds`, {
+            headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+
+        if (resp.ok) {
+            const userGuilds = await resp.json() as Array<{ id: string; permissions: string; owner?: boolean }>;
+            const guild = userGuilds.find(g => g.id === guildId);
+            const allowed = !!guild && ((BigInt(guild.permissions) & BigInt(MANAGE_GUILD)) !== BigInt(0) || !!guild.owner);
+            mutationPermissionCache.set(cacheKey, { allowed, timestamp: Date.now() });
+            return allowed ? { valid: true, userId: session.user_id } : denied;
+        }
+
+        logger.warn(`[PollManagement] Live permission check failed (status ${resp.status}); falling back to cached guilds`);
+    } catch (err) {
+        logger.warn('[PollManagement] Live permission check error; falling back to cached guilds:', err);
+    }
+
+    // Fallback (only reached when Discord is unreachable): login-time snapshot.
     if (session.cached_guilds) {
         const guilds = session.cached_guilds as any[];
         const guild = guilds.find(g => g.id === guildId);
         if (guild) {
             const permissions = BigInt(guild.permissions);
-            const hasManageGuild = (permissions & BigInt(MANAGE_GUILD)) !== 0n || guild.owner;
+            const hasManageGuild = (permissions & BigInt(MANAGE_GUILD)) !== BigInt(0) || guild.owner;
             if (hasManageGuild) {
                 return { valid: true, userId: session.user_id };
             }
         }
     }
 
-    return { valid: false, error: 'You need Manage Server permission', status: 403 };
+    return denied;
 }
 
 // ============================================================================
@@ -472,12 +512,13 @@ router.post('/polls', async (req: Request, res: Response) => {
         return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const body = req.body as CreatePollRequest;
-
-    // Validate required fields
-    if (!body.guild_id || !body.channel_id || !body.title || !body.options || body.options.length < 2) {
-        return res.status(400).json({ error: 'Missing required fields' });
+    // Validate and sanitize the request body (snowflake formats, length caps,
+    // vote/weight bounds). Replaces the previous presence-only checks.
+    const validation = validateCreatePoll(req.body);
+    if (!validation.success) {
+        return res.status(400).json({ error: 'Invalid poll data', details: validation.errors });
     }
+    const body = validation.data as CreatePollRequest;
 
     const permCheck = await verifyUserPermission(sessionId, body.guild_id);
     if (!permCheck.valid) {
@@ -695,6 +736,10 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
         return res.status(401).json({ error: 'Unauthorized' });
     }
 
+    if (!pollId) {
+        return res.status(400).json({ error: 'Missing poll id' });
+    }
+
     if (typeof active !== 'boolean') {
         return res.status(400).json({ error: 'active must be a boolean' });
     }
@@ -738,19 +783,16 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
             return res.status(500).json({ error: 'Failed to update poll status' });
         }
 
-        // 4. Get vote data for re-rendering
-        const { data: voteCounts } = await supabase
-            .from('votes')
-            .select('option_index')
-            .eq('poll_id', pollId);
-
-        const counts = new Array(pollData.options.length).fill(0);
-        if (voteCounts) {
-            voteCounts.forEach((v: any) => {
-                if (v.option_index >= 0 && v.option_index < counts.length) counts[v.option_index]++;
-            });
+        // 4. Get vote data for re-rendering (weighted — consistent with /close
+        // via PollManager, which was switched to the same aggregation utility).
+        const voteAgg = await aggregateVotes(pollId, pollData.options.length);
+        if (voteAgg.error) {
+            // Revert the status flip we made above; we cannot render without counts.
+            await supabase.from('polls').update({ active: pollData.active }).eq('message_id', pollId);
+            return res.status(500).json({ error: 'Failed to load vote data' });
         }
-        const totalVotes = voteCounts ? voteCounts.length : 0;
+        const counts = voteAgg.counts;
+        const totalVotes = voteAgg.totalWeight;
 
         // 5. Get user info for creator display
         const { data: userData } = await supabase
@@ -920,10 +962,13 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
         if (messageDeleted) {
             logger.warn(`[PollManagement] Poll ${pollId} Discord message was deleted`);
 
-            // Persist the discord_deleted flag to database so it survives page refreshes
+            // The Discord message could not be updated, so the status flip did not
+            // take visible effect — revert `active` to its original value (matching
+            // the permission-error branch) and persist discord_deleted so the UI
+            // knows the message is gone.
             await supabase
                 .from('polls')
-                .update({ discord_deleted: true })
+                .update({ active: pollData.active, discord_deleted: true })
                 .eq('message_id', pollId);
 
             return res.status(410).json({
@@ -1059,8 +1104,17 @@ router.patch('/polls/:pollId', async (req: Request, res: Response) => {
         return res.status(401).json({ error: 'Unauthorized' });
     }
 
+    if (!pollId) {
+        return res.status(400).json({ error: 'Missing poll id' });
+    }
+
     if (!newSettings || typeof newSettings !== 'object') {
         return res.status(400).json({ error: 'settings object required' });
+    }
+
+    const settingsValidation = validateUpdatePollSettings(newSettings);
+    if (!settingsValidation.success) {
+        return res.status(400).json({ error: 'Invalid settings', details: settingsValidation.errors });
     }
 
     try {
@@ -1194,20 +1248,17 @@ router.patch('/polls/:pollId', async (req: Request, res: Response) => {
 
                     logger.info(`[PollManagement] Recalculated weights for ${uniqueUserIds.length} voters on poll ${pollId}`);
 
-                    // Update Discord message with new vote counts
-                    // First, get updated vote counts
-                    const { data: allVotes } = await supabase
-                        .from('votes')
-                        .select('option_index, weight')
-                        .eq('poll_id', pollId);
-
-                    const newVoteCounts: number[] = pollData.options.map(() => 0);
-                    (allVotes || []).forEach((v: { option_index: number; weight: number }) => {
-                        newVoteCounts[v.option_index] = (newVoteCounts[v.option_index] || 0) + (v.weight || 1);
-                    });
-
-                    // Calculate total votes
-                    const totalVotes = newVoteCounts.reduce((a, b) => a + b, 0);
+                    // Update Discord message with new vote counts (weighted, via
+                    // the shared aggregation utility rather than a hand-rolled copy).
+                    const updatedAgg = await aggregateVotes(pollId, pollData.options.length);
+                    if (updatedAgg.error) {
+                        // Settings were already persisted; fail here so we don't
+                        // render a zero-filled image. The outer catch returns 500
+                        // and the (idempotent) update can be retried.
+                        throw new Error('Failed to aggregate votes after weight recalculation');
+                    }
+                    const newVoteCounts = updatedAgg.counts;
+                    const totalVotes = updatedAgg.totalWeight;
 
                     // Get creator name for rendering
                     const { data: userData } = await supabase

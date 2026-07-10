@@ -112,14 +112,30 @@ export class ViewInteractionHandler {
 
         // Fetch Data
         const pageSize = 15; // Match with embed limit
+
+        // Determine the true page count FIRST, then clamp an out-of-range page
+        // before fetching. Previously the range was fetched and the page clamped
+        // afterwards with no refetch, so a "next" click past the last page (or a
+        // stale button) returned an empty voter list with a mismatched footer.
+        const { count } = await supabase
+            .from('votes')
+            .select('user_id', { count: 'exact', head: true })
+            .eq('poll_id', pollId)
+            .eq('option_index', selectedOption);
+
+        const totalVotes = count || 0;
+        const totalPages = Math.ceil(totalVotes / pageSize);
+        if (totalPages > 0 && page >= totalPages) page = totalPages - 1;
+        if (page < 0) page = 0;
+
         const start = page * pageSize;
         const end = start + pageSize - 1;
 
         // Fetch Voters (Paginated)
         // Note: option_index column in votes table
-        const { data: voters, error, count } = await supabase
+        const { data: voters, error } = await supabase
             .from('votes')
-            .select('user_id', { count: 'exact' })
+            .select('user_id')
             .eq('poll_id', pollId)
             .eq('option_index', selectedOption)
             .range(start, end);
@@ -129,11 +145,6 @@ export class ViewInteractionHandler {
             await interaction.followUp({ content: I18n.t('messages.common.generic_error', interaction.locale), ephemeral: true });
             return;
         }
-
-        const totalVotes = count || 0;
-        const totalPages = Math.ceil(totalVotes / pageSize);
-        // Correct page if out of bounds (shouldn't happen with correct button logic but safe to check)
-        if (page >= totalPages && totalPages > 0) page = totalPages - 1;
 
 
         // Get Poll Data for Option Name

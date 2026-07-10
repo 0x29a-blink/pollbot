@@ -55,6 +55,17 @@ export class PollManager {
 
             // 3. Fetch Vote Data for Render using centralized utility
             const voteData = await aggregateVotes(pollId, pollData.options.length);
+
+            // If the vote query failed, abort rather than baking a zero-filled
+            // image into the (possibly permanently) closed poll. The user can retry.
+            if (voteData.error) {
+                const msg = I18n.t('messages.common.error', interaction.locale);
+                if (interaction.deferred || interaction.replied) {
+                    return interaction.editReply({ content: msg });
+                }
+                return interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
+            }
+
             const counts = voteData.counts;
             const totalVotes = voteData.totalWeight;
 

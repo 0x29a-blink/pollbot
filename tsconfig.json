@@ -27,6 +27,9 @@
   "exclude": [
     "node_modules",
     "dist",
-    "dashboard"
+    "dashboard",
+    "scripts",
+    "vitest.config.ts",
+    "**/*.test.ts"
   ]
 }

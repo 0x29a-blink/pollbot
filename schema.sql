@@ -219,6 +219,62 @@ $$;
 
 GRANT EXECUTE ON FUNCTION get_total_members() TO public;
 
+-- Atomically replace a user's votes on a poll (delete old + insert new in one
+-- transaction) so a failed insert can never erase the user's prior vote.
+CREATE OR REPLACE FUNCTION replace_vote(
+    p_poll_id TEXT,
+    p_user_id TEXT,
+    p_options INTEGER[],
+    p_weight INTEGER
+)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    DELETE FROM votes WHERE poll_id = p_poll_id AND user_id = p_user_id;
+
+    INSERT INTO votes (poll_id, user_id, option_index, weight)
+    SELECT p_poll_id, p_user_id, opt, p_weight
+    FROM unnest(p_options) AS opt;
+END;
+$$;
+
+-- Only the bot (service_role) may replace votes; deny the default PUBLIC grant.
+REVOKE ALL ON FUNCTION replace_vote(TEXT, TEXT, INTEGER[], INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION replace_vote(TEXT, TEXT, INTEGER[], INTEGER) TO service_role;
+
+-- Aggregate stats for the public dashboard (return only counts, never per-user
+-- rows) so the anon key does not need blanket read on `users`/`votes`.
+CREATE OR REPLACE FUNCTION get_active_voter_count()
+RETURNS BIGINT
+LANGUAGE SQL
+STABLE
+SECURITY DEFINER
+AS $$
+    SELECT COUNT(*)::BIGINT
+    FROM users
+    WHERE last_vote_at IS NOT NULL
+      AND last_vote_at > NOW() - INTERVAL '13 hours';
+$$;
+
+REVOKE ALL ON FUNCTION get_active_voter_count() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION get_active_voter_count() TO anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION get_guild_vote_counts()
+RETURNS TABLE(guild_id TEXT, vote_count BIGINT)
+LANGUAGE SQL
+STABLE
+SECURITY DEFINER
+AS $$
+    SELECT p.guild_id, COUNT(v.*)::BIGINT AS vote_count
+    FROM votes v
+    JOIN polls p ON v.poll_id = p.message_id
+    GROUP BY p.guild_id;
+$$;
+
+REVOKE ALL ON FUNCTION get_guild_vote_counts() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION get_guild_vote_counts() TO anon, authenticated, service_role;
+
 -- ============================================================================
 -- REALTIME
 -- ============================================================================

@@ -87,16 +87,11 @@ export const Home: React.FC = () => {
             const { data: statsData } = await supabase.from('global_stats').select('*').eq('id', 1).single();
             if (statsData) setStats(statsData);
 
-            // Active Premium Users
-            const { data: usersData } = await supabase.from('users').select('last_vote_at');
-            if (usersData) {
-                const now = new Date().getTime();
-                const activeCount = usersData.filter(u => {
-                    if (!u.last_vote_at) return false;
-                    const diffHours = (now - new Date(u.last_vote_at).getTime()) / (1000 * 60 * 60);
-                    return diffHours < 13;
-                }).length;
-                setActivePremiumCount(activeCount);
+            // Active Premium Users — via aggregate RPC so we don't need blanket
+            // read on the `users` table from the public anon key.
+            const { data: activeVoterCount } = await supabase.rpc('get_active_voter_count');
+            if (activeVoterCount !== null && activeVoterCount !== undefined) {
+                setActivePremiumCount(Number(activeVoterCount));
             }
 
             // Calculations for Totals (Servers & Members)
@@ -335,16 +330,15 @@ export const Home: React.FC = () => {
                         guildStats[p.guild_id].polls++;
                     });
 
-                    // For Ratio, we need votes too.
+                    // For Ratio, we need votes too — via aggregate RPC (guild_id ->
+                    // vote_count) so the anon key doesn't need blanket read on `votes`.
                     if (sort === 'ratio_desc') {
-                        const { data: allVotes } = await supabase.from('votes').select('poll_id');
-                        const pollToGuild = new Map(allPolls.map(p => [p.message_id, p.guild_id]));
+                        const { data: guildVoteCounts } = await supabase.rpc('get_guild_vote_counts');
 
-                        if (allVotes) {
-                            allVotes.forEach(v => {
-                                const gId = pollToGuild.get(v.poll_id);
-                                if (gId && guildStats[gId]) {
-                                    guildStats[gId].votes++;
+                        if (guildVoteCounts) {
+                            (guildVoteCounts as { guild_id: string; vote_count: number }[]).forEach(row => {
+                                if (guildStats[row.guild_id]) {
+                                    guildStats[row.guild_id].votes += Number(row.vote_count);
                                 }
                             });
                         }
