@@ -5,10 +5,6 @@ on:
     branches: [main]
   pull_request:
 
-# NOTE: package-lock.json is gitignored in this repo, so CI cannot use
-# `npm ci` or setup-node's npm cache (both require a committed lockfile).
-# We use `npm install` and skip the cache.
-
 jobs:
   backend:
     name: Backend (typecheck + test)
@@ -18,10 +14,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       # Skip postinstall: it downloads Chromium and runs a full build, which is
       # unnecessary for typechecking and unit tests.
       - name: Install dependencies
-        run: npm install --ignore-scripts
+        run: npm ci --ignore-scripts
       - name: Typecheck
         run: npm run typecheck
       - name: Lint
@@ -47,8 +44,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
       - name: Install dependencies
-        run: npm install
+        run: npm ci
       - name: Typecheck
         run: npx tsc -b --noEmit
       - name: Lint
