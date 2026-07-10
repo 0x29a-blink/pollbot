@@ -18,11 +18,6 @@ export interface PollSettings {
     vote_weights?: Record<string, number>;
     /** Role metadata for dashboard display (name, color) */
     role_metadata?: Record<string, { name: string; color: number }>;
-    // Legacy/alternate property names used in some components
-    private?: boolean;
-    allow_multivote?: boolean;
-    hide_results?: boolean;
-    weights?: Record<string, number>;
 }
 
 // ============================================================================

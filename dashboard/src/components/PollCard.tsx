@@ -101,25 +101,26 @@ export const PollCard: React.FC<PollCardProps> = ({ poll, votes = {}, guild }) =
                                 <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Configuration</h4>
                                 <div className="grid grid-cols-2 gap-y-3 gap-x-6">
                                     <SettingItem icon={<Calendar className="w-4 h-4" />} label="Created" value={new Date(poll.created_at).toLocaleString()} />
-                                    <SettingItem icon={<Settings className="w-4 h-4" />} label="Private" value={poll.settings?.private ? 'Yes' : 'No'} />
-                                    <SettingItem icon={<Info className="w-4 h-4" />} label="Multi-Vote" value={poll.settings?.allow_multivote ? 'Yes' : 'No'} />
-                                    <SettingItem icon={<PieChart className="w-4 h-4" />} label="Results" value={poll.settings?.hide_results ? 'Hidden' : 'Public'} />
+                                    {/* public/allow_close/allow_exports default to true when absent — use !== false */}
+                                    <SettingItem icon={<PieChart className="w-4 h-4" />} label="Live Results" value={poll.settings?.public !== false ? 'Visible' : 'Hidden until close'} />
+                                    <SettingItem icon={<Info className="w-4 h-4" />} label="Selections" value={`${poll.settings?.min_votes ?? 1}–${poll.settings?.max_votes ?? 1}`} />
+                                    <SettingItem icon={<Settings className="w-4 h-4" />} label="Thread" value={poll.settings?.allow_thread ? 'Yes' : 'No'} />
 
-                                    <SettingItem icon={<Settings className="w-4 h-4" />} label="Min Votes" value={poll.settings?.min_votes || 'None'} />
-                                    <SettingItem icon={<Settings className="w-4 h-4" />} label="Max Votes" value={poll.settings?.max_votes || 'None'} />
+                                    <SettingItem icon={<Settings className="w-4 h-4" />} label="Close Button" value={poll.settings?.allow_close !== false ? 'Yes' : 'No'} />
+                                    <SettingItem icon={<Settings className="w-4 h-4" />} label="Exports" value={poll.settings?.allow_exports !== false ? 'Allowed' : 'Disabled'} />
 
                                     <div className="col-span-2 mt-2 pt-2 border-t border-slate-700/50">
                                         <div className="text-[10px] uppercase opacity-70 mb-1">Allowed Roles</div>
-                                        <div className="text-xs text-white break-words">{poll.settings?.allowed_roles?.length ? poll.settings.allowed_roles.join(', ') : 'All Users'}</div>
+                                        <div className="text-xs text-white break-words">{poll.settings?.allowed_roles?.length ? poll.settings.allowed_roles.map(roleName(poll)).join(', ') : 'All Users'}</div>
                                     </div>
 
-                                    {poll.settings?.weights && Object.keys(poll.settings.weights).length > 0 && (
+                                    {poll.settings?.vote_weights && Object.keys(poll.settings.vote_weights).length > 0 && (
                                         <div className="col-span-2 mt-2 pt-2 border-t border-slate-700/50">
                                             <div className="text-[10px] uppercase opacity-70 mb-1">Vote Weights</div>
                                             <div className="flex flex-wrap gap-2">
-                                                {Object.entries(poll.settings.weights).map(([role, weight]: any) => (
+                                                {Object.entries(poll.settings.vote_weights).map(([role, weight]) => (
                                                     <span key={role} className="bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded text-xs">
-                                                        {role}: {weight}x
+                                                        {roleName(poll)(role)}: {weight}x
                                                     </span>
                                                 ))}
                                             </div>
@@ -134,6 +135,9 @@ export const PollCard: React.FC<PollCardProps> = ({ poll, votes = {}, guild }) =
         </motion.div>
     );
 };
+
+/** Resolve a role ID to its display name via role_metadata, falling back to the ID. */
+const roleName = (poll: Poll) => (id: string) => poll.settings?.role_metadata?.[id]?.name ?? id;
 
 const SettingItem = ({ icon, label, value }: any) => (
     <div className="flex items-center gap-2 text-slate-400">
