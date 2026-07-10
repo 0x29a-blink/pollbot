@@ -1,6 +1,16 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 
+// Complete class strings per accent color — Tailwind only generates classes it
+// sees as literals, so these must never be built by string interpolation.
+const accentClasses: Record<string, { tile: string; value: string }> = {
+    yellow: { tile: 'bg-yellow-500/10 text-yellow-400', value: 'text-yellow-400' },
+    amber: { tile: 'bg-amber-500/10 text-amber-400', value: 'text-amber-400' },
+    indigo: { tile: 'bg-indigo-500/10 text-indigo-400', value: 'text-indigo-400' },
+    emerald: { tile: 'bg-emerald-500/10 text-emerald-400', value: 'text-emerald-400' },
+};
+const fallbackAccent = { tile: 'bg-slate-500/10 text-slate-400', value: 'text-slate-400' };
+
 interface LeaderboardProps {
     title: string;
     icon: React.ReactNode;
@@ -16,6 +26,7 @@ interface LeaderboardProps {
 }
 
 export const Leaderboard: React.FC<LeaderboardProps> = ({ title, icon, color, items }) => {
+    const accent = accentClasses[color] ?? fallbackAccent;
     return (
         <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -23,7 +34,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ title, icon, color, it
             className="glass-panel p-6"
         >
             <div className="flex items-center gap-2 mb-6">
-                <div className={`p-2 bg-${color}-500/10 rounded-lg text-${color}-400`}>
+                <div className={`p-2 rounded-lg ${accent.tile}`}>
                     {icon}
                 </div>
                 <div>
@@ -59,7 +70,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ title, icon, color, it
                             </div>
 
                             <div className="text-right">
-                                <span className={`font-mono font-bold text-sm text-${color}-400`}>{item.value}</span>
+                                <span className={`font-mono font-bold text-sm ${accent.value}`}>{item.value}</span>
                             </div>
                         </div>
                     ))

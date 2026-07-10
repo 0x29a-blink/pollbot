@@ -325,7 +325,7 @@ const Toggle: React.FC<{
                 </div>
                 <div
                     className="w-10 h-6 rounded-full transition-colors flex items-center px-1"
-                    style={{ backgroundColor: value ? 'rgb(79, 70, 229)' : 'rgb(71, 85, 105)' }}
+                    style={{ backgroundColor: value ? 'var(--color-primary-strong)' : 'rgb(71, 85, 105)' }}
                 >
                     <div
                         className="w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"

@@ -30,6 +30,17 @@ export const Landing: React.FC = () => {
         window.location.href = '/api/auth/discord';
     };
 
+    // Complete literal class strings per feature color — Tailwind cannot
+    // generate interpolated class names, so these must stay literal.
+    const featureTileClasses: Record<string, string> = {
+        indigo: 'bg-indigo-500/10 text-indigo-400 ring-indigo-500/20 group-hover:ring-indigo-500/40',
+        emerald: 'bg-emerald-500/10 text-emerald-400 ring-emerald-500/20 group-hover:ring-emerald-500/40',
+        violet: 'bg-violet-500/10 text-violet-400 ring-violet-500/20 group-hover:ring-violet-500/40',
+        amber: 'bg-amber-500/10 text-amber-400 ring-amber-500/20 group-hover:ring-amber-500/40',
+        rose: 'bg-rose-500/10 text-rose-400 ring-rose-500/20 group-hover:ring-rose-500/40',
+        cyan: 'bg-cyan-500/10 text-cyan-400 ring-cyan-500/20 group-hover:ring-cyan-500/40',
+    };
+
     const features = [
         {
             icon: <BarChart3 className="w-6 h-6" />,
@@ -152,7 +163,7 @@ export const Landing: React.FC = () => {
                                 transition={{ duration: 0.4, delay: 0.3 + index * 0.1 }}
                                 className="glass-panel p-6 group hover:border-indigo-500/30 transition-colors"
                             >
-                                <div className={`w-12 h-12 rounded-xl bg-${feature.color}-500/10 flex items-center justify-center text-${feature.color}-400 mb-4 ring-1 ring-${feature.color}-500/20 group-hover:ring-${feature.color}-500/40 transition-all`}>
+                                <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 ring-1 transition-all ${featureTileClasses[feature.color] ?? 'bg-slate-500/10 text-slate-400 ring-slate-500/20'}`}>
                                     {feature.icon}
                                 </div>
                                 <h3 className="text-lg font-semibold text-white mb-2">{feature.title}</h3>

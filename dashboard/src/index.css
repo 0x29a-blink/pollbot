@@ -1,15 +1,22 @@
 @import "tailwindcss";
-/* Force refresh */
+
+/* Design tokens. @theme values generate Tailwind utilities (bg-primary,
+   text-primary, bg-primary/10, ...). New colors go through here — never
+   build class names by string interpolation (Tailwind can't see them). */
+@theme {
+  --color-primary: #6366f1;          /* indigo-500 — the one brand accent */
+  --color-primary-strong: #4f46e5;   /* indigo-600 — hover/active */
+  --color-surface: #0a0a0f;
+}
 
 :root {
   --color-bg: #0a0a0f;
   --color-card-bg: rgba(22, 22, 30, 0.6);
   --color-card-border: rgba(255, 255, 255, 0.1);
-  --color-primary: #6366f1;
   --color-primary-glow: rgba(99, 102, 241, 0.5);
   --color-text-main: #ffffff;
   --color-text-muted: #9ca3af;
-  --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-family: 'Inter Variable', 'Inter', system-ui, -apple-system, sans-serif;
   --glass-blur: blur(12px);
 }
 

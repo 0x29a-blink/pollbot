@@ -809,6 +809,14 @@ export const Home: React.FC = () => {
     );
 };
 
+// Complete literal class strings — Tailwind can't generate interpolated names.
+const statTileClasses: Record<string, string> = {
+    blue: 'bg-blue-500/10',
+    emerald: 'bg-emerald-500/10',
+    violet: 'bg-violet-500/10',
+    amber: 'bg-amber-500/10',
+};
+
 const StatsCard = ({ title, value, subLabel, icon, color }: any) => (
     <div className={`glass-panel p-6 relative overflow-hidden group`}>
         <div className={`absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity`}>
@@ -816,7 +824,7 @@ const StatsCard = ({ title, value, subLabel, icon, color }: any) => (
         </div>
         <div className="relative z-10">
             <div className="flex items-center gap-3 mb-2">
-                <div className={`p-2 rounded-lg bg-${color}-500/10`}>
+                <div className={`p-2 rounded-lg ${statTileClasses[color] ?? 'bg-slate-500/10'}`}>
                     {icon}
                 </div>
                 <span className="text-slate-400 font-medium">{title}</span>
