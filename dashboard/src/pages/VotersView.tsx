@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, Search, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { ArrowLeft, Search, CheckCircle, XCircle, Clock, Users } from 'lucide-react';
+import { FilterButton } from '../components/ui/FilterButton';
 
 
 interface UserData {
@@ -108,9 +109,23 @@ export const VotersView: React.FC = () => {
                         </thead>
                         <tbody className="divide-y divide-slate-800">
                             {loading ? (
-                                <tr><td colSpan={4} className="p-8 text-center">Loading registry...</td></tr>
+                                [...Array(5)].map((_, i) => (
+                                    <tr key={i}>
+                                        <td colSpan={4} className="p-3">
+                                            <div className="h-8 rounded-lg animate-pulse bg-slate-800/40" />
+                                        </td>
+                                    </tr>
+                                ))
                             ) : filteredUsers.length === 0 ? (
-                                <tr><td colSpan={4} className="p-8 text-center">No users found.</td></tr>
+                                <tr>
+                                    <td colSpan={4} className="p-8">
+                                        <div className="text-center">
+                                            <Users className="w-6 h-6 text-slate-600 mx-auto mb-2" />
+                                            <div className="text-white font-semibold text-sm">No users found</div>
+                                            <div className="text-xs text-slate-500 mt-1">Try a different filter or search.</div>
+                                        </div>
+                                    </td>
+                                </tr>
                             ) : (
                                 filteredUsers.map(user => {
                                     const status = getPremiumStatus(user.last_vote_at);
@@ -165,12 +180,3 @@ export const VotersView: React.FC = () => {
         </div>
     );
 };
-
-const FilterButton = ({ active, children, onClick }: any) => (
-    <button
-        onClick={onClick}
-        className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${active ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
-    >
-        {children}
-    </button>
-);

@@ -23,7 +23,15 @@ export const PollCard: React.FC<PollCardProps> = ({ poll, votes = {}, guild }) =
             className="glass-panel border-l-4 border-l-indigo-500 overflow-hidden"
         >
             {/* Compact / Header View */}
-            <div className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer hover:bg-slate-800/30 transition-colors" onClick={() => setIsExpanded(!isExpanded)}>
+            <div
+                className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer hover:bg-slate-800/30 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none"
+                onClick={() => setIsExpanded(!isExpanded)}
+                role="button"
+                tabIndex={0}
+                aria-expanded={isExpanded}
+                aria-label={`Toggle details for poll ${poll.title}`}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setIsExpanded(!isExpanded); } }}
+            >
                 <div className="flex-1 min-w-0">
                     <h3 className="text-lg font-bold text-white mb-1 truncate">{poll.title}</h3>
                     <div className="flex items-center gap-4 text-sm text-slate-400">

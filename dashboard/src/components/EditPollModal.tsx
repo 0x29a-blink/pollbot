@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { X, Loader2, Settings2, Users, Scale, HelpCircle } from 'lucide-react';
+import { Loader2, Settings2, Users, Scale } from 'lucide-react';
+import { Modal } from './ui/Modal';
+import { Toggle } from './ui/Toggle';
 
 interface PollSettings {
     public?: boolean;
@@ -96,60 +97,40 @@ export const EditPollModal: React.FC<EditPollModalProps> = ({
         .filter(r => !r.managed && r.name !== '@everyone')
         .sort((a, b) => b.position - a.position);
 
-    if (!isOpen) return null;
-
     return (
-        <AnimatePresence>
-            <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-                onClick={onClose}
-            >
-                <motion.div
-                    initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                    className="glass-panel w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col"
-                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                >
-                    {/* Header */}
-                    <div className="flex items-center justify-between p-5 border-b border-slate-700">
-                        <div>
-                            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                                <Settings2 className="w-5 h-5 text-indigo-400" />
-                                Edit Poll Settings
-                            </h2>
-                            <p className="text-sm text-slate-400 mt-1 truncate max-w-xs">{poll.title}</p>
-                        </div>
-                        <button
-                            onClick={onClose}
-                            className="p-2 text-slate-400 hover:text-white transition-colors rounded-lg hover:bg-slate-800"
-                        >
-                            <X className="w-5 h-5" />
-                        </button>
-                    </div>
-
+        <Modal
+            open={isOpen}
+            onClose={onClose}
+            ariaLabel="Edit Poll Settings"
+            header={
+                <div>
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                        <Settings2 className="w-5 h-5 text-indigo-400" />
+                        Edit Poll Settings
+                    </h2>
+                    <p className="text-sm text-slate-400 mt-1 truncate max-w-xs">{poll.title}</p>
+                </div>
+            }
+        >
                     {/* Content */}
                     <div className="flex-1 overflow-y-auto p-5 space-y-4">
                         {/* Toggle Settings */}
                         <div className="space-y-3">
                             <Toggle
                                 label="Show live results"
-                                value={settings.public !== false}
+                                checked={settings.public !== false}
                                 onChange={v => setSettings({ ...settings, public: v })}
                                 tooltip="When enabled, voters can see the current vote counts while the poll is open"
                             />
                             <Toggle
                                 label="Show close button"
-                                value={settings.allow_close !== false}
+                                checked={settings.allow_close !== false}
                                 onChange={v => setSettings({ ...settings, allow_close: v })}
                                 tooltip="When enabled, adds a button for poll managers to manually close the poll"
                             />
                             <Toggle
                                 label="Allow exports"
-                                value={settings.allow_exports !== false}
+                                checked={settings.allow_exports !== false}
                                 onChange={v => setSettings({ ...settings, allow_exports: v })}
                                 tooltip="When enabled, all users can use /view and /export commands"
                             />
@@ -287,52 +268,6 @@ export const EditPollModal: React.FC<EditPollModalProps> = ({
                             Save Changes
                         </button>
                     </div>
-                </motion.div>
-            </motion.div>
-        </AnimatePresence>
-    );
-};
-
-// Toggle component
-const Toggle: React.FC<{
-    label: string;
-    value: boolean;
-    onChange: (value: boolean) => void;
-    tooltip: string;
-}> = ({ label, value, onChange, tooltip }) => {
-    const [showTooltip, setShowTooltip] = useState(false);
-
-    return (
-        <div className="relative group">
-            <div
-                onClick={() => onChange(!value)}
-                className="flex items-center justify-between p-2.5 rounded-lg bg-slate-800/50 cursor-pointer hover:bg-slate-700/50 transition-colors border border-slate-700/50"
-            >
-                <div className="flex items-center gap-1.5">
-                    <span className="text-sm text-slate-300">{label}</span>
-                    <div
-                        onMouseEnter={() => setShowTooltip(true)}
-                        onMouseLeave={() => setShowTooltip(false)}
-                        className="relative"
-                    >
-                        <HelpCircle className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-400" />
-                        {showTooltip && (
-                            <div className="absolute left-0 bottom-full mb-2 w-48 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-300 z-50 shadow-xl">
-                                {tooltip}
-                            </div>
-                        )}
-                    </div>
-                </div>
-                <div
-                    className="w-10 h-6 rounded-full transition-colors flex items-center px-1"
-                    style={{ backgroundColor: value ? 'var(--color-primary-strong)' : 'rgb(71, 85, 105)' }}
-                >
-                    <div
-                        className="w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
-                        style={{ marginLeft: value ? '16px' : '0px' }}
-                    />
-                </div>
-            </div>
-        </div>
+        </Modal>
     );
 };

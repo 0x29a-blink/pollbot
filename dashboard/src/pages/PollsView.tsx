@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, SortDesc, TrendingUp, X } from 'lucide-react';
+import { ArrowLeft, SortDesc, TrendingUp, X, BarChart3 } from 'lucide-react';
 import { PollCard } from '../components/PollCard';
+import { FilterButton } from '../components/ui/FilterButton';
+import { SkeletonList } from '../components/ui/Skeleton';
+import { EmptyState } from '../components/ui/EmptyState';
 
 export const PollsView: React.FC = () => {
     const navigate = useNavigate();
@@ -165,7 +168,13 @@ export const PollsView: React.FC = () => {
 
                 <div className="grid grid-cols-1 gap-4">
                     {displayPolls.length === 0 && !loading ? (
-                        <div className="glass-panel p-12 text-center text-slate-500">No polls found matching criteria.</div>
+                        <div className="glass-panel">
+                            <EmptyState
+                                icon={<BarChart3 className="w-6 h-6" />}
+                                title="No polls found"
+                                subtitle="No polls match the current filter."
+                            />
+                        </div>
                     ) : (
                         displayPolls.map(poll => (
                             <PollCard
@@ -179,7 +188,9 @@ export const PollsView: React.FC = () => {
                 </div>
 
                 {loading && (
-                    <div className="text-center py-8 text-slate-500">Loading polls...</div>
+                    <div className="mt-4">
+                        <SkeletonList rows={4} height="h-24" />
+                    </div>
                 )}
 
                 {!loading && hasMore && displayPolls.length > 0 && (
@@ -196,12 +207,3 @@ export const PollsView: React.FC = () => {
         </div>
     );
 };
-
-const FilterButton = ({ active, children, onClick }: any) => (
-    <button
-        onClick={onClick}
-        className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${active ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
-    >
-        {children}
-    </button>
-);

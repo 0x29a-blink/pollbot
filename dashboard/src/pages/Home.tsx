@@ -8,16 +8,9 @@ import { VoteHistoryChart } from '../components/charts/VoteHistoryChart';
 import { LanguagePieChart } from '../components/charts/LanguagePieChart';
 import { Leaderboard } from '../components/Leaderboard';
 import { useAuth } from '../App';
-
-// Helper to get CSRF token from cookie
-const getCsrfToken = (): string | null => {
-    const cookies = document.cookie.split(';');
-    for (const cookie of cookies) {
-        const [name, value] = cookie.trim().split('=');
-        if (name === 'csrf_token') return value;
-    }
-    return null;
-};
+import { Modal } from '../components/ui/Modal';
+import { useToast } from '../components/ui/Toast';
+import { apiFetch } from '../utils/api';
 
 interface GlobalStats {
     total_polls: number;
@@ -56,6 +49,7 @@ export const Home: React.FC = () => {
     const [totalPages, setTotalPages] = useState(1);
     const [activePremiumCount, setActivePremiumCount] = useState(0);
     const navigate = useNavigate();
+    const toast = useToast();
     const { user, logout } = useAuth();
 
     const ITEMS_PER_PAGE = 24;
@@ -149,16 +143,15 @@ export const Home: React.FC = () => {
         setSyncing(true);
 
         try {
-            const res = await fetch('/api/admin/sync-guilds', {
+            const res = await apiFetch('/api/admin/sync-guilds', {
                 method: 'POST',
-                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-csrf-token': getCsrfToken() || '',
                 }
             });
 
             if (res.ok) {
+                toast.success('Guild sync started');
                 // Wait a moment for sync to complete, then refresh data
                 setTimeout(() => {
                     handleRefreshData();
@@ -166,12 +159,12 @@ export const Home: React.FC = () => {
                 }, 3000);
             } else {
                 const err = await res.json();
-                alert(`Sync failed: ${err.error}`);
+                toast.error(`Sync failed: ${err.error}`);
                 setSyncing(false);
             }
         } catch (error) {
             console.error('Sync error:', error);
-            alert('Failed to sync guilds');
+            toast.error('Failed to sync guilds');
             setSyncing(false);
         }
     };
@@ -222,12 +215,8 @@ export const Home: React.FC = () => {
         setUserGuildsError(null);
 
         try {
-            const res = await fetch('/api/user/guilds/refresh', {
+            const res = await apiFetch('/api/user/guilds/refresh', {
                 method: 'POST',
-                credentials: 'include',
-                headers: {
-                    'x-csrf-token': getCsrfToken() || '',
-                }
             });
 
             if (res.ok) {
@@ -468,35 +457,34 @@ export const Home: React.FC = () => {
 
             <main className="container-wide mt-8 animate-fade-in">
                 {/* Sync Confirmation Modal */}
-                {showSyncConfirm && (
-                    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-                        <motion.div
-                            initial={{ opacity: 0, scale: 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            className="glass-panel p-6 max-w-md mx-4"
-                        >
-                            <h3 className="text-xl font-bold text-white mb-4">Sync Guild Data?</h3>
-                            <p className="text-slate-400 mb-6">
-                                This will refresh ALL server data from Discord including names, icons, and member counts.
-                                This is a heavy operation and may take a moment.
-                            </p>
-                            <div className="flex gap-3 justify-end">
-                                <button
-                                    onClick={() => setShowSyncConfirm(false)}
-                                    className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={handleSyncGuilds}
-                                    className="px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-bold hover:bg-amber-400 transition-colors"
-                                >
-                                    Sync All Guilds
-                                </button>
-                            </div>
-                        </motion.div>
+                <Modal
+                    open={showSyncConfirm}
+                    onClose={() => setShowSyncConfirm(false)}
+                    title="Sync Guild Data?"
+                    width="max-w-md"
+                    closeOnBackdrop={false}
+                >
+                    <div className="p-5">
+                        <p className="text-slate-400 mb-6">
+                            This will refresh ALL server data from Discord including names, icons, and member counts.
+                            This is a heavy operation and may take a moment.
+                        </p>
+                        <div className="flex gap-3 justify-end">
+                            <button
+                                onClick={() => setShowSyncConfirm(false)}
+                                className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleSyncGuilds}
+                                className="px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-bold hover:bg-amber-400 transition-colors"
+                            >
+                                Sync All Guilds
+                            </button>
+                        </div>
                     </div>
-                )}
+                </Modal>
 
                 {/* Admin Telemetry Panel - Only visible when toggled */}
                 {user?.is_admin && showTelemetry ? (
@@ -843,7 +831,11 @@ const ServerCard = ({ guild, onClick }: { guild: GuildData, onClick: () => void 
     <motion.div
         whileHover={{ y: -4 }}
         onClick={onClick}
-        className="glass-panel p-4 cursor-pointer hover:border-indigo-500/30 transition-colors group"
+        role="button"
+        tabIndex={0}
+        aria-label={`View server ${guild.name}`}
+        onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
+        className="glass-panel p-4 cursor-pointer hover:border-indigo-500/30 transition-colors group focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none"
     >
         <div className="flex items-center gap-4">
             {guild.icon_url ? (

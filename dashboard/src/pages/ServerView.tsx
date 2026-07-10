@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, BarChart3 } from 'lucide-react';
 import { PollCard } from '../components/PollCard';
+import { FilterButton } from '../components/ui/FilterButton';
+import { SkeletonList, Skeleton } from '../components/ui/Skeleton';
+import { EmptyState } from '../components/ui/EmptyState';
 import type { Poll, GuildData } from '../types';
 
 export const ServerView: React.FC = () => {
@@ -78,6 +81,7 @@ export const ServerView: React.FC = () => {
             <div className="container-wide animate-fade-in">
                 <button
                     onClick={() => navigate('/dashboard')}
+                    aria-label="Back to Dashboard"
                     className="flex items-center gap-2 text-slate-400 hover:text-white mb-6 transition-colors"
                 >
                     <ArrowLeft className="w-4 h-4" />
@@ -85,7 +89,10 @@ export const ServerView: React.FC = () => {
                 </button>
 
                 {loading ? (
-                    <div className="text-white">Loading details...</div>
+                    <div className="space-y-6">
+                        <Skeleton height="h-28" />
+                        <SkeletonList rows={3} height="h-24" />
+                    </div>
                 ) : (
                     <>
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10">
@@ -117,7 +124,13 @@ export const ServerView: React.FC = () => {
 
                         <div className="grid grid-cols-1 gap-6">
                             {filteredPolls.length === 0 ? (
-                                <div className="glass-panel p-12 text-center text-slate-500">No polls found for this filter.</div>
+                                <div className="glass-panel">
+                                    <EmptyState
+                                        icon={<BarChart3 className="w-6 h-6" />}
+                                        title="No polls found"
+                                        subtitle="No polls match this filter for this server."
+                                    />
+                                </div>
                             ) : (
                                 filteredPolls.map(poll => <PollCard key={poll.message_id} poll={poll} votes={voteCounts[poll.message_id] || {}} />)
                             )}
@@ -128,12 +141,3 @@ export const ServerView: React.FC = () => {
         </div>
     );
 };
-
-const FilterButton = ({ active, children, onClick }: any) => (
-    <button
-        onClick={onClick}
-        className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${active ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
-    >
-        {children}
-    </button>
-);

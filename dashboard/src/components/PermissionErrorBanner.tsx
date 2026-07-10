@@ -108,6 +108,7 @@ export const PermissionErrorBanner: React.FC<PermissionErrorBannerProps> = ({
                                     {/* Dismiss button */}
                                     <button
                                         onClick={onDismiss}
+                                        aria-label="Dismiss"
                                         className="shrink-0 p-1.5 rounded-lg text-amber-400/60 hover:text-amber-300 hover:bg-amber-500/10 transition-colors"
                                     >
                                         <X className="w-5 h-5" />

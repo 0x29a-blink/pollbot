@@ -12,22 +12,16 @@ import { VoterViewModal } from '../components/VoterViewModal';
 import { ExportModal } from '../components/ExportModal';
 import { PermissionErrorBanner } from '../components/PermissionErrorBanner';
 import type { Poll, PollSettings, GuildInfo, VoterResponse, PremiumStatus, ExportResponse, VoteUpdate, PermissionError } from '../types';
-
-// Helper to get CSRF token from cookie
-const getCsrfToken = (): string | null => {
-    const cookies = document.cookie.split(';');
-    for (const cookie of cookies) {
-        const [name, value] = cookie.trim().split('=');
-        if (name === 'csrf_token') return value;
-    }
-    return null;
-};
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { useToast } from '../components/ui/Toast';
+import { apiFetch } from '../utils/api';
 
 
 export const UserServerView: React.FC = () => {
     const { guildId } = useParams<{ guildId: string }>();
     const navigate = useNavigate();
     const { user } = useAuth();
+    const toast = useToast();
 
     const [guild, setGuild] = useState<GuildInfo | null>(null);
     const [polls, setPolls] = useState<Poll[]>([]);
@@ -166,17 +160,16 @@ export const UserServerView: React.FC = () => {
         }
         
         try {
-            const res = await fetch(`/api/user/polls/${pollId}/status`, {
+            const res = await apiFetch(`/api/user/polls/${pollId}/status`, {
                 method: 'PATCH',
-                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-csrf-token': getCsrfToken() || '',
                 },
                 body: JSON.stringify({ active }),
             });
 
             if (res.ok) {
+                toast.success(active ? 'Poll reopened' : 'Poll closed');
                 // Update local state immediately
                 setPolls(prev => prev.map(p =>
                     p.message_id === pollId ? { ...p, active } : p
@@ -223,21 +216,20 @@ export const UserServerView: React.FC = () => {
 
     const handleDeletePoll = async (pollId: string) => {
         try {
-            const res = await fetch(`/api/user/polls/${pollId}`, {
+            const res = await apiFetch(`/api/user/polls/${pollId}`, {
                 method: 'DELETE',
-                credentials: 'include',
-                headers: {
-                    'x-csrf-token': getCsrfToken() || '',
-                },
             });
 
             if (res.ok) {
+                toast.success('Poll deleted');
                 // Remove from local state
                 setPolls(prev => prev.filter(p => p.message_id !== pollId));
             } else {
+                toast.error('Failed to delete poll');
                 console.error('Failed to delete poll');
             }
         } catch (err) {
+            toast.error('Failed to delete poll');
             console.error('Error deleting poll:', err);
         }
     };
@@ -265,18 +257,17 @@ export const UserServerView: React.FC = () => {
         setPermissionError(null);
         
         try {
-            const res = await fetch(`/api/user/polls/${pollId}`, {
+            const res = await apiFetch(`/api/user/polls/${pollId}`, {
                 method: 'PATCH',
-                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-csrf-token': getCsrfToken() || '',
                 },
                 body: JSON.stringify({ settings: newSettings }),
             });
 
             if (res.ok) {
                 const updatedPoll = await res.json();
+                toast.success('Poll settings saved');
                 // Update local state
                 setPolls(prev => prev.map(p =>
                     p.message_id === pollId ? { ...p, settings: updatedPoll.settings } : p
@@ -338,6 +329,7 @@ export const UserServerView: React.FC = () => {
                     <div className="flex items-center gap-4">
                         <button
                             onClick={() => navigate('/dashboard')}
+                            aria-label="Back to Dashboard"
                             className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors"
                         >
                             <ArrowLeft className="w-5 h-5 text-slate-400" />
@@ -473,6 +465,7 @@ const PollCard: React.FC<{
     const [isExpanded, setIsExpanded] = useState(false);
     const [isUpdating, setIsUpdating] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [confirmingDelete, setConfirmingDelete] = useState(false);
     const [cooldownRemaining, setCooldownRemaining] = useState(0);
 
     // Cooldown timer effect
@@ -521,12 +514,8 @@ const PollCard: React.FC<{
     // Refresh premium status (after voting)
     const refreshPremium = async (): Promise<boolean> => {
         try {
-            const res = await fetch('/api/user/premium/refresh', {
+            const res = await apiFetch('/api/user/premium/refresh', {
                 method: 'POST',
-                credentials: 'include',
-                headers: {
-                    'x-csrf-token': getCsrfToken() || '',
-                }
             });
             if (res.ok) {
                 const data: PremiumStatus = await res.json();
@@ -595,16 +584,18 @@ const PollCard: React.FC<{
         }
     };
 
-    const handleDelete = async (e: React.MouseEvent) => {
+    const handleDelete = (e: React.MouseEvent) => {
         e.stopPropagation();
-        if (!confirm('Are you sure you want to delete this poll from the database? This cannot be undone.')) {
-            return;
-        }
+        setConfirmingDelete(true);
+    };
+
+    const confirmDelete = async () => {
         setIsDeleting(true);
         try {
             await onDeletePoll(poll.message_id);
         } finally {
             setIsDeleting(false);
+            setConfirmingDelete(false);
         }
     };
 
@@ -614,6 +605,16 @@ const PollCard: React.FC<{
             animate={{ opacity: 1 }}
             className="glass-panel overflow-hidden"
         >
+            <ConfirmDialog
+                open={confirmingDelete}
+                title="Delete poll?"
+                message="This permanently removes the poll and its votes from the database. This cannot be undone."
+                confirmLabel="Delete Poll"
+                danger
+                busy={isDeleting}
+                onConfirm={confirmDelete}
+                onCancel={() => setConfirmingDelete(false)}
+            />
             {/* Compact Header - Always visible */}
             <button
                 onClick={() => setIsExpanded(!isExpanded)}

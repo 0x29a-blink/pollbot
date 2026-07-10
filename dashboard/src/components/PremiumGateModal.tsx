@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Crown, ExternalLink, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { Crown, ExternalLink, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { Modal } from './ui/Modal';
 
 interface PremiumGateModalProps {
     isOpen: boolean;
@@ -43,43 +44,24 @@ export const PremiumGateModal: React.FC<PremiumGateModalProps> = ({
         }
     };
 
-    if (!isOpen) return null;
-
     return (
-        <AnimatePresence>
-            <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-                onClick={onClose}
-            >
-                <motion.div
-                    initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                    className="glass-panel w-full max-w-md overflow-hidden"
-                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                >
-                    {/* Header */}
-                    <div className="flex items-center justify-between p-5 border-b border-slate-700">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
-                                <Crown className="w-5 h-5 text-white" />
-                            </div>
-                            <div>
-                                <h2 className="text-lg font-bold text-white">Premium Feature</h2>
-                                <p className="text-xs text-slate-400">Unlock with top.gg vote</p>
-                            </div>
-                        </div>
-                        <button
-                            onClick={onClose}
-                            className="p-2 text-slate-400 hover:text-white transition-colors rounded-lg hover:bg-slate-800"
-                        >
-                            <X className="w-5 h-5" />
-                        </button>
+        <Modal
+            open={isOpen}
+            onClose={onClose}
+            ariaLabel="Premium Feature"
+            width="max-w-md"
+            header={
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
+                        <Crown className="w-5 h-5 text-white" />
                     </div>
-
+                    <div>
+                        <h2 className="text-lg font-bold text-white">Premium Feature</h2>
+                        <p className="text-xs text-slate-400">Unlock with top.gg vote</p>
+                    </div>
+                </div>
+            }
+        >
                     {/* Content */}
                     <div className="p-6">
                         <div className="text-center mb-6">
@@ -153,8 +135,6 @@ export const PremiumGateModal: React.FC<PremiumGateModalProps> = ({
                             </button>
                         </div>
                     </div>
-                </motion.div>
-            </motion.div>
-        </AnimatePresence>
+        </Modal>
     );
 };

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Loader2, Users, Copy, Check, ChevronLeft, ChevronRight, User } from 'lucide-react';
+import { Loader2, Users, Copy, Check, ChevronLeft, ChevronRight, User } from 'lucide-react';
+import { Modal } from './ui/Modal';
 
 import type { VoterInfo, VoteUpdate } from '../types';
 
@@ -116,41 +117,22 @@ export const VoterViewModal: React.FC<VoterViewModalProps> = ({
 
     const paginatedVoters = voters.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
 
-    if (!isOpen) return null;
-
     return (
-        <AnimatePresence>
-            <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-                onClick={onClose}
-            >
-                <motion.div
-                    initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                    className="glass-panel w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
-                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                >
-                    {/* Header */}
-                    <div className="flex items-center justify-between p-5 border-b border-slate-700">
-                        <div>
-                            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                                <Users className="w-5 h-5 text-violet-400" />
-                                Voter Breakdown
-                            </h2>
-                            <p className="text-sm text-slate-400 mt-1 truncate max-w-md">{pollTitle}</p>
-                        </div>
-                        <button
-                            onClick={onClose}
-                            className="p-2 text-slate-400 hover:text-white transition-colors rounded-lg hover:bg-slate-800"
-                        >
-                            <X className="w-5 h-5" />
-                        </button>
-                    </div>
-
+        <Modal
+            open={isOpen}
+            onClose={onClose}
+            ariaLabel="Voter Breakdown"
+            width="max-w-2xl"
+            header={
+                <div>
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                        <Users className="w-5 h-5 text-violet-400" />
+                        Voter Breakdown
+                    </h2>
+                    <p className="text-sm text-slate-400 mt-1 truncate max-w-md">{pollTitle}</p>
+                </div>
+            }
+        >
                     {/* Option Tabs */}
                     <div className="flex flex-wrap gap-2 p-4 border-b border-slate-700/50 bg-slate-900/30">
                         {options.map((option, index) => (
@@ -324,8 +306,6 @@ export const VoterViewModal: React.FC<VoterViewModalProps> = ({
                             </>
                         )}
                     </div>
-                </motion.div>
-            </motion.div>
-        </AnimatePresence>
+        </Modal>
     );
 };

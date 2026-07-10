@@ -1,17 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { X, AlertCircle, Plus, Trash2, Users, Scale, Loader2, HelpCircle } from 'lucide-react';
+import { AlertCircle, Plus, Trash2, Users, Scale, Loader2 } from 'lucide-react';
 import type { Channel, Role } from '../types';
-
-// Helper to get CSRF token from cookie
-const getCsrfToken = (): string | null => {
-    const cookies = document.cookie.split(';');
-    for (const cookie of cookies) {
-        const [name, value] = cookie.trim().split('=');
-        if (name === 'csrf_token') return value;
-    }
-    return null;
-};
+import { Modal } from './ui/Modal';
+import { Toggle } from './ui/Toggle';
+import { useToast } from './ui/Toast';
+import { apiFetch } from '../utils/api';
 
 interface CreatePollModalProps {
     isOpen: boolean;
@@ -45,6 +38,7 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
     guildName,
     onPollCreated,
 }) => {
+    const toast = useToast();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -187,12 +181,10 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
                 }
             });
 
-            const res = await fetch('/api/user/polls', {
+            const res = await apiFetch('/api/user/polls', {
                 method: 'POST',
-                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-csrf-token': getCsrfToken() || '',
                 },
                 body: JSON.stringify({
                     guild_id: guildId,
@@ -209,6 +201,7 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
 
             if (res.ok) {
                 const poll = await res.json();
+                toast.success('Poll created');
                 onPollCreated(poll);
                 onClose();
                 // Reset form
@@ -244,31 +237,20 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
         return `#${color.toString(16).padStart(6, '0')}`;
     };
 
-    if (!isOpen) return null;
-
     return (
-        <AnimatePresence>
-            <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-                <motion.div
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    className="glass-panel w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
-                >
-                    {/* Header */}
-                    <div className="flex items-center justify-between p-5 border-b border-slate-700">
-                        <div>
-                            <h2 className="text-xl font-bold text-white">Create Poll</h2>
-                            <p className="text-sm text-slate-400">in {guildName}</p>
-                        </div>
-                        <button
-                            onClick={onClose}
-                            className="p-2 text-slate-400 hover:text-white transition-colors rounded-lg hover:bg-slate-800"
-                        >
-                            <X className="w-5 h-5" />
-                        </button>
-                    </div>
-
+        <Modal
+            open={isOpen}
+            onClose={onClose}
+            ariaLabel="Create Poll"
+            width="max-w-3xl"
+            closeOnBackdrop={false}
+            header={
+                <div>
+                    <h2 className="text-xl font-bold text-white">Create Poll</h2>
+                    <p className="text-sm text-slate-400">in {guildName}</p>
+                </div>
+            }
+        >
                     {/* Content */}
                     <div className="flex-1 overflow-y-auto p-5">
                         {dataLoading ? (
@@ -571,45 +553,6 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
                             )}
                         </button>
                     </div>
-                </motion.div>
-            </div>
-        </AnimatePresence>
+        </Modal>
     );
 };
-
-// Compact toggle component with visible tooltip
-const Toggle: React.FC<{
-    label: string;
-    tooltip?: string;
-    checked: boolean;
-    onChange: (value: boolean) => void;
-}> = ({ label, tooltip, checked, onChange }) => (
-    <div className="relative group">
-        <div
-            onClick={() => onChange(!checked)}
-            className="flex items-center justify-between p-2.5 rounded-lg bg-slate-800/50 cursor-pointer hover:bg-slate-700/50 transition-colors border border-slate-700/50"
-        >
-            <div className="flex items-center gap-1.5">
-                <span className="text-sm text-slate-300">{label}</span>
-                {tooltip && (
-                    <HelpCircle className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-400" />
-                )}
-            </div>
-            <div
-                className="w-10 h-6 rounded-full transition-colors flex items-center px-1"
-                style={{ backgroundColor: checked ? 'var(--color-primary-strong)' : '#475569' }}
-            >
-                <div
-                    className="w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
-                    style={{ marginLeft: checked ? '16px' : '0px' }}
-                />
-            </div>
-        </div>
-        {tooltip && (
-            <div className="absolute left-0 right-0 bottom-full mb-2 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-300 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 shadow-xl">
-                {tooltip}
-                <div className="absolute left-4 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-slate-700" />
-            </div>
-        )}
-    </div>
-);

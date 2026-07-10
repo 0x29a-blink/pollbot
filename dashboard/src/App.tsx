@@ -4,6 +4,7 @@ import { Login } from './pages/Login';
 import { Landing } from './pages/Landing';
 import { AuthCallback } from './pages/AuthCallback';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { ToastProvider } from './components/ui/Toast';
 
 // Heavy, auth-gated pages (charts, framer-motion, large views) are code-split so
 // the public Landing/Login entry points don't download them on first load.
@@ -167,11 +168,13 @@ function AppRoutes() {
 function App() {
   return (
     <ErrorBoundary>
-      <BrowserRouter>
-        <AuthProvider>
-          <AppRoutes />
-        </AuthProvider>
-      </BrowserRouter>
+      <ToastProvider>
+        <BrowserRouter>
+          <AuthProvider>
+            <AppRoutes />
+          </AuthProvider>
+        </BrowserRouter>
+      </ToastProvider>
     </ErrorBoundary>
   );
 }
