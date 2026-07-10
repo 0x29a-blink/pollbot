@@ -366,7 +366,7 @@ async function verifyUserPermission(sessionId: string, guildId: string): Promise
  * Returns cached channels for a guild with bot permission status
  */
 router.get('/guilds/:id/channels', async (req: Request, res: Response) => {
-    const guildId = req.params.id;
+    const guildId = req.params.id as string;
     // Support both cookie and header auth
     const cookieSession = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers.authorization;
@@ -398,7 +398,7 @@ router.get('/guilds/:id/channels', async (req: Request, res: Response) => {
  * Returns cached roles for a guild
  */
 router.get('/guilds/:id/roles', async (req: Request, res: Response) => {
-    const guildId = req.params.id;
+    const guildId = req.params.id as string;
     // Support both cookie and header auth
     const cookieSession = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers.authorization;
@@ -430,7 +430,7 @@ router.get('/guilds/:id/roles', async (req: Request, res: Response) => {
  * Force refresh channels and roles for a guild (5-min cooldown)
  */
 router.post('/guilds/:id/refresh', async (req: Request, res: Response) => {
-    const guildId = req.params.id;
+    const guildId = req.params.id as string;
     // Support both cookie and header auth
     const cookieSession = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers.authorization;
@@ -729,7 +729,7 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
     const authHeader = req.headers.authorization;
     const headerSession = authHeader?.replace('Bearer ', '');
     const sessionId = cookieSession || headerSession;
-    const { pollId } = req.params;
+    const pollId = req.params.pollId as string;
     const { active } = req.body as { active: boolean };
 
     if (!sessionId) {
@@ -1018,7 +1018,7 @@ router.delete('/polls/:pollId', async (req: Request, res: Response) => {
     const authHeader = req.headers.authorization;
     const headerSession = authHeader?.replace('Bearer ', '');
     const sessionId = cookieSession || headerSession;
-    const { pollId } = req.params;
+    const pollId = req.params.pollId as string;
 
     if (!sessionId) {
         return res.status(401).json({ error: 'Unauthorized' });
@@ -1088,7 +1088,7 @@ router.patch('/polls/:pollId', async (req: Request, res: Response) => {
     const authHeader = req.headers.authorization;
     const headerSession = authHeader?.replace('Bearer ', '');
     const sessionId = cookieSession || headerSession;
-    const { pollId } = req.params;
+    const pollId = req.params.pollId as string;
     const { settings: newSettings } = req.body as {
         settings: {
             public?: boolean;

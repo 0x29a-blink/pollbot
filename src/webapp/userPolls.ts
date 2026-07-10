@@ -301,7 +301,7 @@ async function fetchVoterData(pollId: string, optionIndex: number, guildId: stri
  * Returns all polls in a server (requires Manage Guild permission)
  */
 router.get('/polls/:guildId', async (req: Request, res: Response) => {
-    const { guildId } = req.params;
+    const guildId = req.params.guildId as string;
     // Support both cookie and header auth
     const cookieSession = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers.authorization;
@@ -461,7 +461,7 @@ router.get('/polls/:guildId', async (req: Request, res: Response) => {
  * Query params: option (required) - the option index to get voters for
  */
 router.get('/polls/:pollId/voters', async (req: Request, res: Response) => {
-    const { pollId } = req.params;
+    const pollId = req.params.pollId as string;
     const optionIndex = parseInt(req.query.option as string);
     const forceRefresh = req.query.refresh === 'true';
 
@@ -564,7 +564,7 @@ router.get('/polls/:pollId/voters', async (req: Request, res: Response) => {
  * Returns CSV data for the entire poll (Free feature)
  */
 router.get('/polls/:pollId/export', async (req: Request, res: Response) => {
-    const { pollId } = req.params;
+    const pollId = req.params.pollId as string;
     const forceRefresh = req.query.refresh === 'true';
 
     if (!pollId) {

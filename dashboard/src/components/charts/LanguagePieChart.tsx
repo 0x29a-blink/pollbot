@@ -81,7 +81,7 @@ export const LanguagePieChart: React.FC = () => {
                             <Tooltip
                                 contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff' }}
                                 itemStyle={{ color: '#fff' }}
-                                formatter={(value: number | undefined, name: any) => [`${value} Servers`, name]}
+                                formatter={(value: any, name: any) => [`${value} Servers`, name]}
                             />
                             <Legend iconType="circle" />
                         </PieChart>
