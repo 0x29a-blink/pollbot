@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, BarChart3, Users, Clock, CheckCircle, XCircle, Loader2, Eye, EyeOff, Vote, Download, Lock, MessageSquare, Settings2, Scale, HelpCircle, ChevronDown, ChevronUp, Plus, FileSpreadsheet } from 'lucide-react';
+import { ArrowLeft, BarChart3, Users, Clock, CheckCircle, XCircle, Loader2, Eye, EyeOff, Vote, Download, Lock, MessageSquare, Settings2, Scale, HelpCircle, ChevronDown, ChevronUp, Plus, FileSpreadsheet, CopyPlus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../App';
 import { CreatePollModal } from '../components/CreatePollModal';
@@ -29,6 +29,7 @@ export const UserServerView: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [showCreateModal, setShowCreateModal] = useState(false);
+    const [duplicateSource, setDuplicateSource] = useState<Poll | null>(null);
     const [editingPoll, setEditingPoll] = useState<Poll | null>(null);
     const [roles, setRoles] = useState<Array<{ id: string; name: string; color: number; position: number; managed: boolean }>>([]);
     const [lastVoteUpdate, setLastVoteUpdate] = useState<VoteUpdate | null>(null);
@@ -383,16 +384,34 @@ export const UserServerView: React.FC = () => {
                 </div>
             </header>
 
-            {/* Create Poll Modal */}
+            {/* Create Poll Modal (also handles duplicate-poll prefill) */}
             {guild && (
                 <CreatePollModal
                     isOpen={showCreateModal}
-                    onClose={() => setShowCreateModal(false)}
+                    onClose={() => {
+                        setShowCreateModal(false);
+                        setDuplicateSource(null);
+                    }}
                     guildId={guildId || ''}
                     guildName={guild.name}
                     onPollCreated={(poll) => {
                         setPolls(prev => [poll, ...prev]);
                     }}
+                    initialValues={duplicateSource ? {
+                        title: duplicateSource.title,
+                        description: duplicateSource.description,
+                        options: duplicateSource.options,
+                        settings: {
+                            public: duplicateSource.settings?.public !== false,
+                            allow_thread: duplicateSource.settings?.allow_thread ?? false,
+                            allow_close: duplicateSource.settings?.allow_close !== false,
+                            allow_exports: duplicateSource.settings?.allow_exports !== false,
+                            max_votes: duplicateSource.settings?.max_votes ?? 1,
+                            min_votes: duplicateSource.settings?.min_votes ?? 1,
+                            allowed_roles: duplicateSource.settings?.allowed_roles ?? [],
+                            vote_weights: duplicateSource.settings?.vote_weights ?? {},
+                        },
+                    } : undefined}
                 />
             )}
 
@@ -431,6 +450,10 @@ export const UserServerView: React.FC = () => {
                                     onStatusChange={handleStatusChange}
                                     onDeletePoll={handleDeletePoll}
                                     onEditPoll={handleEditPoll}
+                                    onDuplicatePoll={(p) => {
+                                        setDuplicateSource(p);
+                                        setShowCreateModal(true);
+                                    }}
                                     lastVoteUpdate={lastVoteUpdate}
                                     cooldownEndTime={cooldownPolls.get(poll.message_id)}
                                 />
@@ -462,9 +485,10 @@ const PollCard: React.FC<{
     onStatusChange: (pollId: string, active: boolean) => Promise<void>;
     onDeletePoll: (pollId: string) => Promise<void>;
     onEditPoll: (poll: Poll) => void;
+    onDuplicatePoll: (poll: Poll) => void;
     lastVoteUpdate: VoteUpdate | null;
     cooldownEndTime?: number;
-}> = ({ poll, formatDate, onStatusChange, onDeletePoll, onEditPoll, lastVoteUpdate, cooldownEndTime }) => {
+}> = ({ poll, formatDate, onStatusChange, onDeletePoll, onEditPoll, onDuplicatePoll, lastVoteUpdate, cooldownEndTime }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [isUpdating, setIsUpdating] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -883,6 +907,19 @@ const PollCard: React.FC<{
                                                 Edit Settings
                                             </button>
                                         )}
+
+                                        {/* Duplicate Button */}
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onDuplicatePoll(poll);
+                                            }}
+                                            aria-label="Duplicate poll"
+                                            className="w-full py-2 px-4 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 border border-cyan-500/30"
+                                        >
+                                            <CopyPlus className="w-4 h-4" />
+                                            Duplicate
+                                        </button>
 
                                         {/* View | Export Split Button */}
                                         <div className="flex gap-0 w-full">

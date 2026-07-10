@@ -12,6 +12,17 @@ interface CreatePollModalProps {
     guildId: string;
     guildName: string;
     onPollCreated: (poll: any) => void;
+    /**
+     * Prefill for "duplicate poll": title/description/options/settings copied
+     * from an existing poll. Deliberately excludes channel (re-picked) and
+     * ends_at (a stale close time on a fresh poll is a trap).
+     */
+    initialValues?: {
+        title: string;
+        description: string;
+        options: string[];
+        settings: Partial<PollFormData['settings']>;
+    };
 }
 
 interface PollFormData {
@@ -37,6 +48,7 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
     guildId,
     guildName,
     onPollCreated,
+    initialValues,
 }) => {
     const toast = useToast();
     const [loading, setLoading] = useState(false);
@@ -71,6 +83,32 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
             vote_weights: {},
         },
     });
+
+    // Apply duplicate-poll prefill whenever the modal opens with initialValues
+    useEffect(() => {
+        if (isOpen && initialValues) {
+            setFormData(prev => ({
+                ...prev,
+                channel_id: '', // re-picked by the user (fetchGuildData auto-selects)
+                title: initialValues.title,
+                description: initialValues.description,
+                options: initialValues.options.length >= 2 ? [...initialValues.options] : ['', ''],
+                settings: {
+                    public: true,
+                    allow_thread: false,
+                    allow_close: true,
+                    allow_exports: true,
+                    max_votes: 1,
+                    min_votes: 1,
+                    allowed_roles: [],
+                    vote_weights: {},
+                    ...initialValues.settings,
+                },
+            }));
+            setDuration('');
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen, initialValues]);
 
     // Fetch channels and roles on mount
     useEffect(() => {
