@@ -495,6 +495,8 @@ interface CreatePollRequest {
         vote_weights?: Record<string, number>;
         role_metadata?: Record<string, { name: string; color: number }>;
     };
+    /** Optional auto-close time (validated in validation.ts). */
+    ends_at?: string | null;
 }
 
 /**
@@ -680,6 +682,7 @@ router.post('/polls', async (req: Request, res: Response) => {
             options: body.options,
             settings,
             active: true,
+            ends_at: body.ends_at ?? null,
         };
 
         let { data: savedPoll, error: dbError } = await supabase

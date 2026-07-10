@@ -51,6 +51,9 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
     const [showWeights, setShowWeights] = useState(false);
     const [showRestrictions, setShowRestrictions] = useState(false);
 
+    // Auto-close duration in ms ('' = never); ends_at computed at submit time
+    const [duration, setDuration] = useState('');
+
     // Form data
     const [formData, setFormData] = useState<PollFormData>({
         channel_id: '',
@@ -196,6 +199,7 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
                         ...formData.settings,
                         role_metadata: Object.keys(roleMetadata).length > 0 ? roleMetadata : undefined,
                     },
+                    ends_at: duration ? new Date(Date.now() + parseInt(duration)).toISOString() : undefined,
                 }),
             });
 
@@ -221,6 +225,7 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
                         vote_weights: {},
                     },
                 });
+                setDuration('');
             } else {
                 const data = await res.json();
                 setError(data.error || 'Failed to create poll');
@@ -421,6 +426,24 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
                                             className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
                                         />
                                     </div>
+                                </div>
+
+                                {/* Auto-close */}
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-2">Auto-close</label>
+                                    <select
+                                        value={duration}
+                                        onChange={(e) => setDuration(e.target.value)}
+                                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                                    >
+                                        <option value="">Never (close manually)</option>
+                                        <option value="3600000">After 1 hour</option>
+                                        <option value="21600000">After 6 hours</option>
+                                        <option value="43200000">After 12 hours</option>
+                                        <option value="86400000">After 24 hours</option>
+                                        <option value="172800000">After 48 hours</option>
+                                        <option value="604800000">After 7 days</option>
+                                    </select>
                                 </div>
 
                                 {/* Collapsible: Role Restrictions */}

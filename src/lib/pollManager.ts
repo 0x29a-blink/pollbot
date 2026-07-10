@@ -1,4 +1,4 @@
-import { Interaction, ButtonBuilder, ButtonStyle, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, MessageFlags, AttachmentBuilder, GuildMember, PermissionsBitField, ChatInputCommandInteraction, ButtonInteraction, Guild } from 'discord.js';
+import { Client, Interaction, ButtonBuilder, ButtonStyle, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, MessageFlags, AttachmentBuilder, GuildMember, PermissionsBitField, ChatInputCommandInteraction, ButtonInteraction, Guild } from 'discord.js';
 import { supabase } from './db';
 import { Renderer } from './renderer';
 import { logger } from './logger';
@@ -250,6 +250,114 @@ export class PollManager {
                     await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
                 }
             } catch { }
+        }
+    }
+
+    /**
+     * Non-interactive close used by the auto-close scheduler. Mirrors the
+     * close half of setPollStatus without an interaction (no permission
+     * check — the schedule was authorized at poll creation; no replies).
+     *
+     * Error policy (differs from the interactive path so the scheduler
+     * cannot retry a dead poll forever):
+     *  - vote-count query failed → do nothing, retry next tick (repo rule:
+     *    never bake a zero-filled image into a closed poll)
+     *  - Unknown Message (10008) → close in DB and mark discord_deleted
+     *  - Missing Access/Permissions (50001/50013) → close in DB anyway; the
+     *    DB flag is what stops votes, the stale image is acceptable
+     *  - anything else → log and retry next tick
+     */
+    static async autoClosePoll(client: Client, pollData: any): Promise<void> {
+        const pollId: string = pollData.message_id;
+
+        // Guild settings for buttons + locale
+        let serverLocale = 'en';
+        let showButtons = true;
+        const { data: guildSettings } = await supabase
+            .from('guild_settings')
+            .select('allow_poll_buttons, locale')
+            .eq('guild_id', pollData.guild_id)
+            .single();
+        if (guildSettings) {
+            showButtons = guildSettings.allow_poll_buttons;
+            if (guildSettings.locale) serverLocale = guildSettings.locale;
+        }
+
+        const voteData = await aggregateVotes(pollId, pollData.options.length);
+        if (voteData.error) {
+            logger.warn(`[AutoClose] Skipping poll ${pollId}: vote aggregation failed (will retry next tick).`);
+            return;
+        }
+
+        try {
+            const channel = await client.channels.fetch(pollData.channel_id);
+            if (!channel?.isTextBased()) {
+                logger.warn(`[AutoClose] Channel ${pollData.channel_id} for poll ${pollId} is not text-based; closing in DB only.`);
+                await supabase.from('polls').update({ active: false }).eq('message_id', pollId);
+                return;
+            }
+            const message = await channel.messages.fetch(pollId);
+
+            let creatorTag = I18n.t('messages.manager.unknown_user', serverLocale);
+            try {
+                const user = await client.users.fetch(pollData.creator_id);
+                creatorTag = user.tag;
+            } catch (e) {
+                logger.warn(`[AutoClose] Failed to fetch creator ${pollData.creator_id}`, e);
+            }
+
+            const guild = 'guild' in channel ? (channel as any).guild ?? null : null;
+            const resolvedTitle = await PollManager.resolveMentions(pollData.title, guild);
+            const resolvedDescription = await PollManager.resolveMentions(pollData.description, guild);
+            const resolvedOptions = await Promise.all(
+                pollData.options.map(async (opt: string) => await PollManager.resolveMentions(opt, guild))
+            );
+
+            const imageBuffer = await Renderer.renderPoll({
+                title: resolvedTitle,
+                description: resolvedDescription,
+                options: resolvedOptions,
+                // Closed polls always reveal counts (matches setPollStatus).
+                votes: voteData.counts,
+                totalVotes: voteData.totalWeight,
+                creator: creatorTag,
+                closed: true,
+                locale: serverLocale,
+            } as any);
+            const attachment = new AttachmentBuilder(imageBuffer, { name: 'poll.png' });
+
+            const components: ActionRowBuilder<any>[] = [];
+            if (showButtons) {
+                const reopenButton = new ButtonBuilder()
+                    .setCustomId('poll_reopen')
+                    .setLabel(I18n.t('messages.manager.reopen_button', serverLocale))
+                    .setStyle(ButtonStyle.Success)
+                    .setEmoji('🔓');
+                components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(reopenButton));
+            }
+
+            // Discord first, then DB — same ordering as setPollStatus.
+            await message.edit({ files: [attachment], components });
+
+            const { error: updateError } = await supabase
+                .from('polls')
+                .update({ active: false })
+                .eq('message_id', pollId);
+            if (updateError) {
+                logger.error(`[AutoClose] Discord updated but DB close failed for ${pollId}:`, updateError);
+            }
+        } catch (err: any) {
+            if (err?.code === 10008) { // Unknown Message — poll was deleted in Discord
+                logger.info(`[AutoClose] Poll message ${pollId} no longer exists; closing and marking discord_deleted.`);
+                await supabase.from('polls').update({ active: false, discord_deleted: true }).eq('message_id', pollId);
+                return;
+            }
+            if (err?.code === 50001 || err?.code === 50013) { // Missing Access / Permissions
+                logger.warn(`[AutoClose] Missing permissions (${err.code}) updating poll ${pollId}; closing in DB only.`);
+                await supabase.from('polls').update({ active: false }).eq('message_id', pollId);
+                return;
+            }
+            throw err; // scheduler logs and retries next tick
         }
     }
 

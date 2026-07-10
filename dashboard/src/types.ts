@@ -41,6 +41,8 @@ export interface Poll {
     total_votes?: number;
     /** Set when Discord message no longer exists */
     discord_deleted?: boolean;
+    /** Auto-close time (ISO 8601); null/absent = manual close only */
+    ends_at?: string | null;
 }
 
 // ============================================================================

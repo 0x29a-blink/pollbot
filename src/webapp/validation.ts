@@ -3,6 +3,8 @@
  * Provides type-safe validation and sanitization for poll-related data
  */
 
+import { validateEndsAt } from '../lib/durationUtils';
+
 // Validation error result
 export interface ValidationError {
     field: string;
@@ -33,6 +35,8 @@ export interface CreatePollInput {
         vote_weights?: Record<string, number>;
         role_metadata?: Record<string, { name: string; color: number }>;
     };
+    /** Optional auto-close time (ISO 8601, future, ≤ 90 days out). */
+    ends_at?: string;
 }
 
 // Poll settings update schema
@@ -208,6 +212,13 @@ export function validateCreatePoll(input: unknown): ValidationResult<CreatePollI
         }
     }
 
+    // Optional auto-close time
+    if (body.ends_at !== undefined && body.ends_at !== null) {
+        if (typeof body.ends_at !== 'string' || !validateEndsAt(body.ends_at)) {
+            errors.push({ field: 'ends_at', message: 'ends_at must be a future ISO timestamp no more than 90 days out' });
+        }
+    }
+
     if (errors.length > 0) {
         return { success: false, errors };
     }
@@ -229,6 +240,9 @@ export function validateCreatePoll(input: unknown): ValidationResult<CreatePollI
     }
     if (body.settings) {
         (validated as any).settings = body.settings;
+    }
+    if (typeof body.ends_at === 'string') {
+        validated.ends_at = body.ends_at;
     }
 
     return { success: true, data: validated };

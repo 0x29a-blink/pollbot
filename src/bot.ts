@@ -117,6 +117,9 @@ client.login(token).then(() => {
     // Initialize Guild Sync Service
     const { GuildSyncService } = require('./services/GuildSyncService');
     new GuildSyncService(client);
+    // Initialize Poll Scheduler (auto-close)
+    const { PollSchedulerService } = require('./services/PollSchedulerService');
+    new PollSchedulerService(client);
 }).catch(err => {
     logger.error("Failed to login:", err);
 });

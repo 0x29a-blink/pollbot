@@ -657,6 +657,12 @@ const PollCard: React.FC<{
                             </>
                         )}
                     </div>
+                    {poll.active && poll.ends_at && !poll.discord_deleted && (
+                        <div className="px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 bg-indigo-500/20 text-indigo-300">
+                            <Clock className="w-3 h-3" />
+                            Auto-closes {new Date(poll.ends_at).toLocaleString()}
+                        </div>
+                    )}
                     {isExpanded ? (
                         <ChevronUp className="w-5 h-5 text-slate-400" />
                     ) : (

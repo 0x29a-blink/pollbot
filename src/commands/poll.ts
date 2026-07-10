@@ -5,6 +5,7 @@ import { logger } from '../lib/logger';
 import { PollManager } from '../lib/pollManager';
 import { I18n } from '../lib/i18n';
 import { upsertGuildRow, guildToRow } from '../lib/guildUtils';
+import { endsAtFromDuration } from '../lib/durationUtils';
 
 export default {
     data: new SlashCommandBuilder()
@@ -53,7 +54,19 @@ export default {
         .addRoleOption(option =>
             option.setName('allowed_role')
                 .setDescription('Limit voting to a specific role. Visit pollbot.win to add more roles!')
-                .setRequired(false)),
+                .setRequired(false))
+        .addStringOption(option =>
+            option.setName('duration')
+                .setDescription('Auto-close the poll after this long (default: never)')
+                .setRequired(false)
+                .addChoices(
+                    { name: '1 hour', value: '1h' },
+                    { name: '6 hours', value: '6h' },
+                    { name: '12 hours', value: '12h' },
+                    { name: '24 hours', value: '24h' },
+                    { name: '48 hours', value: '48h' },
+                    { name: '7 days', value: '7d' },
+                )),
     async execute(interaction: ChatInputCommandInteraction) {
         if (!interaction.inGuild()) {
             return interaction.reply({ content: I18n.t('messages.common.guild_only', interaction.locale), flags: MessageFlags.Ephemeral });
@@ -86,6 +99,8 @@ export default {
         }
         const targetRole = interaction.options.getRole('allowed_role');
         const allowExports = interaction.options.getBoolean('allow_exports') ?? true;
+        const duration = interaction.options.getString('duration');
+        const endsAt = duration ? endsAtFromDuration(duration) : null;
 
         const allowedRoles = targetRole ? [targetRole.id] : [];
         const voteWeights = {}; // Vote weights now managed via dashboard at pollbot.win
@@ -322,7 +337,8 @@ export default {
                         role_metadata: Object.keys(roleMetadata).length > 0 ? roleMetadata : undefined
                     },
                     active: true,
-                    created_at: new Date().toISOString()
+                    created_at: new Date().toISOString(),
+                    ends_at: endsAt
                 };
 
                 let { error } = await supabase.from('polls').insert(pollRow);
