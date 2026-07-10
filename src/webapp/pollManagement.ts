@@ -4,6 +4,7 @@ import { logger } from '../lib/logger';
 import { upsertGuildRow } from '../lib/guildUtils';
 import { aggregateVotes } from '../lib/voteUtils';
 import { validateCreatePoll, validateUpdatePollSettings } from './validation';
+import { trackUsage } from '../lib/usageTracker';
 import { getShardingManager } from '../webhook';
 
 const router = Router();
@@ -710,6 +711,7 @@ router.post('/polls', async (req: Request, res: Response) => {
         }
 
         logger.info(`[PollManagement] Poll created by ${permCheck.userId} in guild ${body.guild_id}: ${successResult.messageId}`);
+        trackUsage({ source: 'dashboard', event_type: 'poll_create', guild_id: body.guild_id, user_id: permCheck.userId });
 
         return res.json({
             ...savedPoll,
@@ -814,6 +816,7 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
         if (!shardingManager) {
             // Still return success since DB was updated
             logger.warn('[PollManagement] Sharding manager not available, Discord message not updated');
+            trackUsage({ source: 'dashboard', event_type: active ? 'poll_reopen' : 'poll_close', guild_id: pollData.guild_id, user_id: permCheck.userId });
             return res.json({ ...pollData, active });
         }
 
@@ -1003,6 +1006,7 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
         }
 
         logger.info(`[PollManagement] Poll ${pollId} status updated to ${active ? 'active' : 'closed'} by ${permCheck.userId}`);
+        trackUsage({ source: 'dashboard', event_type: active ? 'poll_reopen' : 'poll_close', guild_id: pollData.guild_id, user_id: permCheck.userId });
 
         return res.json({ ...pollData, active });
     } catch (error) {
@@ -1073,6 +1077,7 @@ router.delete('/polls/:pollId', async (req: Request, res: Response) => {
         }
 
         logger.info(`[PollManagement] Poll ${pollId} (${pollData.title}) deleted by ${permCheck.userId}`);
+        trackUsage({ source: 'dashboard', event_type: 'poll_delete', guild_id: pollData.guild_id, user_id: permCheck.userId });
 
         return res.json({ success: true, deleted: pollId });
     } catch (error) {
@@ -1328,6 +1333,7 @@ router.patch('/polls/:pollId', async (req: Request, res: Response) => {
         }
 
         logger.info(`[PollManagement] Poll ${pollId} settings updated by ${permCheck.userId}`);
+        trackUsage({ source: 'dashboard', event_type: 'poll_edit', guild_id: pollData.guild_id, user_id: permCheck.userId });
 
         return res.json({ ...pollData, settings: updatedSettings });
     } catch (error) {

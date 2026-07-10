@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { supabase } from '../lib/db';
 import { logger } from '../lib/logger';
+import { trackUsage } from '../lib/usageTracker';
 import crypto from 'crypto';
 
 const router = Router();
@@ -291,6 +292,7 @@ router.get('/callback', async (req: Request, res: Response) => {
         });
 
         logger.info(`[Dashboard Auth] User ${discordUser.username} (${discordUser.id}) logged in, admin: ${isAdmin}`);
+        trackUsage({ source: 'dashboard', event_type: 'login', guild_id: null, user_id: discordUser.id });
 
         // Set session as httpOnly cookie and redirect to dashboard
         res.cookie(COOKIE_NAME, sessionId, COOKIE_OPTIONS);

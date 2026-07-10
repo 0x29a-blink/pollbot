@@ -7,6 +7,7 @@ import { PollManager } from '../lib/pollManager';
 import { I18n } from '../lib/i18n';
 import { aggregateVotes, replaceUserVotes } from '../lib/voteUtils';
 import { scheduleRender } from '../lib/renderQueue';
+import { trackUsage } from '../lib/usageTracker';
 import { AttachmentBuilder } from 'discord.js';
 
 export default {
@@ -19,6 +20,7 @@ export default {
                 const pollId = interaction.message.id;
                 const isCloseAction = interaction.customId === 'poll_close';
                 await PollManager.setPollStatus(interaction, pollId, !isCloseAction);
+                trackUsage({ source: 'bot', event_type: isCloseAction ? 'poll_close' : 'poll_reopen', guild_id: interaction.guildId, user_id: interaction.user.id });
                 return;
             }
 
@@ -192,6 +194,7 @@ export default {
                 const weightMsg = voteWeight > 1 ? ` (Weight: ${voteWeight})` : '';
                 await interaction.editReply({ content: I18n.t('messages.poll.voted', interaction.locale, { options: votedOptions }) + weightMsg });
                 logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} voted on poll ${pollId} with the following item: ${votedOptions} weight:${voteWeight}`);
+                trackUsage({ source: 'bot', event_type: 'vote', guild_id: interaction.guildId, user_id: userId });
 
                 // 7. Update the Poll Image — coalesced per poll so a burst of votes
                 // collapses to a single render + Discord edit (the voter already got
@@ -336,6 +339,7 @@ export default {
 
         try {
             await command.execute(interaction);
+            trackUsage({ source: 'bot', event_type: `command:${interaction.commandName}`, guild_id: interaction.guildId, user_id: interaction.user.id });
         } catch (error: any) {
             logger.error(`Error executing ${interaction.commandName}`, error);
 

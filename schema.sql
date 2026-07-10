@@ -86,7 +86,17 @@ CREATE TABLE IF NOT EXISTS users (
     is_admin BOOLEAN DEFAULT FALSE
 );
 
--- 7. dashboard_sessions table
+-- 7. usage_events table (bot vs dashboard usage telemetry)
+CREATE TABLE IF NOT EXISTS usage_events (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    source TEXT NOT NULL CHECK (source IN ('bot', 'dashboard')),
+    event_type TEXT NOT NULL,
+    guild_id TEXT,
+    user_id TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 8. dashboard_sessions table
 CREATE TABLE IF NOT EXISTS dashboard_sessions (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -132,6 +142,9 @@ WHERE scheduled_start IS NOT NULL AND active = false;
 -- Guilds the bot has left (partial: most rows have left_at NULL)
 CREATE INDEX IF NOT EXISTS idx_guilds_left_at ON guilds(left_at) WHERE left_at IS NOT NULL;
 
+-- Usage telemetry queries (aggregated by day)
+CREATE INDEX IF NOT EXISTS idx_usage_events_created_at ON usage_events(created_at DESC);
+
 -- ============================================================================
 -- ROW LEVEL SECURITY
 -- ============================================================================
@@ -143,6 +156,7 @@ ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE guild_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE guilds ENABLE ROW LEVEL SECURITY;
 ALTER TABLE dashboard_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE usage_events ENABLE ROW LEVEL SECURITY;
 
 -- Service role policies (bot uses service key which bypasses RLS, but explicit is best practice)
 CREATE POLICY "Service role full access" ON polls FOR ALL TO service_role USING (true) WITH CHECK (true);
@@ -150,6 +164,8 @@ CREATE POLICY "Service role full access" ON votes FOR ALL TO service_role USING 
 CREATE POLICY "Service role full access" ON global_stats FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service role full access" ON users FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service role full access" ON dashboard_sessions FOR ALL TO service_role USING (true) WITH CHECK (true);
+-- usage_events: service_role only; deliberately NO public read (rows contain user_ids)
+CREATE POLICY "Service role full access" ON usage_events FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- Public read access for telemetry panel (uses anon key)
 CREATE POLICY "Public read access" ON polls FOR SELECT USING (true);
@@ -295,6 +311,23 @@ $$;
 
 REVOKE ALL ON FUNCTION get_guild_vote_counts() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION get_guild_vote_counts() TO anon, authenticated, service_role;
+
+-- Bot vs dashboard usage per day (aggregates only, no user_ids exposed)
+CREATE OR REPLACE FUNCTION get_usage_summary(p_days INT DEFAULT 30)
+RETURNS TABLE(day DATE, source TEXT, events BIGINT, unique_users BIGINT)
+LANGUAGE SQL
+STABLE
+SECURITY DEFINER
+AS $$
+    SELECT created_at::DATE AS day, usage_events.source, COUNT(*)::BIGINT, COUNT(DISTINCT user_id)::BIGINT
+    FROM usage_events
+    WHERE created_at > NOW() - make_interval(days => LEAST(GREATEST(p_days, 1), 365))
+    GROUP BY 1, 2
+    ORDER BY 1;
+$$;
+
+REVOKE ALL ON FUNCTION get_usage_summary(INT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION get_usage_summary(INT) TO anon, authenticated, service_role;
 
 -- ============================================================================
 -- REALTIME

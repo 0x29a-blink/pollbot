@@ -3,6 +3,7 @@ import { supabase } from '../lib/db';
 import { logger } from '../lib/logger';
 import { getVoteCountsForPoll } from '../lib/voteUtils';
 import { groupVoteRows, MyVoteRow } from './voteGrouping';
+import { trackUsage } from '../lib/usageTracker';
 
 const router = Router();
 
@@ -727,6 +728,7 @@ router.get('/polls/:pollId/export', async (req: Request, res: Response) => {
         const csv = [headers.join(','), ...rows].join('\n');
 
         logger.info(`[Export] User ${session.user_id} exported poll ${pollId} (${votes.length} votes)`);
+        trackUsage({ source: 'dashboard', event_type: 'export', guild_id: poll.guild_id as string, user_id: session.user_id });
 
         return res.json({
             csv,

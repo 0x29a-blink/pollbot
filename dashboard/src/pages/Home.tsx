@@ -6,6 +6,7 @@ import { Activity, Users, BarChart3, Search, Filter, Server, Trophy, Medal, Refr
 import { useNavigate } from 'react-router-dom';
 import { VoteHistoryChart } from '../components/charts/VoteHistoryChart';
 import { LanguagePieChart } from '../components/charts/LanguagePieChart';
+import { UsageSourceChart } from '../components/charts/UsageSourceChart';
 import { Leaderboard } from '../components/Leaderboard';
 import { useAuth } from '../App';
 import { Modal } from '../components/ui/Modal';
@@ -528,6 +529,11 @@ export const Home: React.FC = () => {
                             </div>
                             <div className="chart-container" style={{ width: '100%', minHeight: '300px', minWidth: 0 }}>
                                 <LanguagePieChart />
+                            </div>
+                        </section>
+                        <section className="mt-8">
+                            <div className="chart-container" style={{ width: '100%', minHeight: '300px', minWidth: 0 }}>
+                                <UsageSourceChart />
                             </div>
                         </section>
 
