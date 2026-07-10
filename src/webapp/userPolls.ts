@@ -344,6 +344,134 @@ router.get('/votes', async (req: Request, res: Response) => {
     }
 });
 
+/**
+ * GET /api/user/guilds/:guildId/analytics
+ * Premium-gated per-guild vote analytics (activity per day, peak hours,
+ * top voters). Data flows through service_role RPCs — the anon key cannot
+ * call them (repo rule: users/votes reads go through the authenticated API).
+ */
+router.get('/guilds/:guildId/analytics', async (req: Request, res: Response) => {
+    const guildId = req.params.guildId as string;
+    if (!guildId) {
+        return res.status(400).json({ error: 'Guild ID is required' });
+    }
+
+    const session = await getSession(req);
+    if (!session) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const daysRaw = parseInt((req.query.days as string) ?? '30', 10);
+    const days = Number.isNaN(daysRaw) ? 30 : Math.min(Math.max(daysRaw, 1), 365);
+
+    try {
+        // Premium gate — same status/body shape as the voter-breakdown route
+        const premiumStatus = await checkPremiumStatus(session.user_id);
+        if (!premiumStatus.isPremium) {
+            return res.status(403).json({
+                error: 'Premium feature',
+                message: 'Vote on top.gg to unlock this feature',
+                voteUrl: TOPGG_VOTE_URL,
+            });
+        }
+
+        // Manage Server permission check (cached, then Discord)
+        const cachedPerm = getCachedPermission(session.user_id, guildId);
+        if (cachedPerm === false) {
+            return res.status(403).json({ error: 'You need Manage Server permission' });
+        }
+        if (cachedPerm === null) {
+            const discordResponse = await fetch(`${DISCORD_API_BASE}/users/@me/guilds`, {
+                headers: { Authorization: `Bearer ${session.access_token}` },
+            });
+            if (!discordResponse.ok) {
+                if (discordResponse.status === 401) {
+                    return res.status(401).json({ error: 'Discord token expired, please re-login' });
+                }
+                return res.status(503).json({ error: 'Discord API temporarily unavailable, please try again' });
+            }
+            const userGuilds: DiscordGuild[] = await discordResponse.json();
+            const targetGuild = userGuilds.find(g => g.id === guildId);
+            if (!targetGuild) {
+                setCachedPermission(session.user_id, guildId, false);
+                return res.status(403).json({ error: 'You are not a member of this server' });
+            }
+            const permissions = BigInt(targetGuild.permissions);
+            const hasManageGuild = (permissions & BigInt(MANAGE_GUILD)) !== BigInt(0) || targetGuild.owner;
+            setCachedPermission(session.user_id, guildId, hasManageGuild);
+            if (!hasManageGuild) {
+                return res.status(403).json({ error: 'You need Manage Server permission' });
+            }
+        }
+
+        // Fetch the three aggregates in parallel (service-role client)
+        const [activityRes, peakRes, topRes] = await Promise.all([
+            supabase.rpc('get_guild_vote_activity', { p_guild_id: guildId, p_days: days }),
+            supabase.rpc('get_guild_peak_hours', { p_guild_id: guildId, p_days: days }),
+            supabase.rpc('get_guild_top_voters', { p_guild_id: guildId, p_days: days, p_limit: 10 }),
+        ]);
+
+        if (activityRes.error || peakRes.error || topRes.error) {
+            logger.error('[Analytics] RPC failure:', activityRes.error || peakRes.error || topRes.error);
+            return res.status(500).json({ error: 'Failed to load analytics' });
+        }
+
+        // Enrich top voters with Discord usernames via the shared member cache
+        const topVoters = await Promise.all(
+            ((topRes.data ?? []) as { user_id: string; votes: number | string }[]).map(async (row) => {
+                let info = getCachedMember(guildId, row.user_id);
+                if (!info && BOT_TOKEN) {
+                    try {
+                        const memberRes = await fetch(
+                            `${DISCORD_API_BASE}/guilds/${guildId}/members/${row.user_id}`,
+                            { headers: { Authorization: `Bot ${BOT_TOKEN}` } }
+                        );
+                        if (memberRes.ok) {
+                            const member = await memberRes.json();
+                            info = {
+                                user_id: row.user_id,
+                                username: member.user?.username || 'Unknown',
+                                display_name: member.user?.global_name || member.user?.username || 'Unknown',
+                                nickname: member.nick || null,
+                                avatar_url: member.user?.avatar
+                                    ? `https://cdn.discordapp.com/avatars/${row.user_id}/${member.user.avatar}.png`
+                                    : null,
+                            };
+                        } else {
+                            info = {
+                                user_id: row.user_id,
+                                username: memberRes.status === 404 ? 'Left Server' : 'Unknown',
+                                display_name: memberRes.status === 404 ? 'Left Server' : 'Unknown',
+                                nickname: null,
+                                avatar_url: null,
+                            };
+                        }
+                        setCachedMember(guildId, row.user_id, info);
+                    } catch {
+                        info = null;
+                    }
+                }
+                return {
+                    user_id: row.user_id,
+                    username: info?.display_name ?? null,
+                    avatar_url: info?.avatar_url ?? null,
+                    votes: Number(row.votes),
+                };
+            })
+        );
+
+        return res.json({
+            days,
+            activity: (activityRes.data ?? []).map((r: any) => ({ day: r.day, votes: Number(r.votes), unique_voters: Number(r.unique_voters) })),
+            peakHours: (peakRes.data ?? []).map((r: any) => ({ hour: Number(r.hour), votes: Number(r.votes) })),
+            topVoters,
+        });
+    } catch (err) {
+        logger.error('[Analytics] Unexpected error:', err);
+        return res.status(500).json({ error: 'Failed to load analytics' });
+    }
+});
+
 router.get('/polls/:guildId', async (req: Request, res: Response) => {
     const guildId = req.params.guildId as string;
     // Support both cookie and header auth

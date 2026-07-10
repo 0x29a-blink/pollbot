@@ -8,6 +8,8 @@ interface PremiumGateModalProps {
     onClose: () => void;
     voteUrl: string;
     onRefresh: () => Promise<boolean>; // Returns true if now premium
+    /** Name of the gated feature (defaults preserve the original voter-breakdown copy). */
+    featureName?: string;
 }
 
 export const PremiumGateModal: React.FC<PremiumGateModalProps> = ({
@@ -15,6 +17,7 @@ export const PremiumGateModal: React.FC<PremiumGateModalProps> = ({
     onClose,
     voteUrl,
     onRefresh,
+    featureName = 'Voter Breakdown',
 }) => {
     const [checking, setChecking] = useState(false);
     const [checkResult, setCheckResult] = useState<'success' | 'failed' | null>(null);
@@ -66,7 +69,7 @@ export const PremiumGateModal: React.FC<PremiumGateModalProps> = ({
                     <div className="p-6">
                         <div className="text-center mb-6">
                             <p className="text-slate-300 mb-2">
-                                <strong className="text-white">Voter Breakdown</strong> is a premium feature.
+                                <strong className="text-white">{featureName}</strong> is a premium feature.
                             </p>
                             <p className="text-sm text-slate-400">
                                 Vote for Pollbot on top.gg to unlock this feature for <span className="text-amber-400 font-medium">12 hours</span>!

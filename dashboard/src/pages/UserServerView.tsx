@@ -11,6 +11,7 @@ import { PremiumGateModal } from '../components/PremiumGateModal';
 import { VoterViewModal } from '../components/VoterViewModal';
 import { ExportModal } from '../components/ExportModal';
 import { PermissionErrorBanner } from '../components/PermissionErrorBanner';
+import { GuildAnalyticsPanel } from '../components/charts/GuildAnalyticsPanel';
 import type { Poll, PollSettings, GuildInfo, VoterResponse, PremiumStatus, ExportResponse, VoteUpdate, PermissionError } from '../types';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { useToast } from '../components/ui/Toast';
@@ -437,6 +438,8 @@ export const UserServerView: React.FC = () => {
                         </div>
                     )}
                 </motion.div>
+
+                {guildId && <GuildAnalyticsPanel guildId={guildId} />}
             </main>
 
             {/* Edit Poll Modal */}
