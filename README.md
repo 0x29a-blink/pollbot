@@ -1,46 +1,72 @@
+<div align="center">
+
 # PollBot
 
-PollBot is an image-generating Discord polling bot built with TypeScript,
-discord.js, and Playwright. Instead of text embeds, every poll is rendered as a
-PNG by a headless-Chromium render service, with live vote counts, weighted
-voting, scheduled auto-close, localization, and a full web dashboard backed by
-Supabase (Postgres).
+### Polls your server will actually vote on.
 
-## Features
+PollBot renders every poll as a crisp, live-updating image — not a wall of embed
+text. Multi-select, weighted votes, private results, role-gated voting,
+scheduled auto-close, and a full web dashboard. One command and you're live.
 
-- Image-based polls: every poll and results view is rendered as a high-quality
-  image, updated live as votes come in (renders are coalesced per poll to stay
-  inside Discord rate limits).
-- Flexible voting: single- and multi-select (`min_votes` / `max_votes`),
-  role-restricted voting, and per-role vote weights configured globally
-  (`/config weights`) or per poll.
-- Scheduled auto-close: give a poll a duration (1 hour to 7 days) and a
-  DB-backed scheduler closes it on time, surviving restarts. Closes render the
-  final results and offer a Reopen button.
-- Web dashboard: server managers create, edit, duplicate, close, and export
-  polls in the browser; voters get a cross-server "My Votes" history. Admins
-  get global analytics (voting trends, peak hours, usage by surface, most
-  active servers).
-- Premium (Top.gg): voter breakdowns and per-server vote analytics unlock by
-  voting for the bot on Top.gg.
-- Exports: poll results as CSV, from the `/export-poll` command, right-click
-  context menus, or the dashboard.
-- Internationalization: locale configurable per server (`/config locale`);
-  English and Spanish ship today.
-- Usage telemetry: bot-vs-dashboard usage recorded in an aggregate-only events
-  table and charted for admins.
+[**Add to Discord**](https://discord.com/api/oauth2/authorize?client_id=911731627498041374&permissions=534992383040&scope=applications.commands%20bot) ·
+[**Dashboard**](https://pollbot.win) ·
+[**Vote on Top.gg**](https://top.gg/bot/911731627498041374) ·
+[**Support**](https://discord.gg/MYRqdNFQfk)
 
-## Architecture
+</div>
 
-| Piece | Where | What it does |
-|-------|-------|--------------|
-| Manager | `src/index.ts` | Verifies DB connectivity, then spawns Discord shards, the web server, and background services |
-| Shard client | `src/bot.ts` | Per-shard discord.js client; caches are capped to bound memory |
-| Web server | `src/webhook.ts`, `src/webapp/` | Express API for the dashboard (Discord OAuth sessions, CSRF), Top.gg vote webhook, cloudflared tunnels |
-| Render service | `src/services/renderService.ts` | HTTP service rendering poll images via a pooled headless Chromium (Playwright) |
-| Scheduler | `src/services/PollSchedulerService.ts` | Closes polls whose `ends_at` has passed (60-second tick, per-shard ownership) |
-| Dashboard | `dashboard/` | React 19 + Vite + Tailwind SPA served by the bot and talking to `/api` |
-| Database | `schema.sql`, `supabase/migrations/` | Supabase Postgres: tables, RLS policies, and aggregate RPC functions |
+---
+
+![Poll Example](https://i.imgur.com/hkZatLO.png)
+
+*`/poll title: Which feature did you like more? items: Feature 1, Feature 2, Feature 3 max_votes: 2` —
+that's the whole setup. The image redraws itself as votes land.*
+
+## Everything Discord's built-in polls can't do
+
+- **Image-rendered results.** Polls are drawn as polished images and redrawn
+  live with every vote — no plain-text embeds.
+- **Real multi-select.** Up to 25 options with min/max picks per voter —
+  "choose exactly 3" is one flag away.
+- **Weighted voting.** Give @Boosters 3 votes and @Members 1. Weights apply
+  everywhere, exports included.
+- **Private until close.** Hide running counts so nobody bandwagons — results
+  reveal when the poll closes.
+- **Auto-close on schedule.** Set a duration from 1 hour to 7 days and the poll
+  closes itself, on time, even through restarts.
+- **Threads and discussion.** Auto-attach a thread to any poll so the debate
+  stays next to the vote.
+- **Delegated control.** A dedicated Poll Manager role lets trusted members run
+  polls without admin permissions.
+- **Speaks your language.** Per-server locale via `/config locale` — English
+  and Spanish today.
+
+## Run everything from the browser
+
+The dashboard at [pollbot.win](https://pollbot.win) gives server managers and
+voters a home:
+
+- Live results and full voter lists
+- Create, edit, duplicate, close, and reopen polls remotely
+- One-click CSV export of any poll
+- "My Votes" — your voting history across every server
+- Vote analytics: activity trends, peak hours, and top voters per server
+  (premium — unlocked by voting for the bot on Top.gg)
+
+## Live in under ten seconds
+
+1. **Create** — `/poll title: Movie night items: Dune, Horror, Superhero` and
+   you're done.
+2. **Vote** — members pick from the menu under the poll; the image redraws with
+   every vote.
+3. **Close and export** — close manually or on schedule, reveal final results,
+   export the full breakdown to CSV.
+
+![Stats Example](https://i.imgur.com/ncnJ1VT.png)
+
+*`/stats` — bot health and usage, also rendered as an image.*
+
+---
 
 ## Commands
 
@@ -73,7 +99,10 @@ message.
 | `allow_exports` | Boolean | No | true | Allow members to export this poll's results |
 | `duration` | Choice | No | - | Auto-close after 1h, 6h, 12h, 24h, 48h, or 7 days |
 
-## Getting started
+## Getting started (self-hosting)
+
+Built with TypeScript, discord.js, and Playwright; data lives in Supabase
+(Postgres) and polls are rendered by a headless-Chromium render service.
 
 ### Prerequisites
 
