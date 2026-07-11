@@ -5,6 +5,23 @@ combined.log
 error.log
 dist
 setup.txt
+
+# Local reports
 HARDENING_REPORT.html
 EXECUTION_REPORT.html
 AUDIT_REPORT.html
+
+# Local tooling, editor, and agent files — never commit these
+CLAUDE.md
+.claude/
+.vscode/
+launch-test.cmd
+launch-test.ps1
+
+# Local planning and design notes
+plans/
+docs/
+
+# Host-specific deployment artifacts
+pollbot.service
+topgg-description.html

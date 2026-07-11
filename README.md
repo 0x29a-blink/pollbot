@@ -1,169 +1,177 @@
-# 🗳️ PollBot
+# PollBot
 
-PollBot is a feature-rich, image-generating Discord polling bot built with **TypeScript**, **Discord.js**, and **Playwright**. It moves beyond simple text embeds to create beautiful, shareable images for your polls, complete with live statistics, internationalization support, and robust management tools.
+PollBot is an image-generating Discord polling bot built with TypeScript,
+discord.js, and Playwright. Instead of text embeds, every poll is rendered as a
+PNG by a headless-Chromium render service, with live vote counts, weighted
+voting, scheduled auto-close, localization, and a full web dashboard backed by
+Supabase (Postgres).
 
-![PollBot Banner](https://via.placeholder.com/1200x400?text=PollBot+Feature+Banner)
+## Features
 
-## ✨ Features
+- Image-based polls: every poll and results view is rendered as a high-quality
+  image, updated live as votes come in (renders are coalesced per poll to stay
+  inside Discord rate limits).
+- Flexible voting: single- and multi-select (`min_votes` / `max_votes`),
+  role-restricted voting, and per-role vote weights configured globally
+  (`/config weights`) or per poll.
+- Scheduled auto-close: give a poll a duration (1 hour to 7 days) and a
+  DB-backed scheduler closes it on time, surviving restarts. Closes render the
+  final results and offer a Reopen button.
+- Web dashboard: server managers create, edit, duplicate, close, and export
+  polls in the browser; voters get a cross-server "My Votes" history. Admins
+  get global analytics (voting trends, peak hours, usage by surface, most
+  active servers).
+- Premium (Top.gg): voter breakdowns and per-server vote analytics unlock by
+  voting for the bot on Top.gg.
+- Exports: poll results as CSV, from the `/export-poll` command, right-click
+  context menus, or the dashboard.
+- Internationalization: locale configurable per server (`/config locale`);
+  English and Spanish ship today.
+- Usage telemetry: bot-vs-dashboard usage recorded in an aggregate-only events
+  table and charted for admins.
 
-- **🎨 Image-Based Polls**: Renders high-quality images for every poll, displaying options, descriptions, and creators in a clean, professional format.
-- **🔢 Flexible Voting**: 
-  - **Single & Multi-Select**: Configure minimum and maximum votes per user (`min_votes`, `max_votes`).
-  - **🔒 Role Restrictions**: Limit voting to specific roles (e.g., `@Members` only).
-  - **⚖️ Weighted Voting**: Assign voting power to roles (e.g., `@Admin` votes count as 5).
-  - **Dynamic Updates**: Images and vote counts update in real-time.
-- **🌍 Internationalization (i18n)**: Fully localized UI and messages. Supports multiple languages (configurable per server).
-- **🛠️ Advanced Management**:
-  - **Slash Commands**: `/poll`, `/close`, `/reopen`, `/config`.
-  - **Interactive Components**: Options to add "Close Poll" buttons directly to the poll message.
-  - **Thread Integration**: Automatically create a thread for discussion when a poll is created.
-- **📊 Visual Statistics**: View system performance and usage metrics with the `/stats` command.
-- **💾 Persistence**: Powered by Supabase for reliable data storage and state management.
+## Architecture
 
----
+| Piece | Where | What it does |
+|-------|-------|--------------|
+| Manager | `src/index.ts` | Verifies DB connectivity, then spawns Discord shards, the web server, and background services |
+| Shard client | `src/bot.ts` | Per-shard discord.js client; caches are capped to bound memory |
+| Web server | `src/webhook.ts`, `src/webapp/` | Express API for the dashboard (Discord OAuth sessions, CSRF), Top.gg vote webhook, cloudflared tunnels |
+| Render service | `src/services/renderService.ts` | HTTP service rendering poll images via a pooled headless Chromium (Playwright) |
+| Scheduler | `src/services/PollSchedulerService.ts` | Closes polls whose `ends_at` has passed (60-second tick, per-shard ownership) |
+| Dashboard | `dashboard/` | React 19 + Vite + Tailwind SPA served by the bot and talking to `/api` |
+| Database | `schema.sql`, `supabase/migrations/` | Supabase Postgres: tables, RLS policies, and aggregate RPC functions |
 
-## 🖼️ Visual Showcase
+## Commands
 
-### 📝 Creating a Poll
-PollBot generates a card for your poll, handling mentions, emojis, and long text gracefully.
+| Command | Description |
+|---------|-------------|
+| `/poll` | Create a poll (see options below) |
+| `/view` | Detailed results and voter breakdown (premium: unlocked by voting on Top.gg) |
+| `/export-poll` | Export a poll's votes as CSV |
+| `/close`, `/reopen` | Close or reopen a poll by message ID |
+| `/config` | Server settings: `poll-buttons`, `locale`, `weights (set/remove/view/clear)` |
+| `/stats` | Bot statistics image |
+| `/pollmanager` | Manage the Poll Manager role |
 
-![Poll Example](https://i.imgur.com/hkZatLO.png)\
-*/poll title: Which feature did you like more? items: Feature 1, Feature 2, Feature 3 max_votes: 2*\
-*Example: A multi-select poll asking for feedback, rendered as an image.*
+Right-click context-menu commands: "View Data" and "Export Results" on any poll
+message.
 
-### 📈 System Statistics
-Monitor your bot's health with a generated dashboard image.
+### /poll options
 
-![Stats Example](https://i.imgur.com/ncnJ1VT.png)\
-*Example: The `/stats` command output showing server count, uptime, and resource usage.*
+| Option | Type | Required | Default | Description |
+|--------|------|----------|---------|-------------|
+| `title` | String | Yes | - | Poll title (max 256 chars) |
+| `items` | String | Yes | - | Comma-separated options, max 25 (e.g. "Yes, No, Maybe") |
+| `description` | String | No | - | Additional context; user/role mentions are rendered in the image |
+| `max_votes` | Integer | No | 1 | Maximum selections per user |
+| `min_votes` | Integer | No | 1 | Minimum selections per user |
+| `public` | Boolean | No | true | If false, counts stay hidden until the poll closes |
+| `thread` | Boolean | No | false | Auto-create a discussion thread |
+| `allowed_role` | Role | No | - | Restrict voting to one role |
+| `close_button` | Boolean | No | true | Add a Close Poll button (subject to `/config poll-buttons`) |
+| `allow_exports` | Boolean | No | true | Allow members to export this poll's results |
+| `duration` | Choice | No | - | Auto-close after 1h, 6h, 12h, 24h, 48h, or 7 days |
 
----
-
-## 🚀 Getting Started
+## Getting started
 
 ### Prerequisites
 
-- **Node.js** (v18 or higher)
-- **Supabase Project** (PostgreSQL database)
-- **Discord Bot Token** & **Client ID**
+- Node.js 20 or newer (CI runs 22)
+- A Supabase project (or a local Supabase stack for development)
+- A Discord application with a bot token
 
-### Installation
+### Setup
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourusername/pollbot.git
-   cd pollbot
-   ```
+1. Install dependencies (the postinstall step downloads the Chromium build
+   used for rendering and compiles the backend):
 
-2. **Install Dependencies**
-   This project uses `playwright` for rendering, so we need to install browser binaries as well.
    ```bash
    npm install
-   # The postinstall script should run automatically, but if not:
-   npx playwright install chromium --with-deps
+   cd dashboard && npm install && cd ..
    ```
 
-3. **Configuration**
-   Copy the example environment file and fill in your credentials.
+2. Configure the environment:
+
    ```bash
-   cp .env.example .env
+   cp .env.example .env            # backend — see comments in the file
+   cp dashboard/.env.example dashboard/.env   # dashboard build-time vars
    ```
-   **`.env` variables** (see [`.env.example`](.env.example) for the full list):
-   - `DISCORD_TOKEN`: Your bot token.
-   - `DISCORD_CLIENT_ID`: Application ID.
-   - `SUPABASE_URL`: Your Supabase project URL.
-   - `SUPABASE_KEY`: Your Supabase **service_role** key (the backend bypasses RLS).
-   - `DEV_ONLY_MODE`: `true` or `false` (limits commands to a specific guild for testing).
-   - `DEV_GUILD_ID`: ID of the testing guild (required if DEV_ONLY_MODE is true).
-   - `NODE_ENV`: set to `production` on the deployed host (marks the session cookie Secure).
-   - **Dashboard OAuth**: `DISCORD_CLIENT_SECRET`, `DISCORD_OAUTH_REDIRECT_URI`, `DISCORD_ADMIN_IDS`.
-   - **Top.gg**: `TOPGG_TOKEN`, `TOPGG_WEBHOOK_AUTH` (the webhook is disabled if this is unset).
-   - **Tunnels**: `WEBHOOK_CLOUDFLARED_TOKEN`, `MAIN_CLOUDFLARED_TOKEN`.
 
-   The dashboard has its own [`dashboard/.env.example`](dashboard/.env.example)
-   (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`).
+   The important backend variables: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`,
+   `SUPABASE_URL`, `SUPABASE_KEY` (service_role key — keep secret), and for
+   the dashboard login `DISCORD_CLIENT_SECRET`, `DISCORD_OAUTH_REDIRECT_URI`,
+   `DISCORD_ADMIN_IDS`. Optional integrations: Top.gg (`TOPGG_TOKEN`,
+   `TOPGG_WEBHOOK_AUTH`) and cloudflared tunnel tokens.
 
-4. **Database Setup**
-   Execute the `schema.sql` file in your Supabase SQL editor to create the necessary tables (`polls`, `guild_settings`, `global_stats`, etc.).
+3. Set up the database: run `schema.sql` in the Supabase SQL editor on a fresh
+   project. On an existing database, apply the numbered files in
+   `supabase/migrations/` you have not run yet, in order.
 
-5. **Deploy Commands**
-   Register the slash commands with Discord.
+4. Register slash commands:
+
    ```bash
    npm run deploy
    ```
 
-6. **Start the Bot**
-   ```bash
-   # Development
-   npm run dev
+   With `DEV_ONLY_MODE=true` and `DEV_GUILD_ID` set, commands register only in
+   your test server (instant, and safe to iterate on); otherwise they register
+   globally.
 
-   # Production
-   npm run build
+5. Run:
+
+   ```bash
+   npm run dev      # development (ts-node)
+
+   npm run build    # production
    npm start
    ```
 
-### 🧪 Development & Verification
+   The dashboard is served by the bot itself from `dashboard/dist`, so build
+   it once (`cd dashboard && npm run build`) or use the Vite dev server for
+   hot reload (`cd dashboard && npm run dev`).
+
+## Development
 
 ```bash
 npm run typecheck   # tsc --noEmit (backend)
 npm test            # vitest unit tests
 npm run lint        # ESLint (advisory)
+npm run build       # compile + copy locales into dist/
+cd dashboard && npx tsc -b --noEmit && npm run build   # dashboard gates
 ```
 
-CI runs these plus the dashboard typecheck/build on every pull request. Database
-changes live in `schema.sql` and the numbered files in `supabase/migrations/`
-(applied manually in the Supabase SQL editor).
+CI runs the backend typecheck and tests plus the dashboard typecheck and build
+on every pull request.
 
----
+Always test against a dev bot and test guild (`DEV_ONLY_MODE=true`), never
+against production.
 
-## 🛠️ Commands
+### Database changes
 
-| Command | Description | Options |
-|---------|-------------|---------|
-| `/poll` | Create a new poll | `title`, `items`, `description`, `max_votes`, `min_votes`, `public`, `thread`, `allowed_role`, `close_button` |
-| `/view` | View detailed poll results, voter breakdown, and export (premium — unlocked by voting on Top.gg) | `poll_id` |
-| `/export` | Export a poll's votes as CSV | `poll_id` |
-| `/stats` | View bot statistics | None |
-| `/config` | Manage server settings | `poll-buttons`, `locale`, `weights (set/remove/view/clear)` |
-| `/close` | Close an active poll | `id` (Message ID of the poll) |
-| `/reopen` | Reopen a closed poll | `id` (Message ID of the poll) |
-| `/pollmanager` | Manage the Poll Manager role | role management options |
+`schema.sql` is the canonical schema. Every change ships as a new numbered
+file in `supabase/migrations/` and is mirrored into `schema.sql`; migrations
+are applied manually in the Supabase SQL editor (this project does not use the
+Supabase CLI migration history). RPC functions that read `users` or `votes`
+must `REVOKE ALL ... FROM PUBLIC` and grant only the roles that need them —
+the dashboard's anon key may only ever reach aggregate results.
 
-There are also right-click **context-menu** commands for viewing and exporting a
-poll message directly.
+## Deployment
 
-## 🖥️ Web Dashboard
+The production instance runs as a systemd service on Linux. A deploy is:
 
-A separate React SPA in [`dashboard/`](dashboard/) lets server managers create and
-manage polls, view voter breakdowns, and export results in a browser. It
-authenticates with Discord OAuth (httpOnly cookie sessions) and talks to the
-bot's Express API. Run it with `cd dashboard && npm install && npm run dev`
-(build with `npm run build`).
+```bash
+git pull
+npm ci && npm run build
+cd dashboard && npm ci && npm run build && cd ..
+npm run deploy      # only when slash commands changed
+# restart the service
+```
 
-### 🔍 `/poll` Options Detail
+Set `NODE_ENV=production` so the session cookie is marked Secure. The
+dashboard and Top.gg webhook are exposed through cloudflared tunnels
+configured by the `*_CLOUDFLARED_TOKEN` variables.
 
-| Option | Type | Required | Default | Description |
-|--------|------|----------|---------|-------------|
-| `title` | String | **Yes** | - | The main title of your poll text (max 256 chars). |
-| `items` | String | **Yes** | - | A comma-separated list of voting options (e.g., "Yes, No, Maybe"). Max 25 items. |
-| `max_votes` | Integer | No | `1` | The maximum number of choices a user can select (e.g., 2 for "Pick 2"). |
-| `min_votes` | Integer | No | `1` | The minimum number of choices a user must select. |
-| `description` | String | No | - | Additional context or details. |
-| `public` | Boolean | No | `True` | If `False`, vote counts are hidden from the results image until the poll is closed. |
-| `thread` | Boolean | No | `False` | If `True`, automatically starts a Discord thread. |
-| `allowed_role` | Role | No | - | Only users with this role can vote. |
-| `close_button`| Boolean | No | `True`* | If `True`, adds a "Close Poll" button. *Subject to server-wide `/config` settings.* |
+## License
 
----
-
-## ⚙️ Usage Tips
-
-- **Mentions**: You can mention users `@user` or roles `@role` in the description and they will be properly rendered in the image.
-- **Customization**: Use `/config locale lang:es` to switch the bot's language to Spanish (or other supported languages) for your server.
-- **Management**: If you accidentally close a poll, use `/reopen` with the message ID to resume voting.
-
----
-
-## 📜 License
-
-This project is licensed under the MIT License.
+MIT
