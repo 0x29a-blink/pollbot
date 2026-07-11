@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { VoteHistoryChart } from '../components/charts/VoteHistoryChart';
 import { LanguagePieChart } from '../components/charts/LanguagePieChart';
 import { UsageSourceChart } from '../components/charts/UsageSourceChart';
+import { PeakHoursChart } from '../components/charts/PeakHoursChart';
 import { Leaderboard } from '../components/Leaderboard';
 import { useAuth } from '../App';
 import { Modal } from '../components/ui/Modal';
@@ -42,6 +43,7 @@ export const Home: React.FC = () => {
     const [totalServerCount, setTotalServerCount] = useState(0);
     const [totalMembers, setTotalMembers] = useState(0);
     const [topCreators, setTopCreators] = useState<any[]>([]);
+    const [topActiveServers, setTopActiveServers] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('');
     const [showCurated, setShowCurated] = useState(false); // Only show servers with polls
@@ -105,22 +107,28 @@ export const Home: React.FC = () => {
             }
 
 
-            // Top Creators
-            const { data: pollsData } = await supabase.from('polls').select('creator_id');
-            if (pollsData) {
-                const counts: Record<string, number> = {};
-                pollsData.forEach((p: any) => counts[p.creator_id] = (counts[p.creator_id] || 0) + 1);
-                const sorted = Object.entries(counts)
-                    .sort(([, a], [, b]) => b - a)
-                    .slice(0, 5)
-                    .map(([id, count]) => ({
-                        id,
-                        label: `User ${id.substr(0, 8)}...`,
-                        subLabel: 'Poll Creator',
-                        value: count,
-                        onClick: () => navigate(`/polls?user_id=${id}`) // Add navigation
-                    }));
-                setTopCreators(sorted);
+            // Top Creators — aggregate RPC; the old raw-row tally silently
+            // capped at PostgREST's 1000-row response limit.
+            const { data: creatorsData } = await supabase.rpc('get_top_creators', { p_limit: 5 });
+            if (creatorsData) {
+                setTopCreators((creatorsData as { creator_id: string; polls: number | string }[]).map(c => ({
+                    id: c.creator_id,
+                    label: `User ${c.creator_id.substr(0, 8)}...`,
+                    subLabel: 'Poll Creator',
+                    value: Number(c.polls),
+                    onClick: () => navigate(`/polls?user_id=${c.creator_id}`)
+                })));
+            }
+
+            // Most active servers by vote volume (last 30 days)
+            const { data: topGuildsData } = await supabase.rpc('get_top_guilds', { p_days: 30, p_limit: 5 });
+            if (topGuildsData) {
+                setTopActiveServers((topGuildsData as { guild_id: string; guild_name: string; votes: number | string; polls: number | string }[]).map(g => ({
+                    id: g.guild_id,
+                    label: g.guild_name,
+                    subLabel: `${Number(g.polls)} poll${Number(g.polls) === 1 ? '' : 's'} voted on`,
+                    value: `${Number(g.votes)} votes`,
+                })));
             }
 
         } catch (error) {
@@ -531,14 +539,17 @@ export const Home: React.FC = () => {
                                 <LanguagePieChart />
                             </div>
                         </section>
-                        <section className="mt-8">
+                        <section className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
                             <div className="chart-container" style={{ width: '100%', minHeight: '300px', minWidth: 0 }}>
                                 <UsageSourceChart />
+                            </div>
+                            <div className="chart-container" style={{ width: '100%', minHeight: '300px', minWidth: 0 }}>
+                                <PeakHoursChart />
                             </div>
                         </section>
 
                         {/* Leaderboards */}
-                        <section className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
+                        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
                             <Leaderboard
                                 title="Top Servers"
                                 icon={<Trophy className="w-5 h-5" />}
@@ -550,6 +561,7 @@ export const Home: React.FC = () => {
                                     value: g.member_count.toLocaleString()
                                 }))}
                             />
+                            <Leaderboard title="Most Active Servers" icon={<Activity className="w-5 h-5" />} color="indigo" items={topActiveServers} />
                             <Leaderboard title="Top Creators" icon={<Medal className="w-5 h-5" />} color="amber" items={topCreators} />
                         </section>
 
