@@ -114,36 +114,120 @@ app.post('/api/admin/sync-guilds', async (req, res) => {
     }
 });
 
-// Admin-only voter analytics. get_top_botlist_voters returns per-user rows
-// (ids + usernames), so it is service_role-only in Postgres and must be
-// reached through this authenticated route — never the anon key.
+// Admin-only voter analytics. Everything below returns per-user rows or
+// admin-grade aggregates, so the backing RPCs are service_role-only in
+// Postgres and must be reached through these authenticated routes — never
+// the anon key.
+
+/** Shared query-param parsing for the voter analytics routes. */
+function parseAnalyticsParams(req: express.Request): { days: number; source: string | null } {
+    const days = Math.min(Math.max(parseInt(String(req.query.days), 10) || 30, 1), 365);
+    const rawSource = String(req.query.source ?? '');
+    const source = rawSource === 'topgg' || rawSource === 'discordforge' ? rawSource : null;
+    return { days, source };
+}
+
 app.get('/api/admin/vote-analytics', async (req, res) => {
     const adminUserId = await getAdminUserId(req);
     if (!adminUserId) {
         return res.status(403).json({ error: 'Admin access required' });
     }
 
-    const days = Math.min(Math.max(parseInt(String(req.query.days), 10) || 30, 1), 365);
+    const { days, source } = parseAnalyticsParams(req);
 
     try {
-        const [topVoters, totals] = await Promise.all([
+        const [analytics, topVoters, totals, recent] = await Promise.all([
+            supabase.rpc('get_botlist_analytics', { p_days: days, p_source: source }),
             supabase.rpc('get_top_botlist_voters', { p_days: days, p_limit: 10 }),
             supabase.rpc('get_botlist_vote_totals'),
+            supabase
+                .from('botlist_votes')
+                .select('id, source, user_id, username, avatar_url, weight, is_test, is_weekend, weekly_votes, total_votes, created_at')
+                .order('id', { ascending: false })
+                .limit(20),
         ]);
 
-        if (topVoters.error || totals.error) {
-            logger.error('[Webhook] Vote analytics query failed:', topVoters.error || totals.error);
+        const failed = analytics.error || topVoters.error || totals.error || recent.error;
+        if (failed) {
+            logger.error('[Webhook] Vote analytics query failed:', failed);
             return res.status(500).json({ error: 'Failed to load vote analytics' });
         }
 
         return res.json({
             days,
+            source,
+            analytics: analytics.data ?? {},
             topVoters: topVoters.data ?? [],
             totals: totals.data ?? [],
+            recentVotes: recent.data ?? [],
         });
     } catch (error) {
         logger.error('[Webhook] Vote analytics failed:', error);
         return res.status(500).json({ error: 'Failed to load vote analytics' });
+    }
+});
+
+// Paginated, searchable voter directory (votes, streaks, DiscordForge
+// weekly/total counters, premium status).
+app.get('/api/admin/voters', async (req, res) => {
+    const adminUserId = await getAdminUserId(req);
+    if (!adminUserId) {
+        return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const { days, source } = parseAnalyticsParams(req);
+    const search = String(req.query.search ?? '').trim().slice(0, 100) || null;
+    const sortRaw = String(req.query.sort ?? 'votes');
+    const sort = ['votes', 'streak', 'weighted', 'recent'].includes(sortRaw) ? sortRaw : 'votes';
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit), 10) || 25, 1), 100);
+    const offset = Math.max(parseInt(String(req.query.offset), 10) || 0, 0);
+
+    try {
+        const { data, error } = await supabase.rpc('get_botlist_voter_directory', {
+            p_days: days,
+            p_source: source,
+            p_search: search,
+            p_sort: sort,
+            p_limit: limit,
+            p_offset: offset,
+        });
+
+        if (error) {
+            logger.error('[Webhook] Voter directory query failed:', error);
+            return res.status(500).json({ error: 'Failed to load voter directory' });
+        }
+
+        return res.json({ days, source, sort, limit, offset, ...(data ?? { total: 0, rows: [] }) });
+    } catch (error) {
+        logger.error('[Webhook] Voter directory failed:', error);
+        return res.status(500).json({ error: 'Failed to load voter directory' });
+    }
+});
+
+// Per-poll supporter card: how this poll's voters relate to the bot lists.
+app.get('/api/admin/polls/:pollId/supporters', async (req, res) => {
+    const adminUserId = await getAdminUserId(req);
+    if (!adminUserId) {
+        return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const pollId = String(req.params.pollId);
+    if (!/^\d{1,25}$/.test(pollId)) {
+        return res.status(400).json({ error: 'Invalid poll id' });
+    }
+
+    try {
+        const { data, error } = await supabase.rpc('get_botlist_poll_supporters', { p_poll_id: pollId });
+
+        if (error) {
+            logger.error(`[Webhook] Poll supporters query failed for ${pollId}:`, error);
+            return res.status(500).json({ error: 'Failed to load poll supporters' });
+        }
+
+        return res.json(data ?? {});
+    } catch (error) {
+        logger.error(`[Webhook] Poll supporters failed for ${pollId}:`, error);
+        return res.status(500).json({ error: 'Failed to load poll supporters' });
     }
 });
 

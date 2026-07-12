@@ -1,20 +1,59 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Calendar, Settings, Info, PieChart, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
+import { Calendar, Settings, Info, PieChart, ChevronDown, ChevronUp, ExternalLink, Heart, CheckCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { apiFetch } from '../utils/api';
 import type { Poll } from '../types';
+
+interface PollSupporters {
+    total_voters: number;
+    premium_now: number;
+    supporters: number;
+    supporters_30d: number;
+    topgg: number;
+    discordforge: number;
+    top_supporters: {
+        user_id: string;
+        username: string | null;
+        avatar_url: string | null;
+        botlist_votes: number;
+        sources: string[];
+        last_botlist_vote_at: string;
+    }[];
+}
 
 interface PollCardProps {
     poll: Poll;
     votes?: Record<number, number>;
     guild?: { name: string; icon_url: string | null; id: string }; // Optional guild info
+    /** Admin-only: show the bot-list supporter breakdown card on expand. */
+    showSupporterCard?: boolean;
 }
 
-export const PollCard: React.FC<PollCardProps> = ({ poll, votes = {}, guild }) => {
+export const PollCard: React.FC<PollCardProps> = ({ poll, votes = {}, guild, showSupporterCard = false }) => {
     const [isExpanded, setIsExpanded] = useState(false);
+    const [supporters, setSupporters] = useState<PollSupporters | null>(null);
+    const [supportersFailed, setSupportersFailed] = useState(false);
     const navigate = useNavigate();
     const options = Array.isArray(poll.options) ? poll.options : [];
     const totalVotes = Object.values(votes).reduce((sum, count) => sum + count, 0);
+
+    // Lazy-load the supporter breakdown the first time the card is expanded.
+    useEffect(() => {
+        if (!showSupporterCard || !isExpanded || supporters || supportersFailed) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await apiFetch(`/api/admin/polls/${poll.message_id}/supporters`);
+                if (cancelled) return;
+                if (!res.ok) { setSupportersFailed(true); return; }
+                setSupporters(await res.json());
+            } catch {
+                if (!cancelled) setSupportersFailed(true);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [showSupporterCard, isExpanded, supporters, supportersFailed, poll.message_id]);
 
     return (
         <motion.div
@@ -137,12 +176,78 @@ export const PollCard: React.FC<PollCardProps> = ({ poll, votes = {}, guild }) =
                                 </div>
                             </div>
                         </div>
+
+                        {/* Bot-list supporter breakdown (admin polls view only) */}
+                        {showSupporterCard && (
+                            <div className="px-6 pb-6">
+                                <div className="bg-slate-900/30 rounded-xl p-4 text-sm">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className="p-1.5 bg-rose-500/10 rounded-lg text-rose-400">
+                                            <Heart className="w-4 h-4" />
+                                        </div>
+                                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Bot-List Supporters Among Voters</h4>
+                                    </div>
+
+                                    {supportersFailed ? (
+                                        <p className="text-xs text-slate-500">Couldn't load supporter data.</p>
+                                    ) : !supporters ? (
+                                        <div className="h-10 rounded-lg animate-pulse bg-slate-800/40" />
+                                    ) : (
+                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                                <SupporterStat label="Poll voters" value={supporters.total_voters} />
+                                                <SupporterStat
+                                                    label="Premium now"
+                                                    value={supporters.premium_now}
+                                                    accent="text-emerald-400"
+                                                    icon={<CheckCircle className="w-3 h-3" />}
+                                                />
+                                                <SupporterStat label="Top.gg voters" value={supporters.topgg} accent="text-rose-400" />
+                                                <SupporterStat label="DiscordForge" value={supporters.discordforge} accent="text-indigo-400" />
+                                                <div className="col-span-2 sm:col-span-4 text-[11px] text-slate-500">
+                                                    {supporters.total_voters > 0
+                                                        ? `${Math.round((supporters.supporters / supporters.total_voters) * 100)}% of this poll's voters have ever voted for the bot (${supporters.supporters_30d} in the last 30 days).`
+                                                        : 'No votes on this poll yet.'}
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <div className="text-[10px] uppercase text-slate-500 font-bold mb-2">Top supporters in this poll</div>
+                                                {supporters.top_supporters.length === 0 ? (
+                                                    <p className="text-xs text-slate-500">None of this poll's voters have voted on a bot list.</p>
+                                                ) : (
+                                                    <ul className="space-y-1.5">
+                                                        {supporters.top_supporters.map(s => (
+                                                            <li key={s.user_id} className="flex items-center gap-2 bg-slate-900/40 border border-slate-800 rounded-lg px-2.5 py-1.5">
+                                                                {s.avatar_url
+                                                                    ? <img src={s.avatar_url} alt="" className="w-5 h-5 rounded-full" />
+                                                                    : <div className="w-5 h-5 rounded-full bg-slate-700" />}
+                                                                <span className="text-xs text-slate-200 truncate flex-1">{s.username || s.user_id}</span>
+                                                                <span className="text-[10px] text-slate-500">{s.sources.join(' · ')}</span>
+                                                                <span className="text-xs font-bold text-white">{s.botlist_votes}</span>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
                     </motion.div>
                 )}
             </AnimatePresence>
         </motion.div>
     );
 };
+
+const SupporterStat = ({ label, value, accent = 'text-white', icon }: { label: string; value: number; accent?: string; icon?: React.ReactNode }) => (
+    <div className="bg-slate-900/40 border border-slate-800 rounded-lg px-3 py-2">
+        <div className="text-[10px] uppercase text-slate-500 font-bold">{label}</div>
+        <div className={`text-lg font-bold ${accent} inline-flex items-center gap-1.5`}>{icon}{value.toLocaleString()}</div>
+    </div>
+);
 
 /** Resolve a role ID to its display name via role_metadata, falling back to the ID. */
 const roleName = (poll: Poll) => (id: string) => poll.settings?.role_metadata?.[id]?.name ?? id;

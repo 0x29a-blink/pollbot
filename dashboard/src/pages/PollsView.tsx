@@ -247,6 +247,7 @@ export const PollsView: React.FC = () => {
                                 poll={poll}
                                 votes={voteCounts[poll.message_id] || {}}
                                 guild={poll.guilds}
+                                showSupporterCard
                             />
                         ))
                     )}
