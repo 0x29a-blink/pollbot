@@ -264,6 +264,7 @@ RETURNS BIGINT
 LANGUAGE SQL
 STABLE
 SECURITY DEFINER
+SET search_path = public
 AS $$
     SELECT COALESCE(SUM(member_count), 0)::BIGINT FROM guilds WHERE left_at IS NULL;
 $$;
@@ -274,6 +275,7 @@ GRANT EXECUTE ON FUNCTION get_total_members() TO public;
 CREATE OR REPLACE FUNCTION bump_peak_active_servers(p_current INT)
 RETURNS INT
 LANGUAGE SQL
+SET search_path = public
 AS $$
     UPDATE global_stats
     SET peak_active_servers = GREATEST(peak_active_servers, p_current),
@@ -295,6 +297,7 @@ CREATE OR REPLACE FUNCTION replace_vote(
 )
 RETURNS void
 LANGUAGE plpgsql
+SET search_path = public
 AS $$
 BEGIN
     DELETE FROM votes WHERE poll_id = p_poll_id AND user_id = p_user_id;
@@ -316,6 +319,7 @@ RETURNS BIGINT
 LANGUAGE SQL
 STABLE
 SECURITY DEFINER
+SET search_path = public
 AS $$
     SELECT COUNT(*)::BIGINT
     FROM users
@@ -331,6 +335,7 @@ RETURNS TABLE(guild_id TEXT, vote_count BIGINT)
 LANGUAGE SQL
 STABLE
 SECURITY DEFINER
+SET search_path = public
 AS $$
     SELECT p.guild_id, COUNT(v.*)::BIGINT AS vote_count
     FROM votes v
@@ -347,6 +352,7 @@ RETURNS TABLE(day DATE, source TEXT, events BIGINT, unique_users BIGINT)
 LANGUAGE SQL
 STABLE
 SECURITY DEFINER
+SET search_path = public
 AS $$
     SELECT created_at::DATE AS day, usage_events.source, COUNT(*)::BIGINT, COUNT(DISTINCT user_id)::BIGINT
     FROM usage_events
@@ -362,7 +368,7 @@ GRANT EXECUTE ON FUNCTION get_usage_summary(INT) TO anon, authenticated, service
 
 CREATE OR REPLACE FUNCTION get_guild_vote_activity(p_guild_id TEXT, p_days INT DEFAULT 30)
 RETURNS TABLE(day DATE, votes BIGINT, unique_voters BIGINT)
-LANGUAGE SQL STABLE SECURITY DEFINER AS $$
+LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     SELECT v.created_at::DATE, COUNT(*)::BIGINT, COUNT(DISTINCT v.user_id)::BIGINT
     FROM votes v JOIN polls p ON v.poll_id = p.message_id
     WHERE p.guild_id = p_guild_id
@@ -375,7 +381,7 @@ GRANT EXECUTE ON FUNCTION get_guild_vote_activity(TEXT, INT) TO service_role;
 
 CREATE OR REPLACE FUNCTION get_guild_peak_hours(p_guild_id TEXT, p_days INT DEFAULT 30)
 RETURNS TABLE(hour INT, votes BIGINT)
-LANGUAGE SQL STABLE SECURITY DEFINER AS $$
+LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     SELECT EXTRACT(HOUR FROM v.created_at)::INT, COUNT(*)::BIGINT
     FROM votes v JOIN polls p ON v.poll_id = p.message_id
     WHERE p.guild_id = p_guild_id
@@ -388,7 +394,7 @@ GRANT EXECUTE ON FUNCTION get_guild_peak_hours(TEXT, INT) TO service_role;
 
 CREATE OR REPLACE FUNCTION get_guild_top_voters(p_guild_id TEXT, p_days INT DEFAULT 30, p_limit INT DEFAULT 10)
 RETURNS TABLE(user_id TEXT, votes BIGINT)
-LANGUAGE SQL STABLE SECURITY DEFINER AS $$
+LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     SELECT v.user_id, COUNT(*)::BIGINT
     FROM votes v JOIN polls p ON v.poll_id = p.message_id
     WHERE p.guild_id = p_guild_id
@@ -403,7 +409,7 @@ GRANT EXECUTE ON FUNCTION get_guild_top_voters(TEXT, INT, INT) TO service_role;
 
 CREATE OR REPLACE FUNCTION get_vote_history(p_days INT DEFAULT 7)
 RETURNS TABLE(day DATE, votes BIGINT, unique_voters BIGINT, polls_created BIGINT)
-LANGUAGE SQL STABLE SECURITY DEFINER AS $$
+LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     WITH bounds AS (
         SELECT LEAST(GREATEST(p_days, 1), 365) AS n
     ),
@@ -440,7 +446,7 @@ GRANT EXECUTE ON FUNCTION get_vote_history(INT) TO anon, authenticated, service_
 
 CREATE OR REPLACE FUNCTION get_global_peak_hours(p_days INT DEFAULT 30)
 RETURNS TABLE(hour INT, votes BIGINT)
-LANGUAGE SQL STABLE SECURITY DEFINER AS $$
+LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     WITH hours AS (
         SELECT generate_series(0, 23) AS hour
     ),
@@ -460,7 +466,7 @@ GRANT EXECUTE ON FUNCTION get_global_peak_hours(INT) TO anon, authenticated, ser
 
 CREATE OR REPLACE FUNCTION get_top_guilds(p_days INT DEFAULT 30, p_limit INT DEFAULT 5)
 RETURNS TABLE(guild_id TEXT, guild_name TEXT, votes BIGINT, polls BIGINT)
-LANGUAGE SQL STABLE SECURITY DEFINER AS $$
+LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     SELECT p.guild_id,
            COALESCE(g.name, 'Unknown Server'),
            COUNT(*)::BIGINT AS votes,
@@ -480,7 +486,7 @@ GRANT EXECUTE ON FUNCTION get_top_guilds(INT, INT) TO anon, authenticated, servi
 
 CREATE OR REPLACE FUNCTION get_top_creators(p_limit INT DEFAULT 5)
 RETURNS TABLE(creator_id TEXT, polls BIGINT)
-LANGUAGE SQL STABLE SECURITY DEFINER AS $$
+LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     SELECT po.creator_id, COUNT(*)::BIGINT
     FROM polls po
     WHERE po.creator_id IS NOT NULL
@@ -496,7 +502,7 @@ GRANT EXECUTE ON FUNCTION get_top_creators(INT) TO anon, authenticated, service_
 -- ({ poll_id: { option_index: count } }) — immune to PostgREST's 1000-row cap.
 CREATE OR REPLACE FUNCTION get_poll_vote_counts(p_poll_ids TEXT[])
 RETURNS JSONB
-LANGUAGE SQL STABLE SECURITY DEFINER AS $$
+LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     SELECT COALESCE(jsonb_object_agg(per_poll.poll_id, per_poll.counts), '{}'::jsonb)
     FROM (
         SELECT c.poll_id, jsonb_object_agg(c.option_index::text, c.cnt) AS counts
@@ -522,7 +528,7 @@ GRANT EXECUTE ON FUNCTION get_poll_vote_counts(TEXT[]) TO anon, authenticated, s
 -- anon may execute, matching the get_vote_history pattern. Test votes excluded.
 CREATE OR REPLACE FUNCTION get_botlist_vote_history(p_days INT DEFAULT 30)
 RETURNS TABLE(day DATE, source TEXT, votes BIGINT, unique_voters BIGINT)
-LANGUAGE SQL STABLE SECURITY DEFINER AS $$
+LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     WITH bounds AS (
         SELECT LEAST(GREATEST(p_days, 1), 365) AS n
     ),
@@ -559,7 +565,7 @@ GRANT EXECUTE ON FUNCTION get_botlist_vote_history(INT) TO anon, authenticated, 
 -- Headline totals per source (all-time and last 30 days). Aggregates only.
 CREATE OR REPLACE FUNCTION get_botlist_vote_totals()
 RETURNS TABLE(source TEXT, votes_total BIGINT, voters_total BIGINT, votes_30d BIGINT, voters_30d BIGINT)
-LANGUAGE SQL STABLE SECURITY DEFINER AS $$
+LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     SELECT s.source,
            COALESCE(COUNT(bv.*) FILTER (WHERE TRUE), 0)::BIGINT,
            COALESCE(COUNT(DISTINCT bv.user_id), 0)::BIGINT,
@@ -579,7 +585,7 @@ GRANT EXECUTE ON FUNCTION get_botlist_vote_totals() TO anon, authenticated, serv
 -- admin API, never the anon key.
 CREATE OR REPLACE FUNCTION get_top_botlist_voters(p_days INT DEFAULT 30, p_limit INT DEFAULT 10)
 RETURNS TABLE(user_id TEXT, username TEXT, avatar_url TEXT, votes BIGINT, sources TEXT[], last_vote_at TIMESTAMPTZ)
-LANGUAGE SQL STABLE SECURITY DEFINER AS $$
+LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     SELECT bv.user_id,
            COALESCE(u.username, MAX(bv.username) FILTER (WHERE bv.username IS NOT NULL)),
            COALESCE(u.avatar_url, MAX(bv.avatar_url) FILTER (WHERE bv.avatar_url IS NOT NULL)),
@@ -618,7 +624,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE votes;
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION get_botlist_analytics(p_days INT DEFAULT 30, p_source TEXT DEFAULT NULL)
 RETURNS JSONB
-LANGUAGE SQL STABLE SECURITY DEFINER AS $$
+LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
 WITH bounds AS (
     SELECT LEAST(GREATEST(p_days, 1), 365) AS n
 ),
@@ -736,7 +742,7 @@ CREATE OR REPLACE FUNCTION get_botlist_voter_directory(
     p_offset INT DEFAULT 0
 )
 RETURNS JSONB
-LANGUAGE SQL STABLE SECURITY DEFINER AS $$
+LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
 WITH bounds AS (
     SELECT LEAST(GREATEST(p_days, 1), 365) AS n
 ),
@@ -818,7 +824,7 @@ GRANT EXECUTE ON FUNCTION get_botlist_voter_directory(INT, TEXT, TEXT, TEXT, INT
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION get_botlist_poll_supporters(p_poll_id TEXT)
 RETURNS JSONB
-LANGUAGE SQL STABLE SECURITY DEFINER AS $$
+LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
 WITH pv AS (
     SELECT DISTINCT user_id FROM votes WHERE poll_id = p_poll_id
 ),

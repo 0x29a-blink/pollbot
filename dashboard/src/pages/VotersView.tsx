@@ -71,7 +71,7 @@ export const VotersView: React.FC = () => {
     const navigate = useNavigate();
 
     // Shared filters
-    const [days, setDays] = useState<7 | 30 | 90>(30);
+    const [days, setDays] = useState<7 | 30 | 90 | 365>(30);
     const [source, setSource] = useState<SourceFilter>('all');
 
     // Analytics bundle
@@ -203,6 +203,7 @@ export const VotersView: React.FC = () => {
                             <FilterButton active={days === 7} onClick={() => setDays(7)}>7D</FilterButton>
                             <FilterButton active={days === 30} onClick={() => setDays(30)}>30D</FilterButton>
                             <FilterButton active={days === 90} onClick={() => setDays(90)}>90D</FilterButton>
+                            <FilterButton active={days === 365} onClick={() => setDays(365)}>1Y</FilterButton>
                         </div>
                         <div className="flex bg-slate-900/50 p-1 rounded-lg border border-slate-700">
                             <FilterButton active={source === 'all'} onClick={() => setSource('all')}>All Lists</FilterButton>

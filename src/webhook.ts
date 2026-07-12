@@ -143,7 +143,9 @@ app.get('/api/admin/vote-analytics', async (req, res) => {
             supabase
                 .from('botlist_votes')
                 .select('id, source, user_id, username, avatar_url, weight, is_test, is_weekend, weekly_votes, total_votes, created_at')
-                .order('id', { ascending: false })
+                // By vote time, not insert order — backfilled legacy rows have
+                // high ids but historical timestamps and must not lead the feed.
+                .order('created_at', { ascending: false })
                 .limit(20),
         ]);
 
