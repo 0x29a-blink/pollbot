@@ -91,9 +91,17 @@ function startServices() {
 
         manager.on('shardCreate', shard => logger.info(`[Manager] Launched shard ${shard.id}`));
 
+        // Bot-list posting is skipped in dev mode: the real API keys may be
+        // present in a local .env, and a dev run must never report the test
+        // bot's stats to the live Top.gg/DiscordForge listings.
+        const devOnlyMode = process.env.DEV_ONLY_MODE === 'true';
+        if (devOnlyMode) {
+            logger.info('[Manager] DEV_ONLY_MODE — skipping Top.gg/DiscordForge stat posting.');
+        }
+
         // Integrated Top.gg AutoPoster
         const topggToken = process.env.TOPGG_TOKEN;
-        if (topggToken) {
+        if (topggToken && !devOnlyMode) {
             const ap = AutoPoster(topggToken, manager);
             ap.on('posted', () => {
                 logger.debug('[AutoPoster] Posted stats to Top.gg!');
@@ -105,7 +113,7 @@ function startServices() {
 
         // DiscordForge stats + heartbeat + command sync (own client, no SDK)
         const discordForgeKey = process.env.DISCORDFORGE_API_KEY;
-        if (discordForgeKey) {
+        if (discordForgeKey && !devOnlyMode) {
             import('./services/BotListService').then(({ BotListService }) => {
                 new BotListService(manager, discordForgeKey).start();
             }).catch(err => {
