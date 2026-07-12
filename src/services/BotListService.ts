@@ -79,14 +79,25 @@ export class BotListService {
                 ? Routes.applicationGuildCommands(clientId, devGuildId)
                 : Routes.applicationCommands(clientId);
 
-            const commands = await rest.get(route) as unknown[];
+            const commands = await rest.get(route) as any[];
             if (!Array.isArray(commands) || commands.length === 0) {
                 logger.warn('[BotList] No registered commands found to sync to DiscordForge.');
                 return;
             }
 
-            await this.forge.syncCommands(commands);
-            logger.info(`[BotList] Synced ${commands.length} commands to DiscordForge.`);
+            // DiscordForge rejects commands without a description, which is
+            // exactly what context-menu commands (type 2/3) are. Only slash
+            // commands (type 1 / CHAT_INPUT) belong on the listing.
+            const syncable = commands.filter(c =>
+                (c?.type ?? 1) === 1 && typeof c?.description === 'string' && c.description.length > 0
+            );
+            if (syncable.length === 0) {
+                logger.warn('[BotList] No slash commands with descriptions found to sync to DiscordForge.');
+                return;
+            }
+
+            await this.forge.syncCommands(syncable);
+            logger.info(`[BotList] Synced ${syncable.length}/${commands.length} commands to DiscordForge.`);
         } catch (err) {
             logger.error('[BotList] Failed to sync commands to DiscordForge:', err);
         }
