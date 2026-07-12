@@ -306,7 +306,7 @@ END;
 $$;
 
 -- Only the bot (service_role) may replace votes; deny the default PUBLIC grant.
-REVOKE ALL ON FUNCTION replace_vote(TEXT, TEXT, INTEGER[], INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION replace_vote(TEXT, TEXT, INTEGER[], INTEGER) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION replace_vote(TEXT, TEXT, INTEGER[], INTEGER) TO service_role;
 
 -- Aggregate stats for the public dashboard (return only counts, never per-user
@@ -370,7 +370,7 @@ LANGUAGE SQL STABLE SECURITY DEFINER AS $$
     GROUP BY 1 ORDER BY 1;
 $$;
 
-REVOKE ALL ON FUNCTION get_guild_vote_activity(TEXT, INT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION get_guild_vote_activity(TEXT, INT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_guild_vote_activity(TEXT, INT) TO service_role;
 
 CREATE OR REPLACE FUNCTION get_guild_peak_hours(p_guild_id TEXT, p_days INT DEFAULT 30)
@@ -383,7 +383,7 @@ LANGUAGE SQL STABLE SECURITY DEFINER AS $$
     GROUP BY 1 ORDER BY 1;
 $$;
 
-REVOKE ALL ON FUNCTION get_guild_peak_hours(TEXT, INT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION get_guild_peak_hours(TEXT, INT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_guild_peak_hours(TEXT, INT) TO service_role;
 
 CREATE OR REPLACE FUNCTION get_guild_top_voters(p_guild_id TEXT, p_days INT DEFAULT 30, p_limit INT DEFAULT 10)
@@ -396,7 +396,7 @@ LANGUAGE SQL STABLE SECURITY DEFINER AS $$
     GROUP BY 1 ORDER BY 2 DESC LIMIT LEAST(GREATEST(p_limit, 1), 25);
 $$;
 
-REVOKE ALL ON FUNCTION get_guild_top_voters(TEXT, INT, INT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION get_guild_top_voters(TEXT, INT, INT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_guild_top_voters(TEXT, INT, INT) TO service_role;
 
 -- Admin dashboard analytics (aggregates only — anon may execute)
@@ -595,7 +595,7 @@ LANGUAGE SQL STABLE SECURITY DEFINER AS $$
     LIMIT LEAST(GREATEST(p_limit, 1), 100);
 $$;
 
-REVOKE ALL ON FUNCTION get_top_botlist_voters(INT, INT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION get_top_botlist_voters(INT, INT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_top_botlist_voters(INT, INT) TO service_role;
 
 -- ============================================================================
