@@ -10,6 +10,7 @@ setup.txt
 HARDENING_REPORT.html
 EXECUTION_REPORT.html
 AUDIT_REPORT.html
+BOTLIST_INTEGRATION_REPORT.html
 
 # Local tooling, editor, and agent files — never commit these
 CLAUDE.md

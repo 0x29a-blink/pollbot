@@ -103,6 +103,18 @@ function startServices() {
             });
         }
 
+        // DiscordForge stats + heartbeat + command sync (own client, no SDK)
+        const discordForgeKey = process.env.DISCORDFORGE_API_KEY;
+        if (discordForgeKey) {
+            import('./services/BotListService').then(({ BotListService }) => {
+                new BotListService(manager, discordForgeKey).start();
+            }).catch(err => {
+                logger.error('[Manager] Failed to start BotListService:', err);
+            });
+        } else {
+            logger.info('[Manager] DISCORDFORGE_API_KEY not set — DiscordForge posting disabled.');
+        }
+
         // 4. Start Webhook Server (Top.gg & Cloudflare Tunnel)
         setTimeout(() => {
             logger.info(`[Manager] Checking Tunnel Tokens: Webhook=${process.env.WEBHOOK_CLOUDFLARED_TOKEN ? 'EXISTS' : 'MISSING'}, Main=${process.env.MAIN_CLOUDFLARED_TOKEN ? 'EXISTS' : 'MISSING'}`);
