@@ -1,6 +1,6 @@
 import { Client, Events, Guild } from 'discord.js';
 import { logger } from '../lib/logger';
-import { upsertGuildRow, guildToRow } from '../lib/guildUtils';
+import { upsertGuildRow, upsertGuildRows, guildToRow } from '../lib/guildUtils';
 import { shardIdForGuild } from '../lib/shardUtils';
 import { supabase } from '../lib/db';
 
@@ -53,10 +53,13 @@ export class GuildSyncService {
     // Make this public so it can be called externally
     public async syncAllGuilds() {
         const guilds = this.client.guilds.cache;
-        for (const [id, guild] of guilds) {
-            await this.syncGuild(guild);
+        // Batched, not one request per guild — see UPSERT_CHUNK_SIZE.
+        const ok = await upsertGuildRows(guilds.map(guildToRow));
+        if (ok) {
+            logger.info(`[GuildSync] Synced ${guilds.size} guilds.`);
+        } else {
+            logger.error(`[GuildSync] Sync of ${guilds.size} guilds completed with errors.`);
         }
-        logger.info(`[GuildSync] Synced ${guilds.size} guilds.`);
     }
 
     /**
