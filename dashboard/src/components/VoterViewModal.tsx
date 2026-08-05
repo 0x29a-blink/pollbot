@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2, Users, Copy, Check, ChevronLeft, ChevronRight, User } from 'lucide-react';
 import { Modal } from './ui/Modal';
 
-import type { VoterInfo, VoteUpdate } from '../types';
+import type { VoterInfo } from '../types';
 
 interface VoterViewModalProps {
     isOpen: boolean;
@@ -17,7 +17,6 @@ interface VoterViewModalProps {
         total_voters: number;
         voters: VoterInfo[];
     }>;
-    lastVoteUpdate?: VoteUpdate | null;
 }
 
 export const VoterViewModal: React.FC<VoterViewModalProps> = ({
@@ -27,7 +26,6 @@ export const VoterViewModal: React.FC<VoterViewModalProps> = ({
     pollTitle,
     options,
     fetchVoters,
-    lastVoteUpdate,
 }) => {
     const [selectedOption, setSelectedOption] = useState(0);
     const [loading, setLoading] = useState(false);
@@ -50,42 +48,25 @@ export const VoterViewModal: React.FC<VoterViewModalProps> = ({
         }
     }, [isOpen, selectedOption]);
 
-    // Handle realtime updates
+    // Keep the open list fresh. Previously this reacted to a realtime vote feed
+    // delivered over the public anon key; voter identity is admin/owner data, so
+    // it now comes only from the authenticated fetchVoters endpoint.
     useEffect(() => {
-        if (isOpen && lastVoteUpdate) {
-            // Optimistic update if valid vote, matches current poll AND current option
-            if (lastVoteUpdate.poll_id === pollId && lastVoteUpdate.option_index === selectedOption && lastVoteUpdate.user_id) {
-                // Check if already in list
-                const exists = voters.some(v => v.user_id === lastVoteUpdate.user_id);
-                if (!exists) {
-                    // Add temporary voter
-                    const tempVoter: VoterInfo = {
-                        user_id: lastVoteUpdate.user_id,
-                        username: 'New Voter...',
-                        display_name: 'Loading...',
-                        nickname: null,
-                        avatar_url: null
-                    };
-                    setVoters(prev => [tempVoter, ...prev]);
-                    setTotalVoters(prev => prev + 1);
-                }
-            }
+        if (!isOpen) return;
 
-            // Only refresh if the update is for this poll
-            if (lastVoteUpdate.poll_id === pollId) {
-                // Debounce the full refresh
-                const timer = setTimeout(() => {
-                    loadVoters(selectedOption);
-                }, 2000);
-                return () => clearTimeout(timer);
-            }
-        }
-    }, [lastVoteUpdate, pollId]);
+        const interval = setInterval(() => {
+            if (document.visibilityState === 'visible') loadVoters(selectedOption, false);
+        }, 15000);
 
-    const loadVoters = async (optionIndex: number) => {
-        setLoading(true);
+        return () => clearInterval(interval);
+    }, [isOpen, pollId, selectedOption]);
+
+    const loadVoters = async (optionIndex: number, resetPage: boolean = true) => {
+        // Background refreshes keep the reader where they are; only an explicit
+        // open/option change jumps back to the first page.
+        setLoading(resetPage);
         setError(null);
-        setCurrentPage(0);
+        if (resetPage) setCurrentPage(0);
         try {
             const data = await fetchVoters(optionIndex);
             setVoters(data.voters);

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, Legend } from 'recharts';
-import { supabase } from '../../lib/supabase';
+import { adminSupabase } from '../../lib/supabase';
 import { apiFetch } from '../../utils/api';
 import { motion } from 'framer-motion';
 import { Heart, Trophy } from 'lucide-react';
@@ -61,7 +61,7 @@ export const BotListVotesPanel: React.FC = () => {
             setLoading(true);
             try {
                 const [historyRes, adminRes] = await Promise.all([
-                    supabase.rpc('get_botlist_vote_history', { p_days: days }),
+                    adminSupabase.rpc('get_botlist_vote_history', { p_days: days }),
                     apiFetch(`/api/admin/vote-analytics?days=${days}`),
                 ]);
                 if (cancelled) return;

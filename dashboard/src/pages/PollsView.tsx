@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { adminSupabase } from '../lib/supabase';
 import { ArrowLeft, SortDesc, SortAsc, TrendingUp, X, BarChart3, Search } from 'lucide-react';
 import { PollCard } from '../components/PollCard';
 import { FilterButton } from '../components/ui/FilterButton';
@@ -62,7 +62,7 @@ export const PollsView: React.FC = () => {
             const start = (pageToFetch - 1) * pageSize;
             const end = start + pageSize - 1;
 
-            let query = supabase
+            let query = adminSupabase
                 .from('polls')
                 .select('*, guilds(id, name, icon_url)', reset ? { count: 'exact' } : {})
                 .range(start, end);
@@ -97,7 +97,7 @@ export const PollsView: React.FC = () => {
                 // truncates at PostgREST's 1000-row cap on vote-heavy batches.
                 const pollIds = pollsData.map(p => p.message_id);
                 if (pollIds.length > 0) {
-                    const { data: countsData } = await supabase.rpc('get_poll_vote_counts', { p_poll_ids: pollIds });
+                    const { data: countsData } = await adminSupabase.rpc('get_poll_vote_counts', { p_poll_ids: pollIds });
                     if (reqId !== requestRef.current) return;
                     if (countsData) {
                         setVoteCounts(prev => (reset ? countsData : { ...prev, ...countsData }));

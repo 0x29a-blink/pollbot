@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, Line, ComposedChart, Legend } from 'recharts';
-import { supabase } from '../../lib/supabase';
+import { adminSupabase } from '../../lib/supabase';
 import { motion } from 'framer-motion';
 import { TrendingUp } from 'lucide-react';
 import { FilterButton } from '../ui/FilterButton';
@@ -35,7 +35,7 @@ export const VoteHistoryChart: React.FC = () => {
         (async () => {
             setLoading(true);
             try {
-                const { data: rows, error } = await supabase.rpc('get_vote_history', { p_days: days });
+                const { data: rows, error } = await adminSupabase.rpc('get_vote_history', { p_days: days });
                 if (cancelled) return;
                 if (error || !rows) {
                     setFailed(true);

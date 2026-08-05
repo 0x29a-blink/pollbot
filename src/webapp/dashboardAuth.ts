@@ -360,7 +360,11 @@ router.get('/me', async (req: Request, res: Response) => {
         username: user.username,
         discriminator: user.discriminator,
         avatar_url: user.avatar_url,
-        is_admin: user.is_admin || ADMIN_IDS.includes(user.id),
+        // Authority is the env allowlist, never the stored column: `users` is a
+        // bot-writable table, so treating its is_admin as a grant would make a
+        // stray write an admin promotion. The column is kept in sync for
+        // display/debugging only.
+        is_admin: ADMIN_IDS.includes(user.id),
     });
 });
 

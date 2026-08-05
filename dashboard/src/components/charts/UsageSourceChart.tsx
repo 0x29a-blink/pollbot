@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, Legend } from 'recharts';
-import { supabase } from '../../lib/supabase';
+import { adminSupabase } from '../../lib/supabase';
 import { motion } from 'framer-motion';
 import { GitCompareArrows } from 'lucide-react';
 
@@ -34,7 +34,7 @@ export const UsageSourceChart: React.FC = () => {
 
     const fetchSummary = async () => {
         try {
-            const { data: rows, error } = await supabase.rpc('get_usage_summary', { p_days: 30 });
+            const { data: rows, error } = await adminSupabase.rpc('get_usage_summary', { p_days: 30 });
             if (error || !rows || rows.length === 0) {
                 setEmpty(true);
                 return;

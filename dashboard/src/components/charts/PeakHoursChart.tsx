@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Bar, BarChart } from 'recharts';
-import { supabase } from '../../lib/supabase';
+import { adminSupabase } from '../../lib/supabase';
 import { motion } from 'framer-motion';
 import { Clock } from 'lucide-react';
 
@@ -27,7 +27,7 @@ export const PeakHoursChart: React.FC = () => {
         let cancelled = false;
         (async () => {
             try {
-                const { data: rows, error } = await supabase.rpc('get_global_peak_hours', { p_days: 30 });
+                const { data: rows, error } = await adminSupabase.rpc('get_global_peak_hours', { p_days: 30 });
                 if (cancelled) return;
                 if (error || !rows) {
                     setFailed(true);

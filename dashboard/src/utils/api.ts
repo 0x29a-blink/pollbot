@@ -9,7 +9,7 @@ const CSRF_HEADER_NAME = 'x-csrf-token';
 /**
  * Get CSRF token from cookie
  */
-function getCsrfToken(): string | null {
+export function getCsrfToken(): string | null {
     const cookies = document.cookie.split(';');
     for (const cookie of cookies) {
         const [name, value] = cookie.trim().split('=');

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { supabase } from '../../lib/supabase';
+import { adminSupabase } from '../../lib/supabase';
 import { motion } from 'framer-motion';
 import { Globe } from 'lucide-react';
 
@@ -19,7 +19,7 @@ export const LanguagePieChart: React.FC = () => {
             // Note: In a real scenario, we'd group by SQL, but Supabase JS client doesn't support easy GROUP BY aggregation directly without RPC or raw SQL.
             // For now, fetching all settings is fine for small scale, or we should use an RPC. Assuming small scale for telemetry.
             // Fetch locales from all connected guilds
-            const { data: guilds } = await supabase
+            const { data: guilds } = await adminSupabase
                 .from('guilds')
                 .select('locale');
 

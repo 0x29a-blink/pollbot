@@ -1,6 +1,6 @@
 import SimpleSolutionsLogo from '../assets/simplesolutions.webp';
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase, adminSupabase } from '../lib/supabase';
 import { motion } from 'framer-motion';
 import { Activity, Users, BarChart3, Search, Filter, Server, Trophy, Medal, RefreshCw, Shield, Plus, ExternalLink, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -58,43 +58,55 @@ export const Home: React.FC = () => {
 
     const ITEMS_PER_PAGE = 24;
 
+    // Everything below is admin-only telemetry. Non-admins never render it, so
+    // don't fetch it either — the backend would reject them anyway.
+    const isAdmin = !!user?.is_admin;
+
     useEffect(() => {
+        if (!isAdmin) {
+            setLoading(false);
+            return;
+        }
+
         fetchData(); // Initial load
 
+        // Only `global_stats` is still readable with the public anon key, and
+        // the bot's counters update it on every poll and vote — so one channel
+        // on that row is an adequate "something changed" signal. The old
+        // subscription listened on polls/votes/guilds directly, which required
+        // those tables to be world-readable.
         const channel = supabase
             .channel('dashboard-updates')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'polls' }, () => fetchData())
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'votes' }, () => fetchData())
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'guilds' }, () => fetchData())
             .on('postgres_changes', { event: '*', schema: 'public', table: 'global_stats' }, () => fetchData())
             .subscribe();
 
         return () => {
             supabase.removeChannel(channel);
         };
-    }, []);
+    }, [isAdmin]);
 
     // Effect to refetch guilds when filters/page change
     useEffect(() => {
+        if (!isAdmin) return;
         fetchGuildsList();
-    }, [page, filter, sort, showCurated]);
+    }, [isAdmin, page, filter, sort, showCurated]);
 
     const fetchData = async () => {
         try {
             // Global Stats
-            const { data: statsData } = await supabase.from('global_stats').select('*').eq('id', 1).single();
+            const { data: statsData } = await adminSupabase.from('global_stats').select('*').eq('id', 1).single();
             if (statsData) setStats(statsData);
 
             // Active Premium Users — via aggregate RPC so we don't need blanket
             // read on the `users` table from the public anon key.
-            const { data: activeVoterCount } = await supabase.rpc('get_active_voter_count');
+            const { data: activeVoterCount } = await adminSupabase.rpc('get_active_voter_count');
             if (activeVoterCount !== null && activeVoterCount !== undefined) {
                 setActivePremiumCount(Number(activeVoterCount));
             }
 
             // Calculations for Totals (Servers & Members)
             // Current server count — excludes guilds the bot has left
-            const { count: totalGuildCount } = await supabase
+            const { count: totalGuildCount } = await adminSupabase
                 .from('guilds')
                 .select('id', { count: 'exact', head: true })
                 .is('left_at', null);
@@ -102,7 +114,7 @@ export const Home: React.FC = () => {
 
             // Get true total members using RPC function (avoids 1000 row limit approximation).
             // Coerce: Postgres BIGINT aggregates can arrive as strings.
-            const { data: memberSumData } = await supabase.rpc('get_total_members');
+            const { data: memberSumData } = await adminSupabase.rpc('get_total_members');
             if (memberSumData !== null && memberSumData !== undefined) {
                 setTotalMembers(Number(memberSumData));
             }
@@ -110,7 +122,7 @@ export const Home: React.FC = () => {
 
             // Top Creators — aggregate RPC; the old raw-row tally silently
             // capped at PostgREST's 1000-row response limit.
-            const { data: creatorsData } = await supabase.rpc('get_top_creators', { p_limit: 5 });
+            const { data: creatorsData } = await adminSupabase.rpc('get_top_creators', { p_limit: 5 });
             if (creatorsData) {
                 setTopCreators((creatorsData as { creator_id: string; polls: number | string }[]).map(c => ({
                     id: c.creator_id,
@@ -122,7 +134,7 @@ export const Home: React.FC = () => {
             }
 
             // Most active servers by vote volume (last 30 days)
-            const { data: topGuildsData } = await supabase.rpc('get_top_guilds', { p_days: 30, p_limit: 5 });
+            const { data: topGuildsData } = await adminSupabase.rpc('get_top_guilds', { p_days: 30, p_limit: 5 });
             if (topGuildsData) {
                 setTopActiveServers((topGuildsData as { guild_id: string; guild_name: string; votes: number | string; polls: number | string }[]).map(g => ({
                     id: g.guild_id,
@@ -284,7 +296,7 @@ export const Home: React.FC = () => {
 
             // If Curated, first fetch valid guild IDs manually to avoid Foreign Key issues (400 Bad Request)
             if (showCurated) {
-                const { data: pollGuilds, error: pollError } = await supabase
+                const { data: pollGuilds, error: pollError } = await adminSupabase
                     .from('polls')
                     .select('guild_id');
 
@@ -299,7 +311,7 @@ export const Home: React.FC = () => {
             }
 
             // Exclude guilds the bot has left (left_at set on GuildDelete)
-            let query = supabase.from('guilds').select('*', { count: 'exact' }).is('left_at', null);
+            let query = adminSupabase.from('guilds').select('*', { count: 'exact' }).is('left_at', null);
 
             // Apply manual filter if needed
             if (showCurated) {
@@ -325,7 +337,7 @@ export const Home: React.FC = () => {
             // Advanced Analytics Sorting (Client-side mainly since no DB views yet)
             if (sort === 'polls_desc' || sort === 'ratio_desc') {
                 // Fetch ALL polls to aggregate stats (Heavy operation, but needed for this specific filter)
-                const { data: allPolls } = await supabase.from('polls').select('guild_id, message_id');
+                const { data: allPolls } = await adminSupabase.from('polls').select('guild_id, message_id');
 
                 if (allPolls) {
                     const guildStats: Record<string, { polls: number, votes: number }> = {};
@@ -337,7 +349,7 @@ export const Home: React.FC = () => {
                     // For Ratio, we need votes too — via aggregate RPC (guild_id ->
                     // vote_count) so the anon key doesn't need blanket read on `votes`.
                     if (sort === 'ratio_desc') {
-                        const { data: guildVoteCounts } = await supabase.rpc('get_guild_vote_counts');
+                        const { data: guildVoteCounts } = await adminSupabase.rpc('get_guild_vote_counts');
 
                         if (guildVoteCounts) {
                             (guildVoteCounts as { guild_id: string; vote_count: number }[]).forEach(row => {

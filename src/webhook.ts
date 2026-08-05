@@ -58,28 +58,14 @@ app.get('/health', (req, res) => {
     res.status(200).send('OK');
 });
 
+// Admin-scoped PostgREST proxy. The dashboard's admin-only reads go through
+// this instead of querying Supabase directly with the public anon key.
+import { adminDataRouter } from './webapp/adminData';
+import { getAdminUserId } from './webapp/adminAuth';
+app.use('/api/admin/db', adminDataRouter);
+
 // Admin-only endpoint to sync all guilds from Discord
 // This triggers all shards to re-fetch guild data
-const ADMIN_IDS = (process.env.DISCORD_ADMIN_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
-
-// Resolve the admin user behind a request, or null. Supports both cookie and
-// header auth like the dashboard's apiFetch.
-async function getAdminUserId(req: express.Request): Promise<string | null> {
-    const cookieSession = req.cookies?.['pollbot_session'];
-    const headerSession = req.headers.authorization?.replace('Bearer ', '');
-    const sessionId = cookieSession || headerSession;
-    if (!sessionId) return null;
-
-    const { data: session } = await supabase
-        .from('dashboard_sessions')
-        .select('user_id')
-        .eq('id', sessionId)
-        .single();
-
-    if (!session || !ADMIN_IDS.includes(session.user_id)) return null;
-    return session.user_id;
-}
-
 app.post('/api/admin/sync-guilds', async (req, res) => {
     const adminUserId = await getAdminUserId(req);
     if (!adminUserId) {

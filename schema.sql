@@ -196,18 +196,20 @@ CREATE POLICY "Service role full access" ON usage_events FOR ALL TO service_role
 -- botlist_votes: service_role only; deliberately NO public read (rows contain user_ids)
 CREATE POLICY "Service role full access" ON botlist_votes FOR ALL TO service_role USING (true) WITH CHECK (true);
 
--- Public read access for telemetry panel (uses anon key)
-CREATE POLICY "Public read access" ON polls FOR SELECT USING (true);
-CREATE POLICY "Public read access" ON votes FOR SELECT USING (true);
+-- global_stats: the one publicly readable table. A single row of aggregate
+-- counters, no per-user data. The dashboard also subscribes to it as a
+-- lightweight "something changed" realtime signal.
 CREATE POLICY "Public read access" ON global_stats FOR SELECT USING (true);
-CREATE POLICY "Public read access" ON users FOR SELECT USING (true);
 
--- guild_settings: public read, service_role write
-CREATE POLICY "Public read access" ON guild_settings FOR SELECT USING (true);
+-- polls / votes / users / guilds / guild_settings: service_role only.
+--
+-- These previously carried `FOR SELECT USING (true)` for the telemetry panel,
+-- which reached them from the browser with the anon key. The anon key ships in
+-- the dashboard bundle, so that made vote-to-voter mappings, Discord user
+-- records and every server's poll text readable by anyone with curl. The panel
+-- is admin-only; it now reads through the backend's /api/admin/db proxy, which
+-- checks the session against DISCORD_ADMIN_IDS and uses the service key.
 CREATE POLICY "Service role write access" ON guild_settings FOR ALL TO service_role USING (true) WITH CHECK (true);
-
--- guilds: public read, service_role write  
-CREATE POLICY "Public read access" ON guilds FOR SELECT USING (true);
 CREATE POLICY "Service role write access" ON guilds FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- ============================================================================
@@ -254,6 +256,13 @@ AFTER INSERT ON votes
 FOR EACH ROW
 EXECUTE FUNCTION update_global_vote_count();
 
+-- Triggers fire as the table owner, so revoking direct EXECUTE does not affect
+-- them; it only stops an anonymous caller invoking these over PostgREST.
+REVOKE ALL ON FUNCTION update_global_poll_count() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION update_global_vote_count() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION update_global_poll_count() TO service_role;
+GRANT EXECUTE ON FUNCTION update_global_vote_count() TO service_role;
+
 -- ============================================================================
 -- RPC FUNCTIONS
 -- ============================================================================
@@ -269,7 +278,8 @@ AS $$
     SELECT COALESCE(SUM(member_count), 0)::BIGINT FROM guilds WHERE left_at IS NULL;
 $$;
 
-GRANT EXECUTE ON FUNCTION get_total_members() TO public;
+REVOKE ALL ON FUNCTION get_total_members() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_total_members() TO service_role;
 
 -- Atomic peak update: GREATEST server-side, no read-modify-write race.
 CREATE OR REPLACE FUNCTION bump_peak_active_servers(p_current INT)
@@ -284,7 +294,7 @@ AS $$
     RETURNING peak_active_servers;
 $$;
 
-REVOKE ALL ON FUNCTION bump_peak_active_servers(INT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION bump_peak_active_servers(INT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION bump_peak_active_servers(INT) TO service_role;
 
 -- Atomically replace a user's votes on a poll (delete old + insert new in one
@@ -327,8 +337,8 @@ AS $$
       AND last_vote_at > NOW() - INTERVAL '13 hours';
 $$;
 
-REVOKE ALL ON FUNCTION get_active_voter_count() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION get_active_voter_count() TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION get_active_voter_count() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_active_voter_count() TO service_role;
 
 CREATE OR REPLACE FUNCTION get_guild_vote_counts()
 RETURNS TABLE(guild_id TEXT, vote_count BIGINT)
@@ -343,8 +353,8 @@ AS $$
     GROUP BY p.guild_id;
 $$;
 
-REVOKE ALL ON FUNCTION get_guild_vote_counts() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION get_guild_vote_counts() TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION get_guild_vote_counts() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_guild_vote_counts() TO service_role;
 
 -- Bot vs dashboard usage per day (aggregates only, no user_ids exposed)
 CREATE OR REPLACE FUNCTION get_usage_summary(p_days INT DEFAULT 30)
@@ -361,8 +371,8 @@ AS $$
     ORDER BY 1;
 $$;
 
-REVOKE ALL ON FUNCTION get_usage_summary(INT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION get_usage_summary(INT) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION get_usage_summary(INT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_usage_summary(INT) TO service_role;
 
 -- Premium Vote Analytics (service_role ONLY — reached via the authenticated API)
 
@@ -441,8 +451,8 @@ LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     ORDER BY d.day;
 $$;
 
-REVOKE ALL ON FUNCTION get_vote_history(INT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION get_vote_history(INT) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION get_vote_history(INT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_vote_history(INT) TO service_role;
 
 CREATE OR REPLACE FUNCTION get_global_peak_hours(p_days INT DEFAULT 30)
 RETURNS TABLE(hour INT, votes BIGINT)
@@ -461,8 +471,8 @@ LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     ORDER BY h.hour;
 $$;
 
-REVOKE ALL ON FUNCTION get_global_peak_hours(INT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION get_global_peak_hours(INT) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION get_global_peak_hours(INT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_global_peak_hours(INT) TO service_role;
 
 CREATE OR REPLACE FUNCTION get_top_guilds(p_days INT DEFAULT 30, p_limit INT DEFAULT 5)
 RETURNS TABLE(guild_id TEXT, guild_name TEXT, votes BIGINT, polls BIGINT)
@@ -481,8 +491,8 @@ LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     LIMIT LEAST(GREATEST(p_limit, 1), 25);
 $$;
 
-REVOKE ALL ON FUNCTION get_top_guilds(INT, INT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION get_top_guilds(INT, INT) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION get_top_guilds(INT, INT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_top_guilds(INT, INT) TO service_role;
 
 CREATE OR REPLACE FUNCTION get_top_creators(p_limit INT DEFAULT 5)
 RETURNS TABLE(creator_id TEXT, polls BIGINT)
@@ -495,8 +505,8 @@ LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     LIMIT LEAST(GREATEST(p_limit, 1), 25);
 $$;
 
-REVOKE ALL ON FUNCTION get_top_creators(INT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION get_top_creators(INT) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION get_top_creators(INT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_top_creators(INT) TO service_role;
 
 -- Batch vote counts for poll list views as a single JSONB value
 -- ({ poll_id: { option_index: count } }) — immune to PostgREST's 1000-row cap.
@@ -516,8 +526,8 @@ LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     ) per_poll;
 $$;
 
-REVOKE ALL ON FUNCTION get_poll_vote_counts(TEXT[]) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION get_poll_vote_counts(TEXT[]) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION get_poll_vote_counts(TEXT[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_poll_vote_counts(TEXT[]) TO service_role;
 
 -- ============================================================================
 -- Bot-list vote analytics (Top.gg + DiscordForge)
@@ -559,8 +569,8 @@ LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     ORDER BY d.day, s.source;
 $$;
 
-REVOKE ALL ON FUNCTION get_botlist_vote_history(INT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION get_botlist_vote_history(INT) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION get_botlist_vote_history(INT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_botlist_vote_history(INT) TO service_role;
 
 -- Headline totals per source (all-time and last 30 days). Aggregates only.
 CREATE OR REPLACE FUNCTION get_botlist_vote_totals()
@@ -577,8 +587,8 @@ LANGUAGE SQL STABLE SECURITY DEFINER SET search_path = public AS $$
     ORDER BY s.source;
 $$;
 
-REVOKE ALL ON FUNCTION get_botlist_vote_totals() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION get_botlist_vote_totals() TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION get_botlist_vote_totals() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_botlist_vote_totals() TO service_role;
 
 -- Top bot-list voters with identity (user id, username) — per-user rows, so
 -- service_role ONLY; the dashboard reaches this through the authenticated

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { adminSupabase } from '../lib/supabase';
 import { ArrowLeft, BarChart3 } from 'lucide-react';
 import { PollCard } from '../components/PollCard';
 import { FilterButton } from '../components/ui/FilterButton';
@@ -26,7 +26,7 @@ export const ServerView: React.FC = () => {
         setLoading(true);
         try {
             // Fetch Guild
-            const { data: guildData } = await supabase
+            const { data: guildData } = await adminSupabase
                 .from('guilds')
                 .select('*')
                 .eq('id', guildId)
@@ -34,7 +34,7 @@ export const ServerView: React.FC = () => {
             setGuild(guildData);
 
             // Fetch Polls
-            const { data: pollsData } = await supabase
+            const { data: pollsData } = await adminSupabase
                 .from('polls')
                 .select('*')
                 .eq('guild_id', guildId)
@@ -46,7 +46,7 @@ export const ServerView: React.FC = () => {
                 // Fetch Votes for these polls
                 const pollIds = pollsData.map(p => p.message_id);
                 if (pollIds.length > 0) {
-                    const { data: votesData } = await supabase
+                    const { data: votesData } = await adminSupabase
                         .from('votes')
                         .select('poll_id, option_index')
                         .in('poll_id', pollIds);

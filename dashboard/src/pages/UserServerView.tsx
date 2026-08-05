@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, BarChart3, Users, Clock, CheckCircle, XCircle, Loader2, Eye, EyeOff, Vote, Download, Lock, MessageSquare, Settings2, Scale, HelpCircle, ChevronDown, ChevronUp, Plus, FileSpreadsheet, CopyPlus } from 'lucide-react';
-import { supabase } from '../lib/supabase';
 import { useAuth } from '../App';
 import { CreatePollModal } from '../components/CreatePollModal';
 import { EditPollModal } from '../components/EditPollModal';
@@ -12,7 +11,7 @@ import { VoterViewModal } from '../components/VoterViewModal';
 import { ExportModal } from '../components/ExportModal';
 import { PermissionErrorBanner } from '../components/PermissionErrorBanner';
 import { GuildAnalyticsPanel } from '../components/charts/GuildAnalyticsPanel';
-import type { Poll, PollSettings, GuildInfo, VoterResponse, PremiumStatus, ExportResponse, VoteUpdate, PermissionError } from '../types';
+import type { Poll, PollSettings, GuildInfo, VoterResponse, PremiumStatus, ExportResponse, PermissionError } from '../types';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { useToast } from '../components/ui/Toast';
 import { apiFetch } from '../utils/api';
@@ -32,7 +31,6 @@ export const UserServerView: React.FC = () => {
     const [duplicateSource, setDuplicateSource] = useState<Poll | null>(null);
     const [editingPoll, setEditingPoll] = useState<Poll | null>(null);
     const [roles, setRoles] = useState<Array<{ id: string; name: string; color: number; position: number; managed: boolean }>>([]);
-    const [lastVoteUpdate, setLastVoteUpdate] = useState<VoteUpdate | null>(null);
     const [permissionError, setPermissionError] = useState<PermissionError | null>(null);
     const [cooldownPolls, setCooldownPolls] = useState<Map<string, number>>(new Map()); // pollId -> cooldown end timestamp
     const hasInitialData = useRef(false);
@@ -43,55 +41,28 @@ export const UserServerView: React.FC = () => {
         }
     }, [guildId]);
 
-    // Real-time subscription for new polls and vote updates
+    // Live-ish refresh while the tab is in the foreground.
+    //
+    // This used to be a Supabase realtime subscription on `polls` and `votes`
+    // using the anon key. That only worked because both tables were readable by
+    // anyone, and the `votes` leg had no guild filter at all — every browser on
+    // the dashboard received a live feed of every vote cast in every server,
+    // voter ids included. Those tables are admin-only now, so refresh through
+    // the authenticated API instead, which already scopes to this guild.
     useEffect(() => {
         if (!guildId) return;
 
-        const channel = supabase
-            .channel(`user-polls-${guildId}`)
-            // Listen for new/updated polls in this guild
-            .on('postgres_changes',
-                { event: '*', schema: 'public', table: 'polls', filter: `guild_id=eq.${guildId}` },
-                () => {
-                    // Refetch polls when any poll changes (silent refresh)
-                    fetchPolls(false);
-                }
-            )
-            // Listen for vote changes
-            .on('postgres_changes',
-                { event: '*', schema: 'public', table: 'votes' },
-                (payload) => {
-                    // Refetch polls to get updated vote counts (silent refresh)
-                    fetchPolls(false);
+        const REFRESH_MS = 12000;
+        const tick = () => {
+            if (document.visibilityState === 'visible') fetchPolls(false);
+        };
 
-                    // On new vote (INSERT), pass payload details for optimistic UI
-                    const newVote = payload.new as any;
-                    const oldVote = payload.old as any;
-
-                    if (payload.eventType === 'INSERT' && newVote) {
-                        setLastVoteUpdate({
-                            poll_id: newVote.poll_id,
-                            option_index: newVote.option_index,
-                            user_id: newVote.user_id,
-                            created_at: newVote.created_at,
-                            timestamp: Date.now()
-                        });
-                    } else {
-                        // For other events (delete/update), just trigger refresh with minimal info
-                        // We use index -1 to signal "refresh all/unknown"
-                        setLastVoteUpdate({
-                            poll_id: oldVote?.poll_id || '',
-                            option_index: -1,
-                            user_id: '',
-                            timestamp: Date.now()
-                        });
-                    }
-                }
-            )
-            .subscribe();
+        const interval = setInterval(tick, REFRESH_MS);
+        document.addEventListener('visibilitychange', tick);
 
         return () => {
-            supabase.removeChannel(channel);
+            clearInterval(interval);
+            document.removeEventListener('visibilitychange', tick);
         };
     }, [guildId]);
 
@@ -454,7 +425,6 @@ export const UserServerView: React.FC = () => {
                                         setDuplicateSource(p);
                                         setShowCreateModal(true);
                                     }}
-                                    lastVoteUpdate={lastVoteUpdate}
                                     cooldownEndTime={cooldownPolls.get(poll.message_id)}
                                 />
                             ))}
@@ -486,9 +456,8 @@ const PollCard: React.FC<{
     onDeletePoll: (pollId: string) => Promise<void>;
     onEditPoll: (poll: Poll) => void;
     onDuplicatePoll: (poll: Poll) => void;
-    lastVoteUpdate: VoteUpdate | null;
     cooldownEndTime?: number;
-}> = ({ poll, formatDate, onStatusChange, onDeletePoll, onEditPoll, onDuplicatePoll, lastVoteUpdate, cooldownEndTime }) => {
+}> = ({ poll, formatDate, onStatusChange, onDeletePoll, onEditPoll, onDuplicatePoll, cooldownEndTime }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [isUpdating, setIsUpdating] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -974,7 +943,6 @@ const PollCard: React.FC<{
                 pollTitle={poll.title}
                 options={poll.options}
                 fetchVoters={fetchVoters}
-                lastVoteUpdate={lastVoteUpdate}
             />
 
             {/* Export Modal */}
