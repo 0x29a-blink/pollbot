@@ -41,7 +41,7 @@ interface TopVoter {
 }
 
 interface RecentVote {
-    id: number; source: string; user_id: string; username: string | null;
+    id: number; source: string; user_id: string; username: string | null; avatar_url: string | null;
     weight: number; is_test: boolean; is_weekend: boolean | null;
     weekly_votes: number | null; total_votes: number | null; created_at: string;
 }
@@ -51,7 +51,7 @@ interface DirectoryRow {
     votes: number; weighted_votes: number; sources: string[];
     first_vote_at: string; last_botlist_vote_at: string;
     df_weekly_votes: number | null; df_total_votes: number | null;
-    streak_days: number; premium_last_vote_at: string | null; premium_active: boolean;
+    streak_days: number; premium_last_vote_at: string | null; premium_expires_at?: string | null; premium_active: boolean;
 }
 
 type SourceFilter = 'all' | 'topgg' | 'discordforge';
@@ -408,7 +408,7 @@ export const VotersView: React.FC = () => {
                         empty="No votes yet. They appear here as they arrive."
                         rows={recentVotes.slice(0, LIST_ROWS).map(v => ({
                             key: String(v.id),
-                            avatar: <Avatar name={v.username || '?'} url={null} size={28} id={v.user_id} />,
+                            avatar: <Avatar name={v.username || '?'} url={v.avatar_url} size={28} id={v.user_id} />,
                             title: (
                                 <>
                                     {v.username || 'Unknown user'}
@@ -495,7 +495,7 @@ export const VotersView: React.FC = () => {
                                                 <td className="num">{Number(v.streak_days) > 1 ? `${fmtCount(v.streak_days)} days` : <Dash title="No streak" />}</td>
                                                 <td className="num">{v.df_total_votes != null ? `${fmtCount(v.df_weekly_votes ?? 0)} / ${fmtCount(v.df_total_votes)}` : <Dash />}</td>
                                                 <td className="num whitespace-nowrap" title={fmtDateTime(v.last_botlist_vote_at)}>{fmtRelative(v.last_botlist_vote_at, nowMs)}</td>
-                                                <td><PremiumChip lastVote={v.premium_last_vote_at} nowMs={nowMs} /></td>
+                                                <td><PremiumChip lastVote={v.premium_last_vote_at} expiresAt={v.premium_expires_at} nowMs={nowMs} /></td>
                                                 <td className="pr-5 text-right">
                                                     <button type="button" onClick={() => navigate(`/polls?user_id=${v.user_id}`)} className="btn btn-ghost btn-sm whitespace-nowrap">
                                                         Polls created
@@ -520,7 +520,7 @@ export const VotersView: React.FC = () => {
                                                 <span className="text-[13px] text-faint truncate flex-1">
                                                     {sourcesText(v.sources)} · {fmtRelative(v.last_botlist_vote_at, nowMs)}{Number(v.streak_days) > 1 ? ` · ${v.streak_days}-day streak` : ''}
                                                 </span>
-                                                <PremiumChip lastVote={v.premium_last_vote_at} nowMs={nowMs} />
+                                                <PremiumChip lastVote={v.premium_last_vote_at} expiresAt={v.premium_expires_at} nowMs={nowMs} />
                                             </div>
                                             <button type="button" onClick={() => navigate(`/polls?user_id=${v.user_id}`)} className="text-[13px] text-brand-text mt-1 min-h-[28px]">
                                                 Polls created
@@ -606,11 +606,14 @@ const PeopleList: React.FC<{ rows: PersonRow[]; loading: boolean; error: string 
     );
 };
 
-/** Premium status from the last vote: active < 12 h, grace < 13 h, then expired. */
-const PremiumChip: React.FC<{ lastVote: string | null; nowMs: number }> = ({ lastVote, nowMs }) => {
-    if (!lastVote) return <span className="chip">Never</span>;
-    const diffHours = (nowMs - new Date(lastVote).getTime()) / 36e5;
-    if (diffHours < 12) return <span className="chip chip-positive chip-dot">Premium</span>;
-    if (diffHours < 13) return <span className="chip chip-warning chip-dot">Grace</span>;
+/** Premium status from stacked `premium_expires_at` (or `lastVote + 13h`): active > 1 h left, grace <= 1 h left, then expired. */
+const PremiumChip: React.FC<{ lastVote: string | null; expiresAt?: string | null; nowMs: number }> = ({ lastVote, expiresAt, nowMs }) => {
+    if (!lastVote && !expiresAt) return <span className="chip">Never</span>;
+    const expiryMs = expiresAt
+        ? new Date(expiresAt).getTime()
+        : (lastVote ? new Date(lastVote).getTime() + 13 * 36e5 : NaN);
+    const remainingHours = (expiryMs - nowMs) / 36e5;
+    if (remainingHours > 1) return <span className="chip chip-positive chip-dot">Premium</span>;
+    if (remainingHours > 0) return <span className="chip chip-warning chip-dot">Grace</span>;
     return <span className="chip">Expired</span>;
 };

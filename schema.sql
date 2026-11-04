@@ -80,11 +80,15 @@ ON CONFLICT (id) DO NOTHING;
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     last_vote_at TIMESTAMPTZ,
+    premium_expires_at TIMESTAMPTZ,
     username TEXT,
     discriminator TEXT,
     avatar_url TEXT,
     is_admin BOOLEAN DEFAULT FALSE
 );
+
+COMMENT ON COLUMN users.premium_expires_at IS
+    'Stacked vote-reward expiry. First vote grants NOW() + 13h; voting while active adds +12h.';
 
 -- 7. usage_events table (bot vs dashboard usage telemetry)
 CREATE TABLE IF NOT EXISTS usage_events (
@@ -116,11 +120,12 @@ COMMENT ON COLUMN dashboard_sessions.access_token_expires_at IS
 
 -- 9. botlist_votes table (vote events from bot listing sites)
 -- One row per vote received from Top.gg or DiscordForge, including the extra
--- voter metadata each site sends. users.last_vote_at remains the source of
--- truth for the premium window; the webhook updates both.
+-- voter metadata each site sends. users.premium_expires_at (with fallback to
+-- last_vote_at + 13h) tracks stacked vote rewards; record_botlist_vote updates both.
 CREATE TABLE IF NOT EXISTS botlist_votes (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     source TEXT NOT NULL CHECK (source IN ('topgg', 'discordforge')),
+    event_id TEXT,
     user_id TEXT NOT NULL,
     username TEXT,
     avatar_url TEXT,
@@ -128,9 +133,10 @@ CREATE TABLE IF NOT EXISTS botlist_votes (
     weight INTEGER NOT NULL DEFAULT 1,
     is_test BOOLEAN NOT NULL DEFAULT FALSE,
     is_weekend BOOLEAN,
-    -- DiscordForge includes the voter's running counts in its webhook
+    -- DiscordForge includes the voter's running counts & streak in its webhook
     weekly_votes INTEGER,
     total_votes INTEGER,
+    streak INTEGER,
     -- Top.gg passes through query params from the vote URL (campaign tracking)
     query JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -148,6 +154,8 @@ CREATE INDEX IF NOT EXISTS idx_votes_user_created ON votes(user_id, created_at D
 -- User premium-voter lookups
 CREATE INDEX IF NOT EXISTS idx_users_last_vote_at ON users(last_vote_at DESC)
 WHERE last_vote_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_premium_expires_at ON users(premium_expires_at DESC)
+WHERE premium_expires_at IS NOT NULL;
 
 -- Session management
 CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_user_id ON dashboard_sessions(user_id);
@@ -170,9 +178,11 @@ WHERE left_at IS NULL;
 -- Usage telemetry queries (aggregated by day)
 CREATE INDEX IF NOT EXISTS idx_usage_events_created_at ON usage_events(created_at DESC);
 
--- Bot-list vote analytics
+-- Bot-list vote analytics & webhook idempotency
 CREATE INDEX IF NOT EXISTS idx_botlist_votes_created_at ON botlist_votes(created_at);
 CREATE INDEX IF NOT EXISTS idx_botlist_votes_user_id ON botlist_votes(user_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_botlist_votes_source_event_id ON botlist_votes(source, event_id)
+WHERE event_id IS NOT NULL;
 
 -- ============================================================================
 -- ROW LEVEL SECURITY
@@ -353,12 +363,100 @@ SET search_path = public
 AS $$
     SELECT COUNT(*)::BIGINT
     FROM users
-    WHERE last_vote_at IS NOT NULL
-      AND last_vote_at > NOW() - INTERVAL '13 hours';
+    WHERE COALESCE(premium_expires_at, last_vote_at + INTERVAL '13 hours') > NOW();
 $$;
 
 REVOKE ALL ON FUNCTION get_active_voter_count() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_active_voter_count() TO service_role;
+
+-- Atomic bot-list vote recorder: deduplicates retried webhook deliveries via
+-- (source, event_id) and stacks +12h onto active premium_expires_at windows.
+CREATE OR REPLACE FUNCTION record_botlist_vote(
+    p_source TEXT,
+    p_user_id TEXT,
+    p_event_id TEXT DEFAULT NULL,
+    p_username TEXT DEFAULT NULL,
+    p_avatar_url TEXT DEFAULT NULL,
+    p_weight INTEGER DEFAULT 1,
+    p_is_test BOOLEAN DEFAULT FALSE,
+    p_is_weekend BOOLEAN DEFAULT NULL,
+    p_weekly_votes INTEGER DEFAULT NULL,
+    p_total_votes INTEGER DEFAULT NULL,
+    p_streak INTEGER DEFAULT NULL,
+    p_query JSONB DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_inserted_id BIGINT;
+    v_expires_at TIMESTAMPTZ;
+    v_username TEXT := NULLIF(btrim(p_username), '');
+    v_avatar_url TEXT := NULLIF(btrim(p_avatar_url), '');
+BEGIN
+    IF v_username IS NULL OR v_avatar_url IS NULL THEN
+        SELECT COALESCE(v_username, u.username),
+               COALESCE(v_avatar_url, u.avatar_url)
+        INTO v_username, v_avatar_url
+        FROM users u
+        WHERE u.id = p_user_id;
+    END IF;
+
+    INSERT INTO botlist_votes (
+        source, user_id, event_id, username, avatar_url,
+        weight, is_test, is_weekend, weekly_votes, total_votes, streak, query
+    )
+    VALUES (
+        p_source,
+        p_user_id,
+        NULLIF(btrim(p_event_id), ''),
+        v_username,
+        v_avatar_url,
+        COALESCE(p_weight, 1),
+        COALESCE(p_is_test, FALSE),
+        p_is_weekend,
+        p_weekly_votes,
+        p_total_votes,
+        p_streak,
+        p_query
+    )
+    ON CONFLICT (source, event_id) WHERE event_id IS NOT NULL DO NOTHING
+    RETURNING id INTO v_inserted_id;
+
+    IF v_inserted_id IS NULL THEN
+        RETURN jsonb_build_object('duplicate', TRUE, 'is_test', COALESCE(p_is_test, FALSE), 'premium_expires_at', NULL);
+    END IF;
+
+    IF COALESCE(p_is_test, FALSE) THEN
+        RETURN jsonb_build_object('duplicate', FALSE, 'is_test', TRUE, 'premium_expires_at', NULL);
+    END IF;
+
+    INSERT INTO users (id, last_vote_at, premium_expires_at, username, avatar_url)
+    VALUES (
+        p_user_id,
+        NOW(),
+        NOW() + INTERVAL '13 hours',
+        v_username,
+        v_avatar_url
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        last_vote_at = NOW(),
+        premium_expires_at = GREATEST(
+            COALESCE(users.premium_expires_at, users.last_vote_at + INTERVAL '13 hours'),
+            NOW() + INTERVAL '1 hour'
+        ) + INTERVAL '12 hours',
+        username = COALESCE(EXCLUDED.username, users.username),
+        avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url)
+    RETURNING premium_expires_at INTO v_expires_at;
+
+    RETURN jsonb_build_object('duplicate', FALSE, 'is_test', FALSE, 'premium_expires_at', v_expires_at);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION record_botlist_vote(TEXT, TEXT, TEXT, TEXT, TEXT, INTEGER, BOOLEAN, BOOLEAN, INTEGER, INTEGER, INTEGER, JSONB) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION record_botlist_vote(TEXT, TEXT, TEXT, TEXT, TEXT, INTEGER, BOOLEAN, BOOLEAN, INTEGER, INTEGER, INTEGER, JSONB) TO service_role;
 
 CREATE OR REPLACE FUNCTION get_guild_vote_counts()
 RETURNS TABLE(guild_id TEXT, vote_count BIGINT)
@@ -1066,7 +1164,8 @@ enriched AS (
            a.df_weekly_votes, a.df_total_votes,
            COALESCE(s.streak_days, 0) AS streak_days,
            u.last_vote_at AS premium_last_vote_at,
-           (u.last_vote_at > NOW() - INTERVAL '13 hours') IS TRUE AS premium_active
+           u.premium_expires_at AS premium_expires_at,
+           (COALESCE(u.premium_expires_at, u.last_vote_at + INTERVAL '13 hours') > NOW()) IS TRUE AS premium_active
     FROM agg a
     LEFT JOIN users u ON u.id = a.user_id
     LEFT JOIN streaks s ON s.user_id = a.user_id
@@ -1110,7 +1209,9 @@ bl AS (
            ARRAY_AGG(DISTINCT bv.source ORDER BY bv.source) AS sources,
            COUNT(*)::INT AS botlist_votes,
            COUNT(*) FILTER (WHERE bv.created_at > NOW() - INTERVAL '30 days')::INT AS votes_30d,
-           MAX(bv.created_at) AS last_botlist_vote_at
+           MAX(bv.created_at) AS last_botlist_vote_at,
+           MAX(bv.username) FILTER (WHERE bv.username IS NOT NULL) AS bl_username,
+           MAX(bv.avatar_url) FILTER (WHERE bv.avatar_url IS NOT NULL) AS bl_avatar_url
     FROM botlist_votes bv
     JOIN pv ON pv.user_id = bv.user_id
     WHERE NOT bv.is_test
@@ -1119,15 +1220,15 @@ bl AS (
 SELECT jsonb_build_object(
     'total_voters',   (SELECT COUNT(*)::INT FROM pv),
     'premium_now',    (SELECT COUNT(*)::INT FROM pv JOIN users u ON u.id = pv.user_id
-                       WHERE u.last_vote_at > NOW() - INTERVAL '13 hours'),
+                       WHERE COALESCE(u.premium_expires_at, u.last_vote_at + INTERVAL '13 hours') > NOW()),
     'supporters',     (SELECT COUNT(*)::INT FROM bl),
     'supporters_30d', (SELECT COUNT(*)::INT FROM bl WHERE votes_30d > 0),
     'topgg',          (SELECT COUNT(*)::INT FROM bl WHERE 'topgg' = ANY(sources)),
     'discordforge',   (SELECT COUNT(*)::INT FROM bl WHERE 'discordforge' = ANY(sources)),
     'top_supporters', (SELECT COALESCE(jsonb_agg(to_jsonb(t)), '[]'::jsonb) FROM (
                           SELECT b.user_id,
-                                 u.username,
-                                 u.avatar_url,
+                                 COALESCE(u.username, b.bl_username) AS username,
+                                 COALESCE(u.avatar_url, b.bl_avatar_url) AS avatar_url,
                                  b.botlist_votes,
                                  b.sources,
                                  b.last_botlist_vote_at

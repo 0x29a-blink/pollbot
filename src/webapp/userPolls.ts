@@ -5,6 +5,7 @@ import { aggregateVoteRows, fetchAllPollVotes, getVoteCountsForPoll } from '../l
 import { groupVoteRows, MyVoteRow } from './voteGrouping';
 import { trackUsage } from '../lib/usageTracker';
 import { formatCsvCell } from '../lib/guildUtils';
+import { computePremiumWindow, DISCORDFORGE_VOTE_URL, TOPGG_VOTE_URL } from '../lib/botListVotes';
 import { DashboardSessionRecord, getValidDashboardSession, refreshAccessToken } from './dashboardAuth';
 
 const router = Router();
@@ -15,8 +16,6 @@ const MANAGE_GUILD = 0x20; // 32
 const SNOWFLAKE_RE = /^\d{17,20}$/;
 const PERMISSION_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const VOTER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes for voter data
-const PREMIUM_HOURS = 13; // Vote valid for 13 hours (per view.ts line 35)
-const TOPGG_VOTE_URL = 'https://top.gg/bot/911731627498041374/vote';
 /** PostgREST's default max rows per request; loops page by this size. */
 const DB_PAGE_SIZE = 1000;
 /** Safety cap for the /votes distinct-poll index scan (100k vote rows). */
@@ -223,30 +222,25 @@ async function verifyPollReadAccessForSession(
 }
 
 /**
- * Helper: Check if user has premium status (voted within 13 hours)
+ * Helper: Check if user has active premium status (supports stacked Top.gg + DiscordForge windows)
  */
 async function checkPremiumStatus(userId: string): Promise<{ isPremium: boolean; expiresAt?: string }> {
-    const { data: userData } = await supabase
+    let { data: userData, error } = await supabase
         .from('users')
-        .select('last_vote_at')
+        .select('last_vote_at, premium_expires_at')
         .eq('id', userId)
         .maybeSingle();
 
-    if (!userData?.last_vote_at) {
-        return { isPremium: false };
+    if (error && (error.code === 'PGRST204' || error.code === '42703')) {
+        const fallback = await supabase
+            .from('users')
+            .select('last_vote_at')
+            .eq('id', userId)
+            .maybeSingle();
+        userData = fallback.data as any;
     }
 
-    const lastVote = new Date(userData.last_vote_at);
-    const now = new Date();
-    const premiumCutoff = new Date(now.getTime() - PREMIUM_HOURS * 60 * 60 * 1000);
-
-    if (lastVote > premiumCutoff) {
-        // Calculate when premium expires
-        const expiresAt = new Date(lastVote.getTime() + PREMIUM_HOURS * 60 * 60 * 1000);
-        return { isPremium: true, expiresAt: expiresAt.toISOString() };
-    }
-
-    return { isPremium: false };
+    return computePremiumWindow(userData);
 }
 
 /**
@@ -580,8 +574,9 @@ router.get('/guilds/:guildId/analytics', async (req: Request, res: Response) => 
         if (!premiumStatus.isPremium) {
             return res.status(403).json({
                 error: 'Premium feature',
-                message: 'Vote on top.gg to unlock this feature',
+                message: 'Vote on Top.gg or DiscordForge to unlock this feature',
                 voteUrl: TOPGG_VOTE_URL,
+                secondaryVoteUrl: DISCORDFORGE_VOTE_URL,
             });
         }
 
@@ -796,8 +791,9 @@ router.get('/polls/:pollId/voters', async (req: Request, res: Response) => {
         if (!premiumStatus.isPremium) {
             return res.status(403).json({
                 error: 'Premium feature',
-                message: 'Vote on top.gg to unlock this feature',
+                message: 'Vote on Top.gg or DiscordForge to unlock this feature',
                 voteUrl: TOPGG_VOTE_URL,
+                secondaryVoteUrl: DISCORDFORGE_VOTE_URL,
             });
         }
 
@@ -975,6 +971,7 @@ router.get('/premium/status', async (req: Request, res: Response) => {
             isPremium: premiumStatus.isPremium,
             expiresAt: premiumStatus.expiresAt,
             voteUrl: TOPGG_VOTE_URL,
+            secondaryVoteUrl: DISCORDFORGE_VOTE_URL,
         });
     } catch (error) {
         logger.error('[Premium] Error checking status:', error);
@@ -1005,6 +1002,7 @@ router.post('/premium/refresh', async (req: Request, res: Response) => {
             isPremium: premiumStatus.isPremium,
             expiresAt: premiumStatus.expiresAt,
             voteUrl: TOPGG_VOTE_URL,
+            secondaryVoteUrl: DISCORDFORGE_VOTE_URL,
         });
     } catch (error) {
         logger.error('[Premium] Error refreshing status:', error);

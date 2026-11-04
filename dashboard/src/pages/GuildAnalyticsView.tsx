@@ -55,6 +55,7 @@ export const GuildAnalyticsView: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
     const [locked, setLocked] = useState(false);
     const [voteUrl, setVoteUrl] = useState('');
+    const [secondaryVoteUrl, setSecondaryVoteUrl] = useState<string | undefined>(undefined);
     const [showGate, setShowGate] = useState(false);
 
     const fetchAnalytics = useCallback(async () => {
@@ -67,6 +68,7 @@ export const GuildAnalyticsView: React.FC = () => {
                 if (body.voteUrl) {
                     setLocked(true);
                     setVoteUrl(body.voteUrl);
+                    if (body.secondaryVoteUrl) setSecondaryVoteUrl(body.secondaryVoteUrl);
                 } else {
                     setError(body.error || "You don't have access to this server's analytics.");
                 }
@@ -136,7 +138,7 @@ export const GuildAnalyticsView: React.FC = () => {
                         <Lock className="w-5 h-5 text-faint" aria-hidden="true" />
                         <p className="mt-3 text-[15px] font-semibold text-ink">Analytics is a premium feature</p>
                         <p className="mt-1 text-sm text-faint max-w-md">
-                            Vote for PollBot on top.gg to unlock vote trends, peak hours and your most active voters for 12 hours.
+                            Vote for Simple Poll Bot on top.gg to unlock vote trends, peak hours and your most active voters for 12 hours (vote on DiscordForge too to stack extra time).
                         </p>
                         <button type="button" className="btn btn-primary mt-5" onClick={() => setShowGate(true)}>
                             Unlock with a vote
@@ -259,6 +261,7 @@ export const GuildAnalyticsView: React.FC = () => {
                 isOpen={showGate}
                 onClose={() => setShowGate(false)}
                 voteUrl={voteUrl}
+                secondaryVoteUrl={secondaryVoteUrl}
                 onRefresh={refreshPremium}
                 featureName="Analytics"
             />

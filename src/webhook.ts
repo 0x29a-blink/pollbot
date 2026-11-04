@@ -6,7 +6,8 @@ import cookieParser from 'cookie-parser';
 import { logger } from './lib/logger';
 import { startManagedTunnel } from './lib/cloudflaredTunnel';
 import { supabase } from './lib/db';
-import { classifyVoteWebhook, BotListVoteEvent } from './lib/botListVotes';
+import { classifyVoteWebhook, computeStackedPremiumExpiry, BotListVoteEvent } from './lib/botListVotes';
+import { enrichUserRows, resolveVoteUserIdentity } from './lib/discordUsers';
 import { dashboardAuthRouter } from './webapp/dashboardAuth';
 import { ensureCsrfToken, validateCsrfToken, getCsrfTokenHandler } from './webapp/csrf';
 import dotenv from 'dotenv';
@@ -155,13 +156,24 @@ app.get('/api/admin/vote-analytics', async (req, res) => {
             return res.status(500).json({ error: 'Failed to load vote analytics' });
         }
 
+        const [enrichedTopVoters, enrichedRecentVotes] = await Promise.all([
+            enrichUserRows(
+                (topVoters.data ?? []) as Array<{ user_id: string; username?: string | null; avatar_url?: string | null }>,
+                { checkUsersTable: false, maxDiscordLookups: 6 }
+            ),
+            enrichUserRows(
+                (recent.data ?? []) as Array<{ user_id: string; username?: string | null; avatar_url?: string | null }>,
+                { checkUsersTable: true, maxDiscordLookups: 8 }
+            ),
+        ]);
+
         return res.json({
             days,
             source,
             analytics: analytics.data ?? {},
-            topVoters: topVoters.data ?? [],
+            topVoters: enrichedTopVoters,
             totals: totals.data ?? [],
-            recentVotes: recent.data ?? [],
+            recentVotes: enrichedRecentVotes,
         });
     } catch (error) {
         logger.error('[Webhook] Vote analytics failed:', error);
@@ -199,7 +211,24 @@ app.get('/api/admin/voters', async (req, res) => {
             return res.status(500).json({ error: 'Failed to load voter directory' });
         }
 
-        return res.json({ days, source, sort, limit, offset, ...(data ?? { total: 0, rows: [] }) });
+        const dirPayload = (data ?? { total: 0, rows: [] }) as {
+            total?: number;
+            rows?: Array<{ user_id: string; username?: string | null; avatar_url?: string | null }>;
+        };
+        const enrichedRows = await enrichUserRows(dirPayload.rows ?? [], {
+            checkUsersTable: false,
+            maxDiscordLookups: 10,
+        });
+
+        return res.json({
+            days,
+            source,
+            sort,
+            limit,
+            offset,
+            total: dirPayload.total ?? 0,
+            rows: enrichedRows,
+        });
     } catch (error) {
         logger.error('[Webhook] Voter directory failed:', error);
         return res.status(500).json({ error: 'Failed to load voter directory' });
@@ -226,7 +255,18 @@ app.get('/api/admin/polls/:pollId/supporters', async (req, res) => {
             return res.status(500).json({ error: 'Failed to load poll supporters' });
         }
 
-        return res.json(data ?? {});
+        const payload = (data ?? {}) as {
+            top_supporters?: Array<{ user_id: string; username?: string | null; avatar_url?: string | null }>;
+            [key: string]: unknown;
+        };
+        if (Array.isArray(payload.top_supporters) && payload.top_supporters.length > 0) {
+            payload.top_supporters = await enrichUserRows(payload.top_supporters, {
+                checkUsersTable: false,
+                maxDiscordLookups: 5,
+            });
+        }
+
+        return res.json(payload);
     } catch (error) {
         logger.error(`[Webhook] Poll supporters failed for ${pollId}:`, error);
         return res.status(500).json({ error: 'Failed to load poll supporters' });
@@ -243,17 +283,55 @@ const VOTE_WEBHOOK_SECRETS = {
     topggAuth: process.env.TOPGG_WEBHOOK_AUTH || undefined,
     topggSignatureSecret: process.env.TOPGG_WEBHOOK_SECRET || undefined,
     discordForgeAuth: process.env.DISCORDFORGE_WEBHOOK_AUTH || undefined,
+    discordForgeSignatureSecret: process.env.DISCORDFORGE_WEBHOOK_SECRET || undefined,
 };
 
 async function recordBotListVote(vote: BotListVoteEvent): Promise<void> {
-    // Full event row (test votes included, flagged) for voter analytics.
+    // Top.gg legacy v0 and DiscordForge Webhooks v2 only send the voter's
+    // Discord snowflake ID. Resolve username/avatar from `public.users` or
+    // Discord Bot REST so voters never show up as "Unknown user".
+    const identity = await resolveVoteUserIdentity(vote);
+    const resolvedUsername = identity.username ?? null;
+    const resolvedAvatarUrl = identity.avatarUrl ?? null;
+
+    // Preferred atomic path (migration 32+): deduplicates retried event_ids
+    // and stacks +12h onto active premium_expires_at windows without races.
+    const { data: rpcData, error: rpcError } = await supabase.rpc('record_botlist_vote', {
+        p_source: vote.source,
+        p_user_id: vote.userId,
+        p_event_id: vote.eventId ?? null,
+        p_username: resolvedUsername,
+        p_avatar_url: resolvedAvatarUrl,
+        p_weight: vote.weight,
+        p_is_test: vote.isTest,
+        p_is_weekend: vote.isWeekend ?? null,
+        p_weekly_votes: vote.weeklyVotes ?? null,
+        p_total_votes: vote.totalVotes ?? null,
+        p_streak: vote.streak ?? null,
+        p_query: vote.query ?? null,
+    });
+
+    if (!rpcError) {
+        if (rpcData?.duplicate) {
+            logger.info(`[Webhook] Ignored duplicate ${vote.source} vote delivery (${vote.eventId}) for user ${vote.userId}`);
+        } else if (rpcData?.premium_expires_at) {
+            logger.info(`[Webhook] Stacked premium for user ${vote.userId} via ${vote.source} until ${rpcData.premium_expires_at}`);
+        }
+        return;
+    }
+
+    // Fallback when migration 32 has not been applied yet on the target DB.
+    if (rpcError.code !== 'PGRST202') {
+        logger.error(`[Webhook] record_botlist_vote RPC failed for ${vote.source} user ${vote.userId}, falling back:`, rpcError);
+    }
+
     const { error: insertError } = await supabase
         .from('botlist_votes')
         .insert({
             source: vote.source,
             user_id: vote.userId,
-            username: vote.username ?? null,
-            avatar_url: vote.avatarUrl ?? null,
+            username: resolvedUsername,
+            avatar_url: resolvedAvatarUrl,
             weight: vote.weight,
             is_test: vote.isTest,
             is_weekend: vote.isWeekend ?? null,
@@ -269,30 +347,53 @@ async function recordBotListVote(vote: BotListVoteEvent): Promise<void> {
     // Test votes must not grant the premium window.
     if (vote.isTest) return;
 
+    const { data: existingUser } = await supabase
+        .from('users')
+        .select('last_vote_at, premium_expires_at')
+        .eq('id', vote.userId)
+        .maybeSingle();
+
+    const nowIso = new Date().toISOString();
+    const stackedExpiry = computeStackedPremiumExpiry(existingUser);
     const userUpdate: Record<string, string> = {
         id: vote.userId,
-        last_vote_at: new Date().toISOString(),
+        last_vote_at: nowIso,
+        premium_expires_at: stackedExpiry,
     };
-    // Enrich the user record when the list told us who voted, but never
-    // blank out fields the payload didn't include.
-    if (vote.username) userUpdate.username = vote.username;
-    if (vote.avatarUrl) userUpdate.avatar_url = vote.avatarUrl;
+    if (resolvedUsername) userUpdate.username = resolvedUsername;
+    if (resolvedAvatarUrl) userUpdate.avatar_url = resolvedAvatarUrl;
 
-    const { error: upsertError } = await supabase
+    let { error: upsertError } = await supabase
         .from('users')
         .upsert(userUpdate, { onConflict: 'id' });
+
+    // Pre-migration-32 schema lacks premium_expires_at; retry with last_vote_at only.
+    if (upsertError?.code === 'PGRST204' || upsertError?.code === '42703') {
+        delete userUpdate.premium_expires_at;
+        ({ error: upsertError } = await supabase.from('users').upsert(userUpdate, { onConflict: 'id' }));
+    }
 
     if (upsertError) {
         logger.error(`[Webhook] Failed to update vote timestamp for user ${vote.userId}:`, upsertError);
     }
 }
 
-if (VOTE_WEBHOOK_SECRETS.topggAuth || VOTE_WEBHOOK_SECRETS.topggSignatureSecret || VOTE_WEBHOOK_SECRETS.discordForgeAuth) {
+if (
+    VOTE_WEBHOOK_SECRETS.topggAuth ||
+    VOTE_WEBHOOK_SECRETS.topggSignatureSecret ||
+    VOTE_WEBHOOK_SECRETS.discordForgeAuth ||
+    VOTE_WEBHOOK_SECRETS.discordForgeSignatureSecret
+) {
     app.post('/vote', async (req, res) => {
+        const topggTrace = req.headers['x-topgg-trace'] as string | undefined;
         const result = classifyVoteWebhook(
             {
                 authorization: req.headers.authorization,
                 'x-topgg-signature': req.headers['x-topgg-signature'] as string | undefined,
+                'x-topgg-trace': topggTrace,
+                'x-forge-signature': req.headers['x-forge-signature'] as string | undefined,
+                'x-forge-event': req.headers['x-forge-event'] as string | undefined,
+                'x-forge-delivery': req.headers['x-forge-delivery'] as string | undefined,
             },
             (req as any).rawBody ?? Buffer.alloc(0),
             req.body,
@@ -300,23 +401,24 @@ if (VOTE_WEBHOOK_SECRETS.topggAuth || VOTE_WEBHOOK_SECRETS.topggSignatureSecret 
         );
 
         if (!result.ok) {
-            // 204 = authentic but nothing to record (e.g. Top.gg ping events).
+            const traceSuffix = topggTrace ? ` [trace=${topggTrace}]` : '';
+            // 204 = authentic but nothing to record (e.g. ping / non-vote v1/v2 events).
             if (result.status === 204) {
-                logger.info(`[Webhook] ${result.reason}`);
+                logger.info(`[Webhook] ${result.reason}${traceSuffix}`);
                 return res.status(204).end();
             }
-            logger.warn(`[Webhook] Rejected vote webhook (${result.status}): ${result.reason}`);
+            logger.warn(`[Webhook] Rejected vote webhook (${result.status}): ${result.reason}${traceSuffix}`);
             return res.status(result.status).json({ error: result.reason });
         }
 
         const vote = result.event;
-        logger.info(`[Webhook] Received ${vote.source} vote from user ${vote.userId}${vote.isTest ? ' (test)' : ''}`);
+        logger.info(`[Webhook] Received ${vote.format ?? vote.source} vote from user ${vote.userId}${vote.isTest ? ' (test)' : ''}`);
 
         try {
             await recordBotListVote(vote);
         } catch (err) {
             // Swallow: both lists retry on non-2xx, and a retried delivery
-            // would double-count the vote in analytics.
+            // could double-count legacy votes without event_ids.
             logger.error(`[Webhook] Unexpected error processing ${vote.source} vote for user ${vote.userId}:`, err);
         }
 
@@ -326,11 +428,12 @@ if (VOTE_WEBHOOK_SECRETS.topggAuth || VOTE_WEBHOOK_SECRETS.topggSignatureSecret 
     const enabled = [
         VOTE_WEBHOOK_SECRETS.topggAuth ? 'Top.gg v0' : null,
         VOTE_WEBHOOK_SECRETS.topggSignatureSecret ? 'Top.gg v1' : null,
-        VOTE_WEBHOOK_SECRETS.discordForgeAuth ? 'DiscordForge' : null,
+        VOTE_WEBHOOK_SECRETS.discordForgeAuth ? 'DiscordForge v1' : null,
+        VOTE_WEBHOOK_SECRETS.discordForgeSignatureSecret ? 'DiscordForge v2' : null,
     ].filter(Boolean).join(', ');
     logger.info(`[Webhook] /vote endpoint enabled for: ${enabled}`);
 } else {
-    logger.warn('[Webhook] No vote webhook secrets set (TOPGG_WEBHOOK_AUTH / TOPGG_WEBHOOK_SECRET / DISCORDFORGE_WEBHOOK_AUTH) — the /vote endpoint is DISABLED.');
+    logger.warn('[Webhook] No vote webhook secrets set (TOPGG_WEBHOOK_AUTH / TOPGG_WEBHOOK_SECRET / DISCORDFORGE_WEBHOOK_AUTH / DISCORDFORGE_WEBHOOK_SECRET) — the /vote endpoint is DISABLED.');
 }
 
 export async function startWebhookServer() {

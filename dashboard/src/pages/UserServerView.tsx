@@ -891,6 +891,7 @@ const PollRow: React.FC<{
                 isOpen={showPremiumModal}
                 onClose={() => setShowPremiumModal(false)}
                 voteUrl={premiumStatus?.voteUrl || 'https://top.gg/bot/911731627498041374/vote'}
+                secondaryVoteUrl={premiumStatus?.secondaryVoteUrl}
                 onRefresh={async () => {
                     const isPremium = await refreshPremium();
                     if (isPremium) {

@@ -132,6 +132,7 @@ export interface PremiumStatus {
     isPremium: boolean;
     expiresAt?: string;
     voteUrl: string;
+    secondaryVoteUrl?: string;
 }
 
 export interface ExportResponse {

@@ -11,6 +11,7 @@ scheduled auto-close, and a full web dashboard. One command and you're live.
 [**Add to Discord**](https://discord.com/api/oauth2/authorize?client_id=911731627498041374&permissions=534992383040&scope=applications.commands%20bot) ·
 [**Dashboard**](https://pollbot.win) ·
 [**Vote on Top.gg**](https://top.gg/bot/911731627498041374) ·
+[**Vote on DiscordForge**](https://discordforge.org/bot/911731627498041374#vote) ·
 [**Support**](https://discord.gg/MYRqdNFQfk)
 
 </div>
@@ -51,7 +52,7 @@ voters a home:
 - One-click CSV export of any poll
 - "My Votes" — your voting history across every server
 - Vote analytics: activity trends, peak hours, and top voters per server
-  (premium — unlocked by voting for the bot on Top.gg)
+  (premium — unlocked by voting on Top.gg; vote on DiscordForge too to stack extra time)
 
 ## Live in under ten seconds
 

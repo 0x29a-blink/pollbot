@@ -229,6 +229,11 @@
             "missing_perms_votes_tracked": "✅ **¡Tu acción fue registrada!** Sin embargo, me faltan permisos para actualizar el mensaje de la encuesta en ese canal.\n\n⚠️ Por favor asegúrate de que tengo los siguientes permisos en el canal de la encuesta: **{{permissions}}**\n\nUna vez restaurados los permisos, la encuesta se actualizará en la próxima acción.",
             "missing_access_no_update": "❌ **¡No se pudo actualizar la encuesta!** Ya no tengo acceso para ver el canal donde se encuentra esta encuesta.\n\n⚠️ Por favor asegúrate de que tengo los siguientes permisos en ese canal: **{{permissions}}**\n\nEl estado de la encuesta no fue cambiado. Una vez corregidos los permisos, intenta de nuevo.",
             "missing_perms_no_update": "❌ **¡No se pudo actualizar la encuesta!** Me faltan permisos para editar el mensaje de la encuesta en ese canal.\n\n⚠️ Por favor asegúrate de que tengo los siguientes permisos en el canal de la encuesta: **{{permissions}}**\n\nEl estado de la encuesta no fue cambiado. Una vez corregidos los permisos, intenta de nuevo."
+        },
+        "promo": {
+            "dashboard_voter": "¡Hola! ¿Sabías que tenemos un **[panel web](<{{url}}>)**? Échale un vistazo y gestiona tus votos, revisa tu historial y sigue los resultados en tiempo real en <{{url}}>",
+            "dashboard_manager": "¡Hola! ¿Sabías que tenemos un **[panel web](<{{url}}>)**? Crea, edita, cierra y gestiona tus encuestas y votos en nuestro nuevo panel en tiempo real en <{{url}}>",
+            "open_dashboard_btn": "Abrir Panel Web"
         }
     },
     "stats": {
@@ -244,7 +249,7 @@
     },
     "view": {
         "title": "Resultados Detallados: {{title}}",
-        "description": "Selecciona una opción abajo para ver la lista de votantes.",
+        "description": "Selecciona una opción abajo para ver la lista de votantes — o explora resultados en vivo y gestiona encuestas en nuestro **[Panel Web](<https://pollbot.win>)**.",
         "option_default": "Selecciona una opción...",
         "option_label": "Opción {{index}} ({{count}} votos)",
         "voter_list_title": "Votantes para Opción {{index}}: {{option}}",
@@ -253,8 +258,10 @@
         "nav_prev": "Anterior",
         "nav_next": "Siguiente >",
         "premium_title": "Función Premium: Ver Resultados Detallados",
-        "premium_desc": "Ver resultados detallados de la encuesta (quién votó por qué) es una **Función Premium**.\n\nPara desbloquear esto por 12 horas, ¡simplemente vota por el bot en Top.gg!\n\nSi no quieres votar puedes usar la app/comando de exportar para obtener una lista de votantes pero no estará formateada automáticamente para ti ni mostrará ganadores de opciones, es solo un CSV de los votantes.",
-        "vote_unlock": "Votar para Desbloquear",
+        "premium_desc": "Ver resultados detallados de la encuesta (quién votó por qué) es una **Función Premium**.\n\nPara desbloquear esto por **12 horas**, ¡vota por Simple Poll Bot en **Top.gg**! ¿Quieres aún más tiempo? Vota también en **DiscordForge** — ¡votar en ambos **acumula tu tiempo** (+12h por voto)!\n\n💡 **Consejo:** También puedes ver desgloses completos de votantes, analíticas del servidor y gestionar encuestas en tiempo real en nuestro nuevo **[Panel Web](<https://pollbot.win>)**.\n\n*(¿No quieres votar? Puedes usar `/export-poll` para obtener un CSV simple.)*",
+        "vote_unlock": "Votar en Top.gg",
+        "vote_forge_unlock": "DiscordForge (+12h)",
+        "dashboard_btn": "Panel Web",
         "i_voted": "¡Yo Voté!",
         "export_btn": "Exportar Lista",
         "export_restricted": "Las exportaciones y vistas detalladas están deshabilitadas para esta encuesta (o es privada). Solo el Creador de la Encuesta o Gestores de Encuestas pueden verlas.",

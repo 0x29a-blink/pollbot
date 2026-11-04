@@ -9,6 +9,12 @@ import { aggregateVotes, replaceUserVotes } from '../lib/voteUtils';
 import { scheduleRender } from '../lib/renderQueue';
 import { trackUsage } from '../lib/usageTracker';
 import { memberHasAnyRoleName, memberHasManageGuild, memberRoleIds } from '../lib/guildUtils';
+import {
+    buildDashboardPromoRow,
+    getDashboardPromoText,
+    maybeSendDashboardPromo,
+    shouldShowDashboardPromo,
+} from '../lib/dashboardPromo';
 
 export default {
     name: Events.InteractionCreate,
@@ -224,10 +230,19 @@ export default {
                     return;
                 }
 
-                // 6. Acknowledge the vote
+                // 6. Acknowledge the vote (with an occasional non-intrusive dashboard tip)
                 const votedOptions = selectedIndices.map(i => pollData.options[i]).join(', ');
                 const weightMsg = voteWeight > 1 ? ` (Weight: ${voteWeight})` : '';
-                await interaction.editReply({ content: I18n.t('messages.poll.voted', interaction.locale, { options: votedOptions }) + weightMsg });
+                const baseAck = I18n.t('messages.poll.voted', interaction.locale, { options: votedOptions }) + weightMsg;
+                const showVoterPromo = shouldShowDashboardPromo(userId, 'vote');
+                await interaction.editReply(
+                    showVoterPromo
+                        ? {
+                              content: `${baseAck}\n\n${getDashboardPromoText('vote', interaction.locale)}`,
+                              components: [buildDashboardPromoRow(interaction.locale)],
+                          }
+                        : { content: baseAck }
+                );
                 logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} voted on poll ${pollId} with the following item: ${votedOptions} weight:${voteWeight}`);
                 trackUsage({ source: 'bot', event_type: 'vote', guild_id: interaction.guildId, user_id: userId });
 
@@ -387,6 +402,12 @@ export default {
         try {
             await command.execute(interaction);
             trackUsage({ source: 'bot', event_type: `command:${interaction.commandName}`, guild_id: interaction.guildId, user_id: interaction.user.id });
+
+            // Randomized ephemeral dashboard nudge across general commands
+            // (/poll handles its own success branch; /view & View Data already link the dashboard directly).
+            if (!['poll', 'view', 'View Data'].includes(interaction.commandName)) {
+                await maybeSendDashboardPromo(interaction, 'command');
+            }
         } catch (error: any) {
             logger.error(`Error executing ${interaction.commandName}`, error);
 

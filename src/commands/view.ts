@@ -6,6 +6,7 @@ import { Renderer } from '../lib/renderer';
 import { ViewInteractionHandler } from '../lib/viewInteraction';
 import { aggregateVotes } from '../lib/voteUtils';
 import { extractMessageId, memberHasManageGuild, memberHasRoleName } from '../lib/guildUtils';
+import { computePremiumWindow, DASHBOARD_URL, DISCORDFORGE_VOTE_URL, TOPGG_VOTE_URL } from '../lib/botListVotes';
 
 export const data = new SlashCommandBuilder()
     .setName('view')
@@ -48,39 +49,50 @@ export async function handleViewPoll(
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     }
 
-    // 1. Check Premium Status (Voted in last 12 hours)
-    const { data: userData } = await supabase
+    // 1. Check Premium Status (supports stacked vote windows from Top.gg + DiscordForge)
+    let { data: userData, error: userErr } = await supabase
         .from('users')
-        .select('last_vote_at')
+        .select('last_vote_at, premium_expires_at')
         .eq('id', userId)
         .maybeSingle();
 
-    const now = new Date();
-    // Default to a date far in the past if no record found
-    const lastVote = userData?.last_vote_at ? new Date(userData.last_vote_at) : new Date(0);
-    const twelveHoursAgo = new Date(now.getTime() - 13 * 60 * 60 * 1000); // We make it 13 hours to give the user some buffer.
+    // Pre-migration-32 schema fallback if premium_expires_at column is absent
+    if (userErr && (userErr.code === 'PGRST204' || userErr.code === '42703')) {
+        const fallback = await supabase
+            .from('users')
+            .select('last_vote_at')
+            .eq('id', userId)
+            .maybeSingle();
+        userData = fallback.data as any;
+    }
 
-    // For local testing, you might want to bypass or mock this
-    const isPremium = lastVote > twelveHoursAgo;
+    const { isPremium } = computePremiumWindow(userData);
 
     if (!isPremium) {
-        const voteUrl = 'https://top.gg/bot/911731627498041374/vote'; // Replace with actual URL
-
         const embed = new EmbedBuilder()
             .setTitle(I18n.t('view.premium_title', interaction.locale))
             .setDescription(I18n.t('view.premium_desc', interaction.locale))
             .setColor('#FFD700'); // Gold
 
+        // Prioritize Top.gg first, allow stacking +12h via DiscordForge, and surface the Web Dashboard
         const row = new ActionRowBuilder<ButtonBuilder>()
             .addComponents(
                 new ButtonBuilder()
                     .setLabel(I18n.t('view.vote_unlock', interaction.locale))
                     .setStyle(ButtonStyle.Link)
-                    .setURL(voteUrl),
+                    .setURL(TOPGG_VOTE_URL),
+                new ButtonBuilder()
+                    .setLabel(I18n.t('view.vote_forge_unlock', interaction.locale))
+                    .setStyle(ButtonStyle.Link)
+                    .setURL(DISCORDFORGE_VOTE_URL),
                 new ButtonBuilder()
                     .setCustomId(`check_vote_${pollId}`)
                     .setLabel(I18n.t('view.i_voted', interaction.locale))
-                    .setStyle(ButtonStyle.Success)
+                    .setStyle(ButtonStyle.Success),
+                new ButtonBuilder()
+                    .setLabel(I18n.t('view.dashboard_btn', interaction.locale))
+                    .setStyle(ButtonStyle.Link)
+                    .setURL(DASHBOARD_URL)
             );
 
         await interaction.editReply({

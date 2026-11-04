@@ -6,6 +6,7 @@ import { PollManager } from '../lib/pollManager';
 import { I18n } from '../lib/i18n';
 import { upsertGuildRow, guildToRow, memberHasManageGuild, memberHasRoleName } from '../lib/guildUtils';
 import { endsAtFromDuration } from '../lib/durationUtils';
+import { maybeSendDashboardPromo } from '../lib/dashboardPromo';
 
 export default {
     data: new SlashCommandBuilder()
@@ -322,12 +323,9 @@ export default {
                     });
                 } else {
                     logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} created a poll with the following parameters "/poll title:${title} items:${items.join(', ')} max_votes:${maxVotes} min_votes:${minVotes} public:${isPublic} thread:${createThread} close_button:${allowClose} allowed_role:${targetRole ? targetRole.name : 'None'}"`);
-                    
-                    // Notify user about the web dashboard
-                    await interaction.followUp({
-                        content: '✨ **New!** Manage your polls and see votes in a cleaner, modern view on our web dashboard: https://pollbot.win',
-                        flags: MessageFlags.Ephemeral
-                    });
+
+                    // Randomized ephemeral nudge advertising the redesigned web dashboard
+                    await maybeSendDashboardPromo(interaction, 'poll_create');
                 }
             } else {
                 logger.warn('Skipping DB save (no credentials)');

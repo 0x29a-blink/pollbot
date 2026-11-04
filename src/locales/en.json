@@ -229,6 +229,11 @@
             "missing_perms_votes_tracked": "✅ **Your action was recorded!** However, I am missing permissions to update the poll message in that channel.\n\n⚠️ Please ensure I have the following permissions in the poll's channel: **{{permissions}}**\n\nOnce permissions are restored, the poll will update on the next action.",
             "missing_access_no_update": "❌ **Could not update poll!** I no longer have access to view the channel where this poll is located.\n\n⚠️ Please ensure I have the following permissions in that channel: **{{permissions}}**\n\nThe poll status was not changed. Once permissions are fixed, try again.",
             "missing_perms_no_update": "❌ **Could not update poll!** I am missing permissions to edit the poll message in that channel.\n\n⚠️ Please ensure I have the following permissions in the poll's channel: **{{permissions}}**\n\nThe poll status was not changed. Once permissions are fixed, try again."
+        },
+        "promo": {
+            "dashboard_voter": "Hey! Did you know we have a **[web dashboard](<{{url}}>)**? Check it out and manage your votes, track your voting history, and view live results on our newly redesigned real-time dashboard at <{{url}}>",
+            "dashboard_manager": "Hey! Did you know we have a **[web dashboard](<{{url}}>)**? Create, edit, close, and manage your polls & votes on our newly redesigned, ultra-fast real-time dashboard at <{{url}}>",
+            "open_dashboard_btn": "Open Web Dashboard"
         }
     },
     "stats": {
@@ -244,7 +249,7 @@
     },
     "view": {
         "title": "Detailed Results: {{title}}",
-        "description": "Select an option below to view the list of voters.",
+        "description": "Select an option below to view the list of voters — or explore live results, search voters, and manage polls on our **[Web Dashboard](<https://pollbot.win>)**.",
         "option_default": "Select an option...",
         "option_label": "Option {{index}} ({{count}} votes)",
         "voter_list_title": "Voters for Option {{index}}: {{option}}",
@@ -253,8 +258,10 @@
         "nav_prev": "Previous",
         "nav_next": "Next >",
         "premium_title": "Premium Feature: View Detailed Results",
-        "premium_desc": "Viewing detailed poll results (who voted for what) is a **Premium Feature**.\n\nTo unlock this for 12 hours, simply vote for the bot on Top.gg!\n\nIf you don't want to vote you can use the export app/command to get a list of voters but it will not be formatted automatically for you or show option winners, it is just a CSV of the voters.",
-        "vote_unlock": "Vote to Unlock",
+        "premium_desc": "Viewing detailed poll results (who voted for what) is a **Premium Feature**.\n\nTo unlock this for **12 hours**, vote for Simple Poll Bot on **Top.gg**! Want even more time? Vote on **DiscordForge** too — voting on both **stacks your time** (+12h per vote)!\n\n💡 **Tip:** Once unlocked, you can also browse full voter breakdowns, server analytics, and manage your polls in real time on our redesigned **[Web Dashboard](<https://pollbot.win>)**.\n\n*(Don't want to vote? You can still run `/export-poll` for a plain CSV export.)*",
+        "vote_unlock": "Vote on Top.gg",
+        "vote_forge_unlock": "DiscordForge (+12h)",
+        "dashboard_btn": "Web Dashboard",
         "i_voted": "I Voted!",
         "export_btn": "Export List",
         "export_restricted": "Exports and detailed views are disabled for this poll (or it is private). Only the Poll Creator or Poll Managers can view them.",

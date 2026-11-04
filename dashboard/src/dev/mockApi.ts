@@ -710,7 +710,12 @@ function handle(method: string, url: URL, rawBody?: string): Response | null {
     }
 
     if (p === '/api/user/premium/status' || p === '/api/user/premium/refresh') {
-        return json({ isPremium: true, expiresAt: new Date(now + 9 * H).toISOString(), voteUrl: 'https://top.gg/bot/911731627498041374/vote' });
+        return json({
+            isPremium: true,
+            expiresAt: new Date(now + 9 * H).toISOString(),
+            voteUrl: 'https://top.gg/bot/911731627498041374/vote',
+            secondaryVoteUrl: 'https://discordforge.org/bot/911731627498041374#vote',
+        });
     }
 
     m = p.match(/^\/api\/user\/polls\/(\d+)\/status$/);
