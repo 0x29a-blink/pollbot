@@ -1,12 +1,16 @@
 // Copyright (c) 2026 Simple Solutions.
 // Licensed under the MIT License. See LICENSE in the project root for details.
 
+import dns from 'dns';
 import { Client, Collection, GatewayIntentBits, Options, Partials } from 'discord.js';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { logger } from './lib/logger';
 import { I18n } from './lib/i18n';
+
+// Prefer IPv4 when dual-stack hosts have non-routable IPv6 links
+dns.setDefaultResultOrder('ipv4first');
 
 I18n.init();
 
@@ -27,6 +31,12 @@ export interface ExtendedClient extends Client {
 }
 
 const client = new Client({
+    // Node 22/24's built-in global FormData must pair with globalThis.fetch rather than
+    // a separate node_modules/undici request dispatcher so multipart attachment uploads
+    // never hang across dual undici realms.
+    rest: {
+        makeRequest: globalThis.fetch as any,
+    },
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,

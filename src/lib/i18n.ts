@@ -7,10 +7,14 @@ type LocaleMap = Record<string, any>;
 export class I18n {
     private static locales: Record<string, LocaleMap> = {};
     private static defaultLocale = 'en';
+    private static initialized = false;
     // Map Discord locales to our file names if different, though ours match Discord's standard mostly
     // Discord sends 'es-ES', we access 'es-ES'
 
     static init() {
+        if (this.initialized) return;
+        this.initialized = true;
+
         const localesPath = path.join(__dirname, '../locales');
         if (!fs.existsSync(localesPath)) {
             console.warn('Locales directory not found');
@@ -30,6 +34,12 @@ export class I18n {
         }
     }
 
+    static ensureInitialized() {
+        if (!this.initialized) {
+            this.init();
+        }
+    }
+
     private static resolveLocale(locale: Locale | string): string {
         if (this.locales[locale]) return locale;
         const prefix = String(locale).split('-')[0];
@@ -42,6 +52,7 @@ export class I18n {
     }
 
     static t(key: string, locale: Locale | string, args?: Record<string, any>): string {
+        this.ensureInitialized();
         // Fallback to language match or default locale if specific locale not found
         const targetLocale = this.resolveLocale(locale);
 
@@ -71,10 +82,12 @@ export class I18n {
     // Helper for Discord command localizations
     // Returns { "es-ES": "translation", ... }
     static getAvailableLocales(): string[] {
+        this.ensureInitialized();
         return Object.keys(this.locales);
     }
 
     static getLocalizations(key: string): Record<string, string> {
+        this.ensureInitialized();
         const localizations: Record<string, string> = {};
         for (const locale of Object.keys(this.locales)) {
             if (locale === this.defaultLocale) continue; // Skip default (English uses the base value)

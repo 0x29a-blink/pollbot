@@ -212,7 +212,7 @@ export default {
             // If server disables, force false. If server allows, use user choice (default true).
             const allowClose = serverAllowsButtons ? (userWantsButtons ?? true) : false;
 
-            // 3. Render Poll Image (Playwright)
+            // 3. Render Poll Image (@napi-rs/canvas)
             const resolvedTitle = await PollManager.resolveMentions(title, interaction.guild);
             const resolvedDescription = await PollManager.resolveMentions(description, interaction.guild);
             const resolvedItems = await Promise.all(items.map(async (item) => await PollManager.resolveMentions(item, interaction.guild)));

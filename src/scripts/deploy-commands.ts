@@ -1,9 +1,11 @@
+import dns from 'dns';
 import { REST, Routes } from 'discord.js';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { I18n } from '../lib/i18n';
 
+dns.setDefaultResultOrder('ipv4first');
 dotenv.config();
 
 // Initialize I18n
@@ -56,7 +58,7 @@ for (const file of commandFiles) {
     }
 }
 
-const rest = new REST().setToken(process.env.DISCORD_TOKEN!);
+const rest = new REST({ makeRequest: globalThis.fetch as any }).setToken(process.env.DISCORD_TOKEN!);
 
 (async () => {
     try {

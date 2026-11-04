@@ -71,7 +71,7 @@ export class BotListService {
         if (!token || !clientId) return;
 
         try {
-            const rest = new REST().setToken(token);
+            const rest = new REST({ makeRequest: globalThis.fetch as any }).setToken(token);
             const isDev = process.env.DEV_ONLY_MODE === 'true';
             const devGuildId = process.env.DEV_GUILD_ID;
 

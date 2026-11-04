@@ -15,8 +15,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      # Skip postinstall: it downloads Chromium and runs a full build, which is
-      # unnecessary for typechecking and unit tests.
+      # Skip optional binary postinstall scripts (e.g. cloudflared) that are
+      # unnecessary for typechecking, linting, and unit tests.
       - name: Install dependencies
         run: npm ci --ignore-scripts
       - name: Typecheck

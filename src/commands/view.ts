@@ -44,7 +44,7 @@ export async function handleViewPoll(
     const userId = interaction.user.id;
 
     // Acknowledge immediately: everything below performs several DB queries and a
-    // Playwright render that can easily exceed Discord's 3-second reply window.
+    // canvas render that can easily exceed Discord's 3-second reply window.
     if (!interaction.deferred && !interaction.replied) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     }

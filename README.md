@@ -102,19 +102,18 @@ message.
 
 ## Getting started (self-hosting)
 
-Built with TypeScript, discord.js, and Playwright; data lives in Supabase
-(Postgres) and polls are rendered by a headless-Chromium render service.
+Built with TypeScript, discord.js, and `@napi-rs/canvas`; data lives in Supabase
+(Postgres) and poll cards are rendered directly in-process with Skia canvas.
 
 ### Prerequisites
 
-- Node.js 20 or newer (CI runs 22)
+- Node.js 22 or newer
 - A Supabase project (or a local Supabase stack for development)
 - A Discord application with a bot token
 
 ### Setup
 
-1. Install dependencies (the postinstall step downloads the Chromium build
-   used for rendering and compiles the backend):
+1. Install dependencies:
 
    ```bash
    npm install
