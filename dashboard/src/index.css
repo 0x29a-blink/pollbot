@@ -1,40 +1,171 @@
 @import "tailwindcss";
 
-/* Design tokens. @theme values generate Tailwind utilities (bg-primary,
-   text-primary, bg-primary/10, ...). New colors go through here — never
-   build class names by string interpolation (Tailwind can't see them). */
+/* ==========================================================================
+   PollBot design system
+   --------------------------------------------------------------------------
+   Fluent (Windows 11 dark: cool charcoal mica ground, layered content sheet,
+   8/4px radii, Segoe UI Variable, sky-cyan #60cdff selection accent) +
+   Discord (server rail, channel-style sidebar, user panel, blurple #5865f2,
+   role dots, semantic green/amber/red) + Material 3 (state layers, tonal
+   brand containers, segmented buttons, semantic chips).
+   Elevation is a crisp lightness step; there are no neon glows, rainbow
+   gradients, or backdrop-blur glass.
+
+   Every colour is a token. @theme values generate Tailwind utilities
+   (bg-surface, text-muted, border-line, bg-brand, text-cyan, ...). Never
+   build class names by string interpolation - Tailwind can't see them.
+   ========================================================================== */
+
 @theme {
-  --color-primary: #6366f1;          /* indigo-500 — the one brand accent */
-  --color-primary-strong: #4f46e5;   /* indigo-600 — hover/active */
-  --color-surface: #0a0a0f;
+  /* ---- Shell: Discord + Fluenty cool charcoal ramp (darkest to lightest) ---- */
+  --color-rail: #16171b;          /* Discord server rail */
+  --color-ground: #1e2025;        /* Fluent mica base: sidebar, public ground */
+  --color-sheet: #26282f;         /* Fluent content layer */
+  --color-surface: #2e3139;       /* cards on the sheet */
+  --color-raised: #373b45;        /* nested panels, hover tiles */
+  --color-overlay: #2b2e36;       /* menus, dialogs, tooltips (they float) */
+
+  /* ---- Lines ---- */
+  --color-line: #3c404c;          /* card edges */
+  --color-rule: #343843;          /* row rules inside cards */
+  --color-control: #4e5362;       /* input and outlined-button borders */
+
+  /* ---- Text (all tiers hold >= 5:1 contrast on surface & sheet) ---- */
+  --color-ink: #ffffff;
+  --color-muted: #cacfd9;
+  --color-faint: #9ca3b4;
+
+  /* ---- PollBot blue + Fluenty sky-cyan ---- */
+  --color-brand: #5865f2;         /* fills: primary button, main data series */
+  --color-brand-hover: #4752c4;
+  --color-brand-press: #3c45a5;
+  --color-brand-text: #9aa2ff;    /* links / accent text on dark (>6:1) */
+  --color-brand-soft: #2c3266;    /* M3 tonal container: selected controls */
+  --color-brand-soft-ink: #e3e6ff;
+
+  --color-cyan: #60cdff;          /* Fluenty Windows 11 sky-cyan accent */
+  --color-cyan-soft: #1b3848;
+  --color-cyan-ink: #c7eeff;
+
+  --color-data: #6d78f9;          /* primary chart series */
+  --color-data-2: #60cdff;        /* secondary chart series (Fluenty cyan) */
+
+  /* ---- Status: Discord / M3 semantic hues on dark tonal containers ---- */
+  --color-positive: #4cc38a;
+  --color-positive-soft: #1c352a;
+  --color-negative: #f2777d;
+  --color-negative-soft: #3d2226;
+  --color-warning: #f0b232;
+  --color-warning-soft: #3c301e;
+
+  /* ---- Remap Tailwind palettes still used by older components ---- */
+  --color-slate-50: #fafafa;
+  --color-slate-100: #f3f4f6;
+  --color-slate-200: #e3e5ea;
+  --color-slate-300: #cfd3dc;
+  --color-slate-400: #b2b8c6;
+  --color-slate-500: #969dad;
+  --color-slate-600: #595f6f;
+  --color-slate-700: #3c404c;
+  --color-slate-800: #2e3139;
+  --color-slate-900: #23252c;
+  --color-slate-950: #191b20;
+  --color-gray-400: #b2b8c6;
+  --color-gray-500: #969dad;
+  --color-gray-600: #595f6f;
+  --color-gray-700: #3c404c;
+  --color-gray-800: #2e3139;
+  --color-gray-900: #23252c;
+
+  --color-indigo-50: #eef0fe;
+  --color-indigo-100: #e0e3fd;
+  --color-indigo-200: #c6cbfb;
+  --color-indigo-300: #a5adf8;
+  --color-indigo-400: #9aa2ff;
+  --color-indigo-500: #5865f2;
+  --color-indigo-600: #4752c4;
+  --color-indigo-700: #3c45a5;
+  --color-indigo-800: #2f3680;
+  --color-indigo-900: #262b63;
+  --color-indigo-950: #171a3b;
+  --color-violet-300: #a5adf8;
+  --color-violet-400: #9aa2ff;
+  --color-violet-500: #5865f2;
+  --color-violet-600: #4752c4;
+  --color-purple-400: #9aa2ff;
+  --color-purple-500: #5865f2;
+  --color-blue-400: #9aa2ff;
+  --color-blue-500: #5865f2;
+  --color-cyan-400: #60cdff;
+  --color-cyan-500: #38bdf8;
+
+  /* Legacy names kept for components not yet migrated */
+  --color-primary: #5865f2;
+  --color-primary-strong: #4752c4;
+
+  /* ---- Type: Fluent ramp ---- */
+  --font-sans: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Inter Variable", "Inter", system-ui, -apple-system, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", "Inter Variable", "Inter", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+
+  /* ---- Shape: Fluent 8 (cards, dialogs) / 4 (controls) ---- */
+  --radius-card: 8px;
+  --radius-control: 4px;
+
+  /* ---- Motion: Fluent decelerate / M3 standard ---- */
+  --ease-fluent: cubic-bezier(0, 0, 0, 1);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
 }
 
 :root {
-  --color-bg: #0a0a0f;
-  --color-card-bg: rgba(22, 22, 30, 0.6);
-  --color-card-border: rgba(255, 255, 255, 0.1);
-  --color-primary-glow: rgba(99, 102, 241, 0.5);
-  --color-text-main: #ffffff;
-  --color-text-muted: #9ca3af;
-  --font-family: 'Inter Variable', 'Inter', system-ui, -apple-system, sans-serif;
-  --glass-blur: blur(12px);
+  color-scheme: dark;
+  /* M3 state layers */
+  --state-hover: rgba(255, 255, 255, 0.06);
+  --state-press: rgba(255, 255, 255, 0.04);
+  --state-selected: rgba(88, 101, 242, 0.16);
+  --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.38), 0 0 0 1px rgba(0, 0, 0, 0.32);
 }
 
+html,
 body {
   margin: 0;
   padding: 0;
-  font-family: var(--font-family);
-  background: var(--color-bg);
-  background-image:
-    radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.08), transparent 25%),
-    radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.08), transparent 25%);
-  color: var(--color-text-main);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  background: var(--color-ground);
+  color: var(--color-ink);
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
   overflow-x: hidden;
 }
 
+::selection {
+  background: rgba(88, 101, 242, 0.45);
+  color: #fff;
+}
+
+/* In the base layer so Tailwind's outline utilities (outline-none) can override it. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--color-cyan);
+    outline-offset: 2px;
+  }
+}
+
+/* Fluent-thin scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #4e5362 transparent;
+}
+
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
@@ -42,86 +173,442 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #333;
-  border-radius: 4px;
+  background: #4e5362;
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #444;
+  background: #6c7387;
+  background-clip: content-box;
+  border: 3px solid transparent;
 }
 
-/* Utilities */
-.glass-panel {
-  background: var(--color-card-bg);
-  backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--color-card-border);
-  border-radius: 12px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+.num {
+  font-variant-numeric: tabular-nums;
 }
 
-.title-gradient {
-  background: linear-gradient(135deg, #fff 0%, #a5b4fc 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  font-weight: 700;
-}
+/* ==========================================================================
+   Components
+   ========================================================================== */
+@layer components {
 
-.btn-primary {
-  background: var(--color-primary);
-  color: white;
-  border: none;
-  padding: 0.75rem 1.5rem;
-  border-radius: 8px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 0 15px var(--color-primary-glow);
-}
-
-.btn-primary:hover {
-  filter: brightness(1.1);
-  transform: translateY(-1px);
-}
-
-.container-wide {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 2rem;
-}
-
-.grid-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 1.5rem;
-  margin-bottom: 2rem;
-}
-
-.server-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 1.5rem;
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
+  /* Card on the content sheet: one tone step up and a quiet edge. */
+  .panel {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
   }
 
-  to {
-    opacity: 1;
-    transform: translateY(0);
+  /* Legacy alias: every old glass card becomes a flat panel. */
+  .glass-panel {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+  }
+
+  .panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 52px;
+    padding: 0 20px;
+  }
+
+  .panel-title {
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+
+  .panel-meta {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--color-faint);
+  }
+
+  /* ---- Buttons (M3 hierarchy, Fluent/Discord 4px geometry) ---- */
+  .btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 14px;
+    border-radius: var(--radius-control);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    border: 1px solid transparent;
+    transition: background-color 120ms var(--ease-standard), border-color 120ms var(--ease-standard), color 120ms var(--ease-standard), transform 80ms var(--ease-standard);
+  }
+
+  .btn:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
+  .btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  .btn-sm {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 13px;
+    gap: 6px;
+  }
+
+  .btn-lg {
+    height: 40px;
+    padding: 0 18px;
+  }
+
+  .btn-icon {
+    width: 32px;
+    padding: 0;
+  }
+
+  .btn-sm.btn-icon {
+    width: 28px;
+  }
+
+  /* Filled: the one primary action on a screen */
+  .btn-primary {
+    background: var(--color-brand);
+    color: #fff;
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background: var(--color-brand-hover);
+  }
+
+  .btn-primary:active:not(:disabled) {
+    background: var(--color-brand-press);
+  }
+
+  /* Tonal (M3 secondary tonal container in PollBot blue) */
+  .btn-tonal {
+    background: var(--color-brand-soft);
+    border-color: rgba(124, 134, 246, 0.25);
+    color: var(--color-brand-soft-ink);
+  }
+
+  .btn-tonal:hover:not(:disabled) {
+    background: #363d7a;
+    border-color: rgba(124, 134, 246, 0.38);
+  }
+
+  /* Outlined */
+  .btn-outline {
+    background: transparent;
+    border-color: var(--color-control);
+    color: var(--color-ink);
+  }
+
+  .btn-outline:hover:not(:disabled) {
+    background: var(--state-hover);
+    border-color: #63697b;
+  }
+
+  /* Text / ghost */
+  .btn-ghost {
+    background: transparent;
+    color: var(--color-muted);
+  }
+
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--state-hover);
+    color: var(--color-ink);
+  }
+
+  /* Destructive */
+  .btn-danger {
+    background: transparent;
+    border-color: #6e353a;
+    color: var(--color-negative);
+  }
+
+  .btn-danger:hover:not(:disabled) {
+    background: var(--color-negative-soft);
+  }
+
+  .btn-danger-solid {
+    background: #da373c;
+    color: #fff;
+  }
+
+  .btn-danger-solid:hover:not(:disabled) {
+    background: #a12828;
+  }
+
+  /* ---- Fields: Fluent text box (sky-cyan / brand underline on focus) ---- */
+  .field {
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    background: #252830;
+    color: var(--color-ink);
+    font: inherit;
+    font-size: 14px;
+    border: 1px solid var(--color-control);
+    border-bottom-color: #697084;
+    border-radius: var(--radius-control);
+    outline: none;
+    transition: border-color 120ms var(--ease-standard), background-color 120ms var(--ease-standard);
+  }
+
+  .field::placeholder {
+    color: var(--color-faint);
+  }
+
+  .field:hover {
+    background: #2a2d36;
+  }
+
+  .field:focus {
+    background: #1b1d23;
+    border-color: var(--color-control);
+    border-bottom: 2px solid var(--color-cyan);
+    padding-bottom: 0;
+  }
+
+  select.field {
+    appearance: none;
+    padding-right: 32px;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23cacfd9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+  }
+
+  select.field option {
+    background: #2b2e36;
+    color: #fff;
+  }
+
+  /* ---- Segmented button (M3 tonal brand selection) ---- */
+  .segmented {
+    display: inline-flex;
+    height: 32px;
+    padding: 2px;
+    gap: 2px;
+    background: #1b1d22;
+    border: 1px solid var(--color-line);
+    border-radius: 6px;
+  }
+
+  .segmented > button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px;
+    border-radius: var(--radius-control);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-muted);
+    cursor: pointer;
+    transition: background-color 120ms var(--ease-standard), color 120ms var(--ease-standard);
+  }
+
+  .segmented > button:hover:not(:disabled) {
+    color: var(--color-ink);
+    background: var(--state-hover);
+  }
+
+  .segmented > button[aria-pressed="true"],
+  .segmented > button[aria-selected="true"] {
+    background: var(--color-brand-soft);
+    color: var(--color-brand-soft-ink);
+    box-shadow: inset 0 0 0 1px rgba(138, 149, 255, 0.28);
+  }
+
+  .segmented > button[aria-pressed="true"] .text-faint,
+  .segmented > button[aria-selected="true"] .text-faint {
+    color: #b7bfff;
+  }
+
+  /* ---- Chips / status pills: hue on a dark tonal tint of itself ---- */
+  .chip {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    background: #383c47;
+    color: var(--color-muted);
+  }
+
+  .chip-dot::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: currentColor;
+  }
+
+  .chip-positive {
+    background: var(--color-positive-soft);
+    color: var(--color-positive);
+  }
+
+  .chip-negative {
+    background: var(--color-negative-soft);
+    color: var(--color-negative);
+  }
+
+  .chip-warning {
+    background: var(--color-warning-soft);
+    color: var(--color-warning);
+  }
+
+  .chip-brand {
+    background: var(--color-brand-soft);
+    color: var(--color-brand-soft-ink);
+  }
+
+  .chip-cyan {
+    background: var(--color-cyan-soft);
+    color: var(--color-cyan);
+  }
+
+  /* ---- Rows with an M3 state layer ---- */
+  .row-interactive {
+    transition: background-color 120ms var(--ease-standard);
+    cursor: pointer;
+  }
+
+  .row-interactive:hover {
+    background: rgba(124, 134, 246, 0.07);
+  }
+
+  .row-interactive:active {
+    background: rgba(124, 134, 246, 0.11);
+  }
+
+  /* ---- Divided KPI strip ---- */
+  .kpi-strip {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    overflow: hidden;
+  }
+
+  .kpi-strip > * + * {
+    border-left: 1px solid var(--color-rule);
+  }
+
+  @media (max-width: 720px) {
+    .kpi-strip {
+      grid-auto-flow: row;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .kpi-strip > * + * {
+      border-left: 0;
+    }
+
+    .kpi-strip > *:nth-child(even) {
+      border-left: 1px solid var(--color-rule);
+    }
+
+    .kpi-strip > *:nth-child(n + 3) {
+      border-top: 1px solid var(--color-rule);
+    }
+  }
+
+  /* Plain table: rules and alignment */
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+
+  .data-table th {
+    height: 36px;
+    padding: 0 12px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-faint);
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .data-table td {
+    height: 48px;
+    padding: 0 12px;
+    border-top: 1px solid var(--color-rule);
+    color: var(--color-muted);
+  }
+
+  .data-table th.num,
+  .data-table td.num {
+    text-align: right;
+  }
+
+  /* Skeleton bars: flat, real size, no shimmer */
+  .skeleton {
+    background: #3a3e49;
+    border-radius: 4px;
+  }
+
+  /* Legacy helpers kept so untouched screens don't break */
+  .title-gradient {
+    color: var(--color-ink);
+    font-weight: 600;
+  }
+
+  .container-wide {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 2rem;
+  }
+
+  .grid-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .server-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+  }
+
+  .chart-container {
+    width: 100%;
+    min-height: 300px;
+    position: relative;
   }
 }
 
+/* App screens don't perform entrances; the legacy class is now a no-op. */
 .animate-fade-in {
-  animation: fadeIn 0.4s ease-out forwards;
+  animation: none;
 }
 
-.chart-container {
-  width: 100%;
-  min-height: 300px;
-  position: relative;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+  }
 }
 
 /* Style number input spinners */

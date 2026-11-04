@@ -1,7 +1,8 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionsBitField, MessageFlags, GuildMember } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { PollManager } from '../lib/pollManager';
 import { I18n } from '../lib/i18n';
 import { logger } from '../lib/logger';
+import { extractMessageId } from '../lib/guildUtils';
 
 export default {
     data: new SlashCommandBuilder()
@@ -18,14 +19,7 @@ export default {
         }
 
         const pollInput = interaction.options.getString('poll', true);
-
-        // Extract Message ID
-        // Supports raw ID or https://discord.com/channels/GUILD/CHANNEL/MESSAGE_ID
-        let pollId = pollInput;
-        const match = pollInput.match(/channels\/\d+\/\d+\/(\d+)/);
-        if (match && match[1]) {
-            pollId = match[1];
-        }
+        const pollId = extractMessageId(pollInput);
 
         // Validate ID format (simple check)
         if (!/^\d+$/.test(pollId)) {

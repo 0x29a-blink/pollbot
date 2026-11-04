@@ -11,6 +11,58 @@ export interface VoteRow {
     user_id?: string | null;
 }
 
+export interface PollVoteRecord {
+    user_id: string;
+    option_index: number | null;
+    weight?: number | null;
+    created_at?: string;
+}
+
+const VOTE_PAGE_SIZE = 1000;
+
+/**
+ * Fetches all vote rows for a poll (optionally filtered to a single `option_index`),
+ * paginating past PostgREST's default 1,000-row limit with deterministic ordering.
+ */
+export async function fetchAllPollVotes(
+    pollId: string,
+    options?: { optionIndex?: number }
+): Promise<{ data: PollVoteRecord[]; error: { message?: string; code?: string } | null }> {
+    const allRows: PollVoteRecord[] = [];
+    let offset = 0;
+
+    while (true) {
+        let query = supabase
+            .from('votes')
+            .select('user_id, option_index, weight, created_at')
+            .eq('poll_id', pollId);
+
+        if (options?.optionIndex !== undefined) {
+            query = query.eq('option_index', options.optionIndex);
+        }
+
+        const { data, error } = await query
+            .order('created_at', { ascending: true })
+            .order('user_id', { ascending: true })
+            .order('option_index', { ascending: true })
+            .range(offset, offset + VOTE_PAGE_SIZE - 1);
+
+        if (error) {
+            return { data: [], error };
+        }
+
+        const batch = (data as PollVoteRecord[]) || [];
+        allRows.push(...batch);
+
+        if (batch.length < VOTE_PAGE_SIZE) {
+            break;
+        }
+        offset += VOTE_PAGE_SIZE;
+    }
+
+    return { data: allRows, error: null };
+}
+
 /**
  * Vote aggregation result containing counts per option and totals.
  */
@@ -80,10 +132,7 @@ export function aggregateVoteRows(votes: VoteRow[], optionCount: number): Omit<V
  * @param optionCount - Number of options in the poll
  */
 export async function aggregateVotes(pollId: string, optionCount: number): Promise<VoteAggregation> {
-    const { data: votes, error } = await supabase
-        .from('votes')
-        .select('option_index, weight, user_id')
-        .eq('poll_id', pollId);
+    const { data: votes, error } = await fetchAllPollVotes(pollId);
 
     if (error) {
         logger.error(`[VoteUtils] Failed to aggregate votes for poll ${pollId}:`, error);
@@ -204,12 +253,14 @@ async function replaceUserVotesFallback(
  * Gets weighted vote counts as a Record for API responses.
  *
  * @returns `voteCounts` keyed by option index, `totalVotes` (weighted total),
- *          and `error` propagated from {@link aggregateVotes}.
+ *          `uniqueVoters` (distinct users, unweighted), and `error`
+ *          propagated from {@link aggregateVotes}. When `error` is true the
+ *          numbers are a zero-filled fallback and must not be displayed as data.
  */
 export async function getVoteCountsForPoll(
     pollId: string,
     options: string[]
-): Promise<{ voteCounts: Record<number, number>; totalVotes: number; error: boolean }> {
+): Promise<{ voteCounts: Record<number, number>; totalVotes: number; uniqueVoters: number; error: boolean }> {
     const aggregation = await aggregateVotes(pollId, options.length);
 
     const voteCounts: Record<number, number> = {};
@@ -220,6 +271,7 @@ export async function getVoteCountsForPoll(
     return {
         voteCounts,
         totalVotes: aggregation.totalWeight,
+        uniqueVoters: aggregation.uniqueVoters,
         error: aggregation.error,
     };
 }

@@ -33,8 +33,10 @@ export interface StatsRenderOptions {
     };
 }
 
-const RENDER_SERVICE_PORT = process.env.RENDER_SERVICE_PORT ? parseInt(process.env.RENDER_SERVICE_PORT) : 3000;
-const RENDER_SERVICE_URL = `http://localhost:${RENDER_SERVICE_PORT}/render`;
+const RENDER_SERVICE_HOST = process.env.RENDER_SERVICE_HOST || '127.0.0.1';
+const RENDER_SERVICE_PORT = process.env.RENDER_SERVICE_PORT ? parseInt(process.env.RENDER_SERVICE_PORT, 10) : 3000;
+const RENDER_SERVICE_URL = `http://${RENDER_SERVICE_HOST}:${RENDER_SERVICE_PORT}/render`;
+const RENDER_TIMEOUT_MS = 30_000;
 
 export class Renderer {
     static async renderPoll(data: RenderOptions): Promise<Buffer> {
@@ -54,7 +56,8 @@ export class Renderer {
             const response = await fetch(RENDER_SERVICE_URL, {
                 method: 'POST',
                 body: JSON.stringify(payload),
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                signal: AbortSignal.timeout(RENDER_TIMEOUT_MS),
             });
 
             if (!response.ok) {

@@ -212,7 +212,7 @@ export class RenderBackend {
                 <div class="divider"></div>
 
                 <div class="options-list">
-                    ${displayItems.map((item, i) => {
+                    ${displayItems.map((item) => {
             const votes = item.count;
             const total = data.totalVotes || 0;
             const percent = total > 0 ? (votes / total) * 100 : 0;
@@ -481,8 +481,8 @@ export class RenderBackend {
     static async renderDetailedView(page: Page, data: RenderOptions): Promise<Buffer> {
         // Calculate Totals and Winner
         const votes = data.votes || data.options.map(() => 0);
-        const totalVotes = votes.reduce((a, b) => a + b, 0);
-        const highestVote = Math.max(...votes);
+        const totalVotes = data.totalVotes ?? votes.reduce((a, b) => a + b, 0);
+        const highestVote = Math.max(...votes, 0);
 
         // Prepare Data for Chart/List
         const items = data.options.map((opt, i) => {
@@ -689,8 +689,8 @@ export class RenderBackend {
 
 
 // Basic HTML escape to prevent injection
-function escapeHtml(unsafe: string) {
-    return unsafe
+function escapeHtml(unsafe: string | null | undefined) {
+    return String(unsafe ?? '')
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")

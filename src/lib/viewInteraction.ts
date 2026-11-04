@@ -1,10 +1,14 @@
-import { ButtonInteraction, StringSelectMenuInteraction, ActionRowBuilder, ButtonBuilder, EmbedBuilder, ButtonStyle, ComponentType } from 'discord.js';
+import { ButtonInteraction, StringSelectMenuInteraction, ActionRowBuilder, ButtonBuilder, EmbedBuilder, ButtonStyle, MessageFlags } from 'discord.js';
 import { supabase } from '../lib/db';
 import { I18n } from '../lib/i18n';
 import { logger } from '../lib/logger';
+import { fetchMembersChunked, memberHasManageGuild, memberHasRoleName } from '../lib/guildUtils';
+import { fetchAllPollVotes } from '../lib/voteUtils';
 
 export class ViewInteractionHandler {
     static async handle(interaction: ButtonInteraction | StringSelectMenuInteraction) {
+        if (!interaction.inGuild() || !interaction.guild) return;
+
         // Parse Custom ID: view_pollId_action_page_optionIndex
         // Example: view_12345_next_1_2  (Page 1, Option 2)
         //          view_12345_select_0_2 (Select Option 2, default page 0)
@@ -20,12 +24,15 @@ export class ViewInteractionHandler {
 
         const pollId = parts[1] || '';
         const action = parts[2] || '';
-        let page = parseInt(parts[3] || '0');
-        let selectedOption = parseInt(parts[4] || '0');
+        let page = parseInt(parts[3] || '0', 10);
+        let selectedOption = parseInt(parts[4] || '0', 10);
+        if (Number.isNaN(page)) page = 0;
+        if (Number.isNaN(selectedOption)) selectedOption = 0;
 
         // Handle Select Menu
         if (interaction.isStringSelectMenu()) {
-            selectedOption = parseInt(interaction.values[0] || '0');
+            selectedOption = parseInt(interaction.values[0] || '0', 10);
+            if (Number.isNaN(selectedOption)) selectedOption = 0;
             page = 0; // Reset to first page on new selection
         } else {
             // Handle Buttons
@@ -33,68 +40,81 @@ export class ViewInteractionHandler {
             if (action === 'next') page++;
             if (action === 'first') page = 0;
             if (action === 'export') {
-                const { data: allVoters, error: exportError } = await supabase
-                    .from('votes')
-                    .select('user_id')
-                    .eq('poll_id', pollId)
-                    .eq('option_index', selectedOption);
-
-                if (exportError || !allVoters) {
-                    await interaction.followUp({ content: I18n.t('messages.common.generic_error', interaction.locale), ephemeral: true });
-                    return;
-                }
-
-                // Fetch Option Name for filename
-                const { data: pollData } = await supabase
-                    .from('polls')
-                    .select('options')
-                    .eq('message_id', pollId)
-                    .single();
-
-                const fallbackName = I18n.t('view.option_generic', interaction.locale, { index: (selectedOption + 1).toString() });
-                const optName = pollData?.options ? (pollData.options as string[])[selectedOption] : fallbackName;
-                const safeOptName = optName || fallbackName;
-                const cleanOptName = safeOptName.replace(/[^a-z0-9]/gi, '_').substring(0, 30);
-
-                // Format content
-                let fileContent = I18n.t('view.export_content', interaction.locale, { option: safeOptName });
-
-                // Fetch members to get nicknames (Optional, might be slow for thousands)
-                // For "Premium" feel, maybe we try? But for stability, IDs are safest.
-                // Let's just list User IDs for now as per "simple text file", but user asked for "userid, username, display name, nickname".
-                // We need to fetch from Discord.
-
                 try {
-                    const guild = interaction.guild;
-                    if (guild) {
-                        // Max fetch is limited usually? 
-                        // For large polls, this might timeout.
-                        // Let's fetch in chunks or just fetch the ones we have?
-                        // Actually, guild.members.fetch({ user: ids }) works well.
-                        const userIds = allVoters.map(v => v.user_id);
-                        // Split into chunks of 100 if needed? Discord.js handles it?
-                        // Let's do it safely.
-                        await interaction.deferReply({ ephemeral: true }); // We follow up
+                    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-                        const members = await guild.members.fetch({ user: userIds });
+                    // Verify poll belongs to this guild & caller has export permission
+                    const { data: pollData, error: pollError } = await supabase
+                        .from('polls')
+                        .select('guild_id, options, settings, creator_id')
+                        .eq('message_id', pollId)
+                        .eq('guild_id', interaction.guildId)
+                        .maybeSingle();
 
-                        allVoters.forEach(v => {
-                            const member = members.get(v.user_id);
-                            const username = member?.user.username || I18n.t('messages.manager.unknown_user', interaction.locale);
-                            const displayName = member?.user.displayName || I18n.t('messages.manager.unknown_user', interaction.locale);
-                            const nickname = member?.nickname || I18n.t('messages.common.none', interaction.locale);
-                            fileContent += `${v.user_id} | ${username} | ${displayName} | ${nickname}\n`;
-                        });
-
-                        const buffer = Buffer.from(fileContent, 'utf-8');
-                        const attachment = { attachment: buffer, name: `voters_${cleanOptName}.txt` };
-
-                        await interaction.editReply({ files: [attachment] });
-                        return; // Done with export interaction
+                    if (pollError || !pollData) {
+                        await interaction.editReply({ content: I18n.t('messages.manager.poll_not_found', interaction.locale) });
+                        return;
                     }
+
+                    const settings = (pollData.settings as Record<string, any>) || {};
+                    const allowExports = settings.allow_exports !== false;
+                    const isPublic = settings.public !== false;
+                    if (!allowExports || !isPublic) {
+                        const isCreator = pollData.creator_id === interaction.user.id;
+                        const hasRole = memberHasRoleName(interaction.guild, interaction.member, 'Poll Manager');
+                        const hasPermission = memberHasManageGuild(interaction.member);
+                        if (!isCreator && !hasRole && !hasPermission) {
+                            await interaction.editReply({ content: I18n.t('view.export_restricted', interaction.locale) });
+                            return;
+                        }
+                    }
+
+                    const options = (pollData.options as string[]) || [];
+                    if (selectedOption < 0 || selectedOption >= options.length) {
+                        await interaction.editReply({ content: I18n.t('messages.poll.invalid_selection', interaction.locale) });
+                        return;
+                    }
+
+                    const { data: allVoters, error: exportError } = await fetchAllPollVotes(pollId, {
+                        optionIndex: selectedOption,
+                    });
+
+                    if (exportError || !allVoters) {
+                        await interaction.editReply({ content: I18n.t('messages.common.generic_error', interaction.locale) });
+                        return;
+                    }
+
+                    const fallbackName = I18n.t('view.option_generic', interaction.locale, { index: (selectedOption + 1).toString() });
+                    const optName = options[selectedOption] || fallbackName;
+                    const cleanOptName = optName.replace(/[^a-z0-9]/gi, '_').substring(0, 30) || `opt_${selectedOption + 1}`;
+
+                    let fileContent = I18n.t('view.export_content', interaction.locale, { option: optName });
+
+                    const userIds = allVoters.map(v => v.user_id);
+                    const members = await fetchMembersChunked(interaction.guild, userIds);
+                    const cleanField = (val: string) => val.replace(/[\r\n|]+/g, ' ').trim();
+
+                    allVoters.forEach(v => {
+                        const member = members.get(v.user_id);
+                        const username = cleanField(member?.user.username || I18n.t('messages.manager.unknown_user', interaction.locale));
+                        const displayName = cleanField(member?.user.displayName || I18n.t('messages.manager.unknown_user', interaction.locale));
+                        const nickname = cleanField(member?.nickname || I18n.t('messages.common.none', interaction.locale));
+                        fileContent += `${v.user_id} | ${username} | ${displayName} | ${nickname}\n`;
+                    });
+
+                    const buffer = Buffer.from(fileContent, 'utf-8');
+                    const attachment = { attachment: buffer, name: `voters_${cleanOptName}.txt` };
+
+                    await interaction.editReply({ files: [attachment] });
                 } catch (e) {
-                    logger.error("Export fetch failed", e);
-                    await interaction.followUp({ content: I18n.t('view.export_fail', interaction.locale), ephemeral: true });
+                    logger.error('Export fetch failed', e);
+                    try {
+                        if (interaction.deferred || interaction.replied) {
+                            await interaction.editReply({ content: I18n.t('view.export_fail', interaction.locale) });
+                        } else {
+                            await interaction.reply({ content: I18n.t('view.export_fail', interaction.locale), flags: MessageFlags.Ephemeral });
+                        }
+                    } catch { /* ignore */ }
                 }
                 return;
             }
@@ -108,6 +128,30 @@ export class ViewInteractionHandler {
                 return;
             }
             throw error;
+        }
+
+        // Verify Poll belongs to this guild & fetch options
+        const { data: poll } = await supabase
+            .from('polls')
+            .select('guild_id, options, settings, creator_id')
+            .eq('message_id', pollId)
+            .eq('guild_id', interaction.guildId)
+            .maybeSingle();
+
+        if (!poll) {
+            await interaction.followUp({ content: I18n.t('messages.manager.poll_not_found', interaction.locale), flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        const settings = (poll.settings as Record<string, any>) || {};
+        if (settings.allow_exports === false || settings.public === false) {
+            const isCreator = poll.creator_id === interaction.user.id;
+            const hasRole = memberHasRoleName(interaction.guild, interaction.member, 'Poll Manager');
+            const hasPermission = memberHasManageGuild(interaction.member);
+            if (!isCreator && !hasRole && !hasPermission) {
+                await interaction.followUp({ content: I18n.t('view.export_restricted', interaction.locale), flags: MessageFlags.Ephemeral });
+                return;
+            }
         }
 
         // Fetch Data
@@ -131,34 +175,28 @@ export class ViewInteractionHandler {
         const start = page * pageSize;
         const end = start + pageSize - 1;
 
-        // Fetch Voters (Paginated)
-        // Note: option_index column in votes table
+        // Fetch Voters (Paginated with deterministic ordering)
         const { data: voters, error } = await supabase
             .from('votes')
             .select('user_id')
             .eq('poll_id', pollId)
             .eq('option_index', selectedOption)
+            .order('created_at', { ascending: true })
+            .order('user_id', { ascending: true })
             .range(start, end);
 
         if (error) {
             logger.error('View Interaction Error:', error);
-            await interaction.followUp({ content: I18n.t('messages.common.generic_error', interaction.locale), ephemeral: true });
+            await interaction.followUp({ content: I18n.t('messages.common.generic_error', interaction.locale), flags: MessageFlags.Ephemeral });
             return;
         }
 
-
-        // Get Poll Data for Option Name
-        const { data: poll } = await supabase
-            .from('polls')
-            .select('options')
-            .eq('message_id', pollId)
-            .single();
-
-        const optionName = poll?.options ? (poll.options as string[])[selectedOption] : I18n.t('view.option_generic', interaction.locale, { index: (selectedOption + 1).toString() });
+        const optionName = poll.options ? (poll.options as string[])[selectedOption] : I18n.t('view.option_generic', interaction.locale, { index: (selectedOption + 1).toString() });
+        const rawTitle = I18n.t('view.voter_list_title', interaction.locale, { index: (selectedOption + 1).toString(), option: optionName });
 
         // Build Embed
         const embed = new EmbedBuilder()
-            .setTitle(I18n.t('view.voter_list_title', interaction.locale, { index: (selectedOption + 1).toString(), option: optionName }))
+            .setTitle(rawTitle.slice(0, 256))
             .setColor('#5865F2');
 
         if (voters && voters.length > 0) {
@@ -169,11 +207,6 @@ export class ViewInteractionHandler {
             embed.setDescription(I18n.t('view.no_votes', interaction.locale));
             embed.setFooter({ text: I18n.t('view.page_indicator', interaction.locale, { current: '1', total: '1' }) });
         }
-
-        // Rebuild Buttons
-        // We reuse the existing select menu from the message?
-        // Actually, we should probably just update the buttons row and keep the select menu as is.
-        // BUT, we need to regenerate components to update the state in the customIDs.
 
         // Retrieve existing select menu (Row 0)
         // We assume Row 0 is Select Menu, Row 1 is Buttons (if exists)

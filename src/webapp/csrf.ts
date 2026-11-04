@@ -5,13 +5,16 @@ import crypto from 'crypto';
 const CSRF_COOKIE_NAME = 'csrf_token';
 const CSRF_HEADER_NAME = 'x-csrf-token';
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const COOKIE_SECURE = process.env.COOKIE_SECURE !== undefined
+    ? process.env.COOKIE_SECURE === 'true'
+    : IS_PRODUCTION;
 
 // Cookie options for CSRF token (readable by JavaScript, unlike session cookie)
 const CSRF_COOKIE_OPTIONS = {
     httpOnly: false, // Must be readable by JavaScript
-    secure: IS_PRODUCTION,
+    secure: COOKIE_SECURE,
     sameSite: 'lax' as const,
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days (aligned with dashboard session lifetime)
     path: '/',
 };
 
@@ -49,19 +52,17 @@ export function validateCsrfToken(req: Request, res: Response, next: NextFunctio
         return next();
     }
 
-    // Skip CSRF validation for OAuth endpoints (they use separate state tokens)
-    if (req.path.includes('/auth/discord') || req.path.includes('/auth/callback') || req.path.includes('/auth/logout')) {
-        return next();
-    }
-
     // Skip CSRF validation for external webhooks (e.g., Top.gg vote webhook)
     // These endpoints use their own authentication (Authorization header with webhook secret)
     if (req.path === '/vote') {
         return next();
     }
 
-    const cookieToken = req.cookies?.[CSRF_COOKIE_NAME];
-    const headerToken = req.headers[CSRF_HEADER_NAME] as string | undefined;
+    const cookieToken = typeof req.cookies?.[CSRF_COOKIE_NAME] === 'string'
+        ? req.cookies[CSRF_COOKIE_NAME]
+        : undefined;
+    const rawHeader = req.headers[CSRF_HEADER_NAME];
+    const headerToken = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
 
     // Both tokens must exist and match
     if (!cookieToken || !headerToken) {
@@ -72,7 +73,9 @@ export function validateCsrfToken(req: Request, res: Response, next: NextFunctio
         return;
     }
 
-    if (cookieToken !== headerToken) {
+    const cookieBuf = Buffer.from(cookieToken, 'utf8');
+    const headerBuf = Buffer.from(headerToken, 'utf8');
+    if (cookieBuf.length !== headerBuf.length || !crypto.timingSafeEqual(cookieBuf, headerBuf)) {
         res.status(403).json({
             error: 'CSRF token invalid',
             message: 'Invalid CSRF token. Please refresh the page and try again.'

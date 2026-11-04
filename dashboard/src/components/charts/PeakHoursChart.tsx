@@ -1,8 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Bar, BarChart } from 'recharts';
+import React, { useEffect, useMemo, useState } from 'react';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Bar, BarChart, Cell } from 'recharts';
 import { adminSupabase } from '../../lib/supabase';
-import { motion } from 'framer-motion';
-import { Clock } from 'lucide-react';
+import { Panel } from '../ui/primitives';
+import { ChartBody, ChartSummary } from '../admin/adminUi';
+import { hourLabel, countAxis } from '../admin/adminFormat';
+import { axisProps, chart, gridProps, tooltipProps } from '../../lib/chartTheme';
+import { fmtCount, fmtPct, toNum } from '../../lib/format';
 
 interface PeakHourRow {
     hour: number;
@@ -10,95 +13,79 @@ interface PeakHourRow {
 }
 
 interface ChartRow {
-    hour: string;
+    hour: number;
+    label: string;
     votes: number;
 }
 
 /**
- * Global vote volume by hour of day (UTC), from the get_global_peak_hours RPC.
- * Zero-filled server-side so all 24 buckets always render.
+ * Global vote volume by hour of day (UTC), last 30 days, from the
+ * get_global_peak_hours RPC. All 24 buckets are always drawn.
  */
-export const PeakHoursChart: React.FC = () => {
-    const [data, setData] = useState<ChartRow[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [failed, setFailed] = useState(false);
+export const PeakHoursChart: React.FC<{ refreshKey?: number; className?: string; height?: number }> = ({ refreshKey = 0, className = '', height = 240 }) => {
+    const [rows, setRows] = useState<ChartRow[] | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [retry, setRetry] = useState(0);
 
     useEffect(() => {
         let cancelled = false;
         (async () => {
             try {
-                const { data: rows, error } = await adminSupabase.rpc('get_global_peak_hours', { p_days: 30 });
+                const { data, error: rpcError } = await adminSupabase.rpc('get_global_peak_hours', { p_days: 30 });
                 if (cancelled) return;
-                if (error || !rows) {
-                    setFailed(true);
+                if (rpcError || !Array.isArray(data)) {
+                    setError("Couldn't load peak hours.");
                     return;
                 }
-                setData((rows as PeakHourRow[]).map(r => ({
-                    hour: `${String(r.hour).padStart(2, '0')}:00`,
-                    votes: Number(r.votes),
-                })));
-            } catch (error) {
-                console.error('Error fetching peak hours:', error);
-                if (!cancelled) setFailed(true);
-            } finally {
-                if (!cancelled) setLoading(false);
+                const byHour = new Map((data as PeakHourRow[]).map(r => [Number(r.hour), toNum(r.votes) ?? 0]));
+                setRows(Array.from({ length: 24 }, (_, h) => ({ hour: h, label: hourLabel(h), votes: byHour.get(h) ?? 0 })));
+                setError(null);
+            } catch (err) {
+                console.error('Error fetching peak hours:', err);
+                if (!cancelled) setError("Couldn't load peak hours.");
             }
         })();
         return () => { cancelled = true; };
-    }, []);
+    }, [refreshKey, retry]);
 
-    if (loading) return <div className="h-64 animate-pulse bg-slate-800/20 rounded-xl"></div>;
+    const { total, peak } = useMemo(() => {
+        const list = rows ?? [];
+        const t = list.reduce((s, r) => s + r.votes, 0);
+        const p = list.reduce<ChartRow | null>((best, r) => (!best || r.votes > best.votes ? r : best), null);
+        return { total: t, peak: p };
+    }, [rows]);
+    const allZero = total === 0;
+    const loading = rows === null && !error;
 
     return (
-        <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="glass-panel p-6"
-        >
-            <div className="flex items-center gap-2 mb-6">
-                <div className="p-2 bg-violet-500/10 rounded-lg text-violet-400">
-                    <Clock className="w-5 h-5" />
-                </div>
-                <div>
-                    <h3 className="text-lg font-bold text-white">Peak Voting Hours</h3>
-                    <p className="text-slate-400 text-xs">Votes by hour of day (UTC) — last 30 days</p>
-                </div>
-            </div>
-
-            {failed ? (
-                <div className="h-64 flex items-center justify-center text-sm text-slate-500">
-                    Couldn't load peak hours — is the analytics migration applied?
-                </div>
-            ) : (
-                <div className="h-64 w-full" style={{ width: '100%', height: '300px', minWidth: 0 }}>
-                    <ResponsiveContainer width="99%" height="100%">
-                        <BarChart data={data} barCategoryGap={2}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                            <XAxis
-                                dataKey="hour"
-                                stroke="#64748b"
-                                fontSize={11}
-                                tickLine={false}
-                                axisLine={false}
-                                interval={3}
-                            />
-                            <YAxis
-                                stroke="#64748b"
-                                fontSize={12}
-                                tickLine={false}
-                                axisLine={false}
-                            />
-                            <Tooltip
-                                cursor={{ fill: '#1e293b', opacity: 0.4 }}
-                                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff' }}
-                                itemStyle={{ color: '#a78bfa' }}
-                                formatter={((value: unknown) => [`${value ?? 0} votes`, 'Votes']) as never}
-                            />
-                            <Bar dataKey="votes" fill="#a78bfa" fillOpacity={0.85} radius={[4, 4, 0, 0]} />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </div>
-            )}
-        </motion.div>
+        <Panel title="Votes by hour" meta="(UTC) · 30 days" className={`min-w-0 ${className}`} bodyClassName="px-5 pb-4">
+            <ChartSummary
+                loading={loading}
+                value={allZero || !peak ? '0' : peak.label}
+                caption={allZero || !peak ? 'votes in the last 30 days' : `busiest hour · ${fmtPct(peak.votes, total)} of votes`}
+            />
+            <ChartBody
+                height={height}
+                loading={loading}
+                error={error}
+                onRetry={() => { setError(null); setRows(null); setRetry(n => n + 1); }}
+                empty={allZero}
+                emptyText="No votes in the last 30 days."
+            >
+                <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={rows ?? []} margin={{ top: 8, right: 4, bottom: 0, left: -8 }} barCategoryGap={2}>
+                        <CartesianGrid {...gridProps} />
+                        <XAxis dataKey="label" {...axisProps} ticks={['00:00', '06:00', '12:00', '18:00']} />
+                        <YAxis {...axisProps} width={44} {...countAxis(peak?.votes ?? 0)} />
+                        <Tooltip {...tooltipProps} formatter={((value: unknown) => [fmtCount(value), 'Votes']) as never} />
+                        <Bar dataKey="votes" radius={[2, 2, 0, 0]} isAnimationActive={false}>
+                            {(rows ?? []).map(r => (
+                                <Cell key={r.hour} fill={!allZero && peak && r.hour === peak.hour ? chart.data2 : chart.data} />
+                            ))}
+                        </Bar>
+                    </BarChart>
+                </ResponsiveContainer>
+            </ChartBody>
+        </Panel>
     );
 };

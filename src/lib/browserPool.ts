@@ -22,7 +22,21 @@ export class BrowserPool {
         });
         const context = await browser.newContext({
             viewport: { width: 800, height: 600 }, // Default, can be overridden by page
-            deviceScaleFactor: 2 // High DPI for better screenshots
+            deviceScaleFactor: 2, // High DPI for better screenshots
+            javaScriptEnabled: false, // Render templates are static HTML/CSS only
+        });
+        // Defense-in-depth SSRF/LFI guard: only allow Google Fonts CSS/font fetches.
+        await context.route('**/*', (route) => {
+            const url = route.request().url();
+            if (
+                url.startsWith('https://fonts.googleapis.com/') ||
+                url.startsWith('https://fonts.gstatic.com/') ||
+                url.startsWith('about:') ||
+                url.startsWith('data:font/')
+            ) {
+                return route.continue();
+            }
+            return route.abort();
         });
         this.browser = browser;
         this.context = context;

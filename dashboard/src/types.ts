@@ -39,6 +39,10 @@ export interface Poll {
     vote_counts?: Record<number, number>;
     /** Computed total votes */
     total_votes?: number;
+    /** Distinct people who voted (raw, unweighted) */
+    unique_voters?: number | null;
+    /** True when the server couldn't count this poll's votes (render a dash, not 0) */
+    counts_error?: boolean;
     /** Set when Discord message no longer exists */
     discord_deleted?: boolean;
     /** Auto-close time (ISO 8601); null/absent = manual close only */
@@ -61,6 +65,8 @@ export interface MyVote {
     chosen_options: string[];
     weight: number;
     voted_at: string;
+    ends_at?: string | null;
+    discord_deleted?: boolean | null;
 }
 
 // ============================================================================
@@ -132,6 +138,8 @@ export interface ExportResponse {
     csv: string;
     filename: string;
     total_votes: number;
+    unique_voters?: number | null;
+    weighted_total?: number | null;
 }
 
 // ============================================================================

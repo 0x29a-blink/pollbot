@@ -47,26 +47,26 @@ export class DiscordForgeClient {
     }
 
     /**
-     * POST /api/bots/stats — rate limited to 1 request / 5 minutes.
+     * POST /api/v1/bots/stats — rate limited to 1 request / 5 minutes.
      */
     async postStats(stats: DiscordForgeStats): Promise<void> {
-        await this.request('POST', '/api/bots/stats', stats);
+        await this.request('POST', '/api/v1/bots/stats', stats, 'bearer');
     }
 
     /**
-     * POST /api/external/bots/heartbeat — expected every ~5 minutes to show
+     * POST /api/v1/bots/heartbeat — expected every ~5 minutes to show
      * the bot as online on the listing.
      */
     async heartbeat(status: 'online' | 'idle' | 'dnd' = 'online'): Promise<void> {
-        await this.request('POST', '/api/external/bots/heartbeat', { status });
+        await this.request('POST', '/api/v1/bots/heartbeat', { status }, 'bearer');
     }
 
     /**
-     * POST /api/external/bots/commands — sync slash commands to the listing.
+     * POST /api/v1/bots/commands — sync slash commands to the listing.
      * Accepts Discord API command JSON; capped at 200 commands server-side.
      */
     async syncCommands(commands: unknown[]): Promise<void> {
-        await this.request('POST', '/api/external/bots/commands', { commands: commands.slice(0, 200) });
+        await this.request('POST', '/api/v1/bots/commands', { commands: commands.slice(0, 200) }, 'bearer');
     }
 
     /**
@@ -76,11 +76,22 @@ export class DiscordForgeClient {
     async checkVote(botId: string, userId: string): Promise<DiscordForgeVoteCheck> {
         return await this.request<DiscordForgeVoteCheck>(
             'GET',
-            `/api/bots/${encodeURIComponent(botId)}/votes/check?userId=${encodeURIComponent(userId)}`
+            `/api/bots/${encodeURIComponent(botId)}/votes/check?userId=${encodeURIComponent(userId)}`,
+            undefined,
+            'raw'
         );
     }
 
-    private async request<T = unknown>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+    private redact(value: string): string {
+        return this.apiKey ? value.split(this.apiKey).join('[REDACTED]') : value;
+    }
+
+    private async request<T = unknown>(
+        method: 'GET' | 'POST',
+        path: string,
+        body?: unknown,
+        authMode: 'bearer' | 'raw' = 'bearer'
+    ): Promise<T> {
         let lastError: Error | undefined;
 
         for (let attempt = 1; attempt <= this.retries; attempt++) {
@@ -91,10 +102,7 @@ export class DiscordForgeClient {
                 const res = await fetch(`${BASE_URL}${path}`, {
                     method,
                     headers: {
-                        // The docs list x-api-key as an accepted alternative on the
-                        // /api/external/ routes; sending both keeps one code path.
-                        'Authorization': this.apiKey,
-                        'x-api-key': this.apiKey,
+                        'Authorization': authMode === 'bearer' ? `Bearer ${this.apiKey}` : this.apiKey,
                         'Content-Type': 'application/json',
                         'Accept': 'application/json',
                         'User-Agent': 'PollBot (https://pollbot.win)',
@@ -115,7 +123,7 @@ export class DiscordForgeClient {
                 }
 
                 if (!res.ok) {
-                    const text = await res.text().catch(() => '');
+                    const text = this.redact(await res.text().catch(() => ''));
                     throw new DiscordForgeError(`DiscordForge ${method} ${path} failed: ${res.status} ${text.slice(0, 200)}`, res.status);
                 }
 
@@ -125,7 +133,12 @@ export class DiscordForgeClient {
                 }
                 return undefined as T;
             } catch (err) {
-                lastError = err instanceof Error ? err : new Error(String(err));
+                if (err instanceof DiscordForgeError) {
+                    lastError = err;
+                } else {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    lastError = new Error(this.redact(msg));
+                }
                 // 4xx (other than 429) won't succeed on retry — bad key, bad payload.
                 if (err instanceof DiscordForgeError && err.status && err.status !== 429 && err.status < 500) {
                     throw err;

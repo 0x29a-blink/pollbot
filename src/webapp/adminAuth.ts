@@ -15,16 +15,23 @@ export function isAdminId(userId: string | null | undefined): boolean {
  * header auth like the dashboard's apiFetch.
  */
 export async function getAdminUserId(req: Request): Promise<string | null> {
-    const cookieSession = req.cookies?.['pollbot_session'];
-    const headerSession = req.headers.authorization?.replace('Bearer ', '');
+    const cookieSession = typeof req.cookies?.['pollbot_session'] === 'string'
+        ? req.cookies['pollbot_session']
+        : '';
+    const authHeader = typeof req.headers.authorization === 'string'
+        ? req.headers.authorization
+        : '';
+    const headerSession = authHeader.startsWith('Bearer ')
+        ? authHeader.slice(7).trim()
+        : '';
     const sessionId = cookieSession || headerSession;
-    if (!sessionId) return null;
+    if (!sessionId || sessionId.length > 128) return null;
 
     const { data: session } = await supabase
         .from('dashboard_sessions')
         .select('user_id, expires_at')
         .eq('id', sessionId)
-        .single();
+        .maybeSingle();
 
     if (!session) return null;
     if (new Date(session.expires_at).getTime() < Date.now()) return null;

@@ -1,38 +1,59 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, AttachmentBuilder, StringSelectMenuBuilder, PermissionsBitField, GuildMember } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, StringSelectMenuBuilder, MessageFlags, ButtonInteraction, MessageContextMenuCommandInteraction } from 'discord.js';
 import { supabase } from '../lib/db';
 import { logger } from '../lib/logger';
 import { I18n } from '../lib/i18n';
 import { Renderer } from '../lib/renderer';
 import { ViewInteractionHandler } from '../lib/viewInteraction';
 import { aggregateVotes } from '../lib/voteUtils';
+import { extractMessageId, memberHasManageGuild, memberHasRoleName } from '../lib/guildUtils';
 
 export const data = new SlashCommandBuilder()
     .setName('view')
     .setDescription('View detailed poll results (Premium Feature)')
     .addStringOption(option =>
         option.setName('poll_id')
-            .setDescription('The ID of the poll (message ID) to view')
+            .setDescription('The ID or Message Link of the poll to view')
             .setRequired(true)
     );
 
 export async function execute(interaction: ChatInputCommandInteraction) {
-    const pollId = interaction.options.getString('poll_id', true);
-    await handleViewPoll(interaction, pollId);
+    const pollInput = interaction.options.getString('poll_id', true);
+    await handleViewPoll(interaction, pollInput);
 }
 
-export async function handleViewPoll(interaction: ChatInputCommandInteraction | any, pollId: string) {
+export async function handleViewPoll(
+    interaction: ChatInputCommandInteraction | ButtonInteraction | MessageContextMenuCommandInteraction,
+    rawPollId: string
+) {
+    if (!interaction.inGuild()) {
+        return interaction.reply({
+            content: I18n.t('messages.common.guild_only', interaction.locale),
+            flags: MessageFlags.Ephemeral,
+        });
+    }
+
+    const pollId = extractMessageId(rawPollId);
+    if (!/^\d+$/.test(pollId)) {
+        return interaction.reply({
+            content: I18n.t('messages.manager.invalid_id', interaction.locale),
+            flags: MessageFlags.Ephemeral,
+        });
+    }
+
     const userId = interaction.user.id;
 
     // Acknowledge immediately: everything below performs several DB queries and a
     // Playwright render that can easily exceed Discord's 3-second reply window.
-    await interaction.deferReply({ ephemeral: true });
+    if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    }
 
     // 1. Check Premium Status (Voted in last 12 hours)
-    const { data: userData, error: userError } = await supabase
+    const { data: userData } = await supabase
         .from('users')
         .select('last_vote_at')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
 
     const now = new Date();
     // Default to a date far in the past if no record found
@@ -69,16 +90,17 @@ export async function handleViewPoll(interaction: ChatInputCommandInteraction | 
         return;
     }
 
-    // 2. Fetch Poll Data
+    // 2. Fetch Poll Data (scoped to the interaction's guild to prevent cross-server IDOR)
     const { data: poll, error: pollError } = await supabase
         .from('polls')
         .select('*')
         .eq('message_id', pollId)
+        .eq('guild_id', interaction.guildId)
         .single();
 
     if (pollError || !poll) {
-        // If this was triggered by a button click on the poll message, remove the buttons to stop spam
-        if (interaction.message && typeof interaction.message.edit === 'function') {
+        // Only remove buttons if this came directly from the poll card's view_details button
+        if (interaction.isButton() && (interaction.customId === 'view_details' || interaction.customId === 'poll_view_details')) {
             try {
                 await interaction.message.edit({ components: [] });
             } catch (error) {
@@ -90,14 +112,13 @@ export async function handleViewPoll(interaction: ChatInputCommandInteraction | 
     }
 
     // 2a. Check allow_exports / public permissions
-    const settings = poll.settings as any || {};
+    const settings = (poll.settings as any) || {};
     const allowExports = settings.allow_exports !== false; // Default true
     const isPublic = settings.public !== false; // Default true
 
     if (!allowExports || !isPublic) {
-        const member = interaction.member as GuildMember;
-        const hasRole = member.roles.cache.some(r => r.name === 'Poll Manager');
-        const hasPermission = member.permissions.has(PermissionsBitField.Flags.ManageGuild);
+        const hasRole = memberHasRoleName(interaction.guild, interaction.member, 'Poll Manager');
+        const hasPermission = memberHasManageGuild(interaction.member);
         const isCreator = poll.creator_id === interaction.user.id;
 
         if (!isCreator && !hasRole && !hasPermission) {
@@ -134,7 +155,7 @@ export async function handleViewPoll(interaction: ChatInputCommandInteraction | 
 
         // 6. Build Interactive Components
         const embed = new EmbedBuilder()
-            .setTitle(I18n.t('view.title', interaction.locale, { title: poll.title }))
+            .setTitle(I18n.t('view.title', interaction.locale, { title: poll.title }).slice(0, 256))
             .setDescription(I18n.t('view.description', interaction.locale))
             .setColor('#2b2d31')
             .setImage('attachment://results.png');

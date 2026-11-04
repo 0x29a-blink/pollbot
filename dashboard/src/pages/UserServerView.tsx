@@ -1,372 +1,561 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { useParams, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, BarChart3, Users, Clock, CheckCircle, XCircle, Loader2, Eye, EyeOff, Vote, Download, Lock, MessageSquare, Settings2, Scale, HelpCircle, ChevronDown, ChevronUp, Plus, FileSpreadsheet, CopyPlus } from 'lucide-react';
-import { useAuth } from '../App';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import {
+    ChevronDown, CopyPlus, ExternalLink, FileSpreadsheet, Hash, Loader2, Lock, LockOpen, Plus, Settings2, Trash2, Users,
+} from 'lucide-react';
+import { AppShell } from '../components/shell/AppShell';
+import { GuildSidebar, type ChannelPollCount } from '../components/shell/Sidebars';
+import {
+    Dash, EmptyBlock, Freshness, InlineError, PageHeader, Panel, PollStatusChip, SearchField,
+} from '../components/ui/primitives';
 import { CreatePollModal } from '../components/CreatePollModal';
 import { EditPollModal } from '../components/EditPollModal';
 import { PremiumGateModal } from '../components/PremiumGateModal';
 import { VoterViewModal } from '../components/VoterViewModal';
 import { ExportModal } from '../components/ExportModal';
 import { PermissionErrorBanner } from '../components/PermissionErrorBanner';
-import { GuildAnalyticsPanel } from '../components/charts/GuildAnalyticsPanel';
-import type { Poll, PollSettings, GuildInfo, VoterResponse, PremiumStatus, ExportResponse, PermissionError } from '../types';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { useToast } from '../components/ui/Toast';
 import { apiFetch } from '../utils/api';
+import { DASH, fmtCount, fmtDateTime, fmtPct, fmtRelative, plural, roleHex } from '../lib/format';
+import type {
+    ExportResponse, GuildInfo, PermissionError, Poll, PollSettings, PremiumStatus, Role, VoterResponse,
+} from '../types';
 
+type StatusFilter = 'all' | 'active' | 'closed';
 
+interface PollsSummary {
+    total: number;
+    active: number;
+    closed: number;
+    channels: { channel_id: string; count: number; open: number }[];
+}
+
+interface ChannelInfo { id: string; name: string; bot_can_post?: boolean }
+
+const PAGE_SIZE = 50;
+const REFRESH_MS = 12_000;
+const COOLDOWN_DURATION = 30_000; // after a permission error
+
+/**
+ * One server's polls.
+ * Question: "What's running in this server, and what do I need to do to it?"
+ * The poll list is the screen. Counts sit in the status filter itself; the
+ * sidebar lists the channels that have polls, like Discord's channel list.
+ */
 export const UserServerView: React.FC = () => {
-    const { guildId } = useParams<{ guildId: string }>();
+    const { guildId = '' } = useParams<{ guildId: string }>();
+    // Keyed so switching servers starts from a clean state.
+    return <ServerPolls key={guildId} guildId={guildId} />;
+};
+
+const ServerPolls: React.FC<{ guildId: string }> = ({ guildId }) => {
     const navigate = useNavigate();
-    const { user } = useAuth();
     const toast = useToast();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const channelFilter = searchParams.get('channel');
 
     const [guild, setGuild] = useState<GuildInfo | null>(null);
     const [polls, setPolls] = useState<Poll[]>([]);
+    const [total, setTotal] = useState<number | null>(null);
+    const [serverSummary, setServerSummary] = useState<PollsSummary | null>(null);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [fatalError, setFatalError] = useState<string | null>(null);
+    const [listError, setListError] = useState<string | null>(null);
+    const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+
+    const [status, setStatus] = useState<StatusFilter>('all');
+    const [query, setQuery] = useState('');
+    const [debouncedQuery, setDebouncedQuery] = useState('');
+
+    const [channels, setChannels] = useState<ChannelInfo[]>([]);
+    const [roles, setRoles] = useState<Role[]>([]);
+
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [duplicateSource, setDuplicateSource] = useState<Poll | null>(null);
     const [editingPoll, setEditingPoll] = useState<Poll | null>(null);
-    const [roles, setRoles] = useState<Array<{ id: string; name: string; color: number; position: number; managed: boolean }>>([]);
     const [permissionError, setPermissionError] = useState<PermissionError | null>(null);
-    const [cooldownPolls, setCooldownPolls] = useState<Map<string, number>>(new Map()); // pollId -> cooldown end timestamp
-    const hasInitialData = useRef(false);
+    const [cooldownPolls, setCooldownPolls] = useState<Map<string, number>>(new Map());
+    const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
+    const [hasData, setHasData] = useState(false);
+    const loadedCount = useRef(0);
+    useEffect(() => { loadedCount.current = polls.length; }, [polls.length]);
+
+    // Debounce search
     useEffect(() => {
-        if (guildId) {
-            fetchPolls(true); // Initial load
-        }
-    }, [guildId]);
+        const t = setTimeout(() => setDebouncedQuery(query.trim()), 300);
+        return () => clearTimeout(t);
+    }, [query]);
 
-    // Live-ish refresh while the tab is in the foreground.
-    //
-    // This used to be a Supabase realtime subscription on `polls` and `votes`
-    // using the anon key. That only worked because both tables were readable by
-    // anyone, and the `votes` leg had no guild filter at all — every browser on
-    // the dashboard received a live feed of every vote cast in every server,
-    // voter ids included. Those tables are admin-only now, so refresh through
-    // the authenticated API instead, which already scopes to this guild.
+    const buildUrl = useCallback((offset: number, limit: number) => {
+        const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+        if (status !== 'all') params.set('status', status);
+        if (channelFilter) params.set('channel', channelFilter);
+        if (debouncedQuery) params.set('search', debouncedQuery);
+        return `/api/user/polls/${guildId}?${params}`;
+    }, [guildId, status, channelFilter, debouncedQuery]);
+
+    /**
+     * Load the first page (mode 'reset'), the next page ('more'), or silently
+     * refresh what's on screen ('refresh').
+     */
+    const fetchPolls = useCallback(async (mode: 'reset' | 'more' | 'refresh') => {
+        if (!guildId) return;
+        const offset = mode === 'more' ? loadedCount.current : 0;
+        const limit = mode === 'refresh' ? Math.min(Math.max(loadedCount.current, PAGE_SIZE), 100) : PAGE_SIZE;
+        if (mode === 'more') setLoadingMore(true);
+        if (mode === 'reset') {
+            setLoading(true);
+            setExpanded(new Set());
+        }
+        try {
+            const res = await fetch(buildUrl(offset, limit), { credentials: 'include' });
+            if (res.ok) {
+                const data = await res.json();
+                const page: Poll[] = data.polls || [];
+                setGuild(data.guild);
+                if (mode === 'more') {
+                    setPolls(prev => {
+                        const seen = new Set(prev.map(p => p.message_id));
+                        return [...prev, ...page.filter(p => !seen.has(p.message_id))];
+                    });
+                } else if (mode === 'refresh') {
+                    setPolls(prev => {
+                        const fresh = new Set(page.map(p => p.message_id));
+                        return [...page, ...prev.slice(page.length).filter(p => !fresh.has(p.message_id))];
+                    });
+                } else {
+                    setPolls(page);
+                }
+                setTotal(typeof data.total === 'number' ? data.total : null);
+                if (data.summary) setServerSummary(data.summary);
+                setFatalError(null);
+                setListError(null);
+                setUpdatedAt(new Date());
+                setHasData(true);
+            } else if (res.status === 401 || res.status === 403 || res.status === 404) {
+                const err = await res.json().catch(() => ({}));
+                if (!hasData || mode === 'reset') {
+                    setFatalError(err.error || (res.status === 404 ? 'PollBot is not in this server.' : "You don't have access to this server."));
+                }
+            } else if (res.status === 503) {
+                if (!hasData) setListError('PollBot is temporarily unavailable. Try again in a moment.');
+            } else if (mode !== 'refresh') {
+                const err = await res.json().catch(() => ({}));
+                setListError(err.error || "Couldn't load this server's polls.");
+            }
+        } catch (err) {
+            console.error('Error fetching polls:', err);
+            if (mode !== 'refresh') setListError("Couldn't load this server's polls.");
+        } finally {
+            setLoading(false);
+            setLoadingMore(false);
+        }
+    }, [guildId, buildUrl, hasData]);
+
+    // First page whenever a filter changes
+    useEffect(() => {
+        void (async () => { await fetchPolls('reset'); })();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [buildUrl]);
+
+    // Live-ish refresh while the tab is visible (authenticated API, guild-scoped)
     useEffect(() => {
         if (!guildId) return;
-
-        const REFRESH_MS = 12000;
         const tick = () => {
-            if (document.visibilityState === 'visible') fetchPolls(false);
+            if (document.visibilityState === 'visible') void fetchPolls('refresh');
         };
-
         const interval = setInterval(tick, REFRESH_MS);
         document.addEventListener('visibilitychange', tick);
-
         return () => {
             clearInterval(interval);
             document.removeEventListener('visibilitychange', tick);
         };
+    }, [guildId, fetchPolls]);
+
+    // Channel names (sidebar + rows) and role names (settings + edit modal)
+    useEffect(() => {
+        if (!guildId) return;
+        let cancelled = false;
+        void (async () => {
+            try {
+                const [cRes, rRes] = await Promise.all([
+                    fetch(`/api/user/guilds/${guildId}/channels`, { credentials: 'include' }),
+                    fetch(`/api/user/guilds/${guildId}/roles`, { credentials: 'include' }),
+                ]);
+                if (cancelled) return;
+                if (cRes.ok) setChannels(((await cRes.json()).channels || []) as ChannelInfo[]);
+                if (rRes.ok) setRoles(((await rRes.json()).roles || []) as Role[]);
+            } catch (err) {
+                console.error('Error fetching channels/roles:', err);
+            }
+        })();
+        return () => { cancelled = true; };
     }, [guildId]);
 
-    const fetchPolls = async (isInitialLoad: boolean = false) => {
+    const channelName = useCallback((id: string) => channels.find(c => c.id === id)?.name ?? null, [channels]);
+    const roleById = useMemo(() => new Map(roles.map(r => [r.id, r])), [roles]);
 
-        try {
-            const res = await fetch(`/api/user/polls/${guildId}`, {
-                credentials: 'include'
-            });
-
-            if (res.ok) {
-                const data = await res.json();
-                setGuild(data.guild);
-                setPolls(data.polls);
-                setError(null);
-                hasInitialData.current = true;
-            } else if (res.status === 503) {
-                // Temporary unavailability - don't show error if we have data
-                if (!hasInitialData.current) {
-                    setError('Service temporarily unavailable, please try again');
-                }
-                // Silently ignore for background refreshes - keep existing data
-                console.warn('API temporarily unavailable, keeping existing data');
-            } else if (res.status === 401) {
-                // Auth error - always show
-                const err = await res.json();
-                setError(err.error || 'Please log in again');
-            } else {
-                // Other errors - only show on initial load
-                if (!hasInitialData.current || isInitialLoad) {
-                    const err = await res.json();
-                    setError(err.error || 'Failed to load polls');
-                }
-            }
-        } catch (err) {
-            console.error('Error fetching polls:', err);
-            // Network errors - only show on initial load
-            if (!hasInitialData.current || isInitialLoad) {
-                setError('Failed to load polls');
-            }
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const formatDate = (dateString: string) => {
-        return new Date(dateString).toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
+    // Summary: from the server when available, otherwise from what's loaded
+    const summary: PollsSummary = useMemo(() => {
+        if (serverSummary) return serverSummary;
+        const byChannel = new Map<string, { count: number; open: number }>();
+        polls.forEach(p => {
+            const c = byChannel.get(p.channel_id) || { count: 0, open: 0 };
+            c.count++;
+            if (p.active) c.open++;
+            byChannel.set(p.channel_id, c);
         });
-    };
+        return {
+            total: polls.length,
+            active: polls.filter(p => p.active).length,
+            closed: polls.filter(p => !p.active).length,
+            channels: [...byChannel.entries()].map(([channel_id, v]) => ({ channel_id, ...v })),
+        };
+    }, [serverSummary, polls]);
 
-    const COOLDOWN_DURATION = 30000; // 30 seconds cooldown
+    const sidebarChannels: ChannelPollCount[] = useMemo(() => summary.channels
+        .map(c => ({ id: c.channel_id, name: channelName(c.channel_id), count: c.count, open: c.open }))
+        .sort((a, b) => b.count - a.count || (a.name || '').localeCompare(b.name || '')), [summary, channelName]);
+
+    // Filters the server may not support yet are applied client-side too
+    const visiblePolls = useMemo(() => polls.filter(p => {
+        if (channelFilter && p.channel_id !== channelFilter) return false;
+        if (status === 'active' && !p.active) return false;
+        if (status === 'closed' && p.active) return false;
+        if (debouncedQuery && !p.title.toLowerCase().includes(debouncedQuery.toLowerCase())) return false;
+        return true;
+    }), [polls, channelFilter, status, debouncedQuery]);
+
+    const channelSummary = channelFilter ? summary.channels.find(c => c.channel_id === channelFilter) : null;
+    const scopeTotal = channelFilter ? (channelSummary?.count ?? 0) : summary.total;
+    const scopeOpen = channelFilter ? (channelSummary?.open ?? 0) : summary.active;
+    const listTotal = total ?? visiblePolls.length;
+    const hasMore = total !== null && polls.length < total;
+
+    /* ------------------------------------------------------------ actions */
 
     const handleStatusChange = async (pollId: string, active: boolean) => {
-        // Check if poll is in cooldown
         const cooldownEnd = cooldownPolls.get(pollId);
-        if (cooldownEnd && Date.now() < cooldownEnd) {
-            return; // Still in cooldown, ignore the request
-        }
+        if (cooldownEnd && Date.now() < cooldownEnd) return;
+        if (permissionError?.pollId === pollId) setPermissionError(null);
 
-        // Clear any previous permission error for this poll
-        if (permissionError?.pollId === pollId) {
-            setPermissionError(null);
-        }
-        
         try {
             const res = await apiFetch(`/api/user/polls/${pollId}/status`, {
                 method: 'PATCH',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ active }),
             });
 
             if (res.ok) {
+                const updated = await res.json();
                 toast.success(active ? 'Poll reopened' : 'Poll closed');
-                // Update local state immediately
-                setPolls(prev => prev.map(p =>
-                    p.message_id === pollId ? { ...p, active } : p
-                ));
-                // Clear any cooldown for this poll on success
+                setPolls(prev => prev.map(p => p.message_id === pollId
+                    ? { ...p, active, ends_at: 'ends_at' in updated ? updated.ends_at : p.ends_at }
+                    : p));
+                setServerSummary(prev => prev ? {
+                    ...prev,
+                    active: prev.active + (active ? 1 : -1),
+                    closed: prev.closed + (active ? -1 : 1),
+                } : prev);
                 setCooldownPolls(prev => {
                     const next = new Map(prev);
                     next.delete(pollId);
                     return next;
                 });
             } else if (res.status === 410) {
-                // Discord message was deleted - mark the poll as deleted
-                setPolls(prev => prev.map(p =>
-                    p.message_id === pollId ? { ...p, discord_deleted: true } : p
-                ));
+                toast.error('The poll message was deleted in Discord');
+                setPolls(prev => prev.map(p => p.message_id === pollId ? { ...p, discord_deleted: true, active: false } : p));
             } else if (res.status === 403) {
-                // Check if this is a permission error
                 const errorData = await res.json();
                 if (errorData.permission_error) {
                     const poll = polls.find(p => p.message_id === pollId);
-                    const cooldownEndTime = Date.now() + COOLDOWN_DURATION;
-                    
-                    // Set permission error
                     setPermissionError({
                         pollId,
-                        pollTitle: poll?.title || 'Unknown Poll',
+                        pollTitle: poll?.title || 'Unknown poll',
                         channelId: errorData.channel_id || poll?.channel_id || '',
                         missingPermissions: errorData.missing_permissions || ['View Channel', 'Send Messages', 'Attach Files'],
                         timestamp: Date.now(),
                     });
-                    
-                    // Add poll to cooldown
-                    setCooldownPolls(prev => new Map(prev).set(pollId, cooldownEndTime));
+                    setCooldownPolls(prev => new Map(prev).set(pollId, Date.now() + COOLDOWN_DURATION));
                 } else {
-                    console.error('Failed to update poll status:', errorData.error);
+                    toast.error(errorData.error || "Couldn't update the poll");
                 }
             } else {
-                console.error('Failed to update poll status');
+                const errorData = await res.json().catch(() => ({}));
+                toast.error(errorData.error || "Couldn't update the poll");
             }
         } catch (err) {
+            toast.error("Couldn't update the poll");
             console.error('Error updating poll status:', err);
         }
     };
 
     const handleDeletePoll = async (pollId: string) => {
         try {
-            const res = await apiFetch(`/api/user/polls/${pollId}`, {
-                method: 'DELETE',
-            });
-
+            const res = await apiFetch(`/api/user/polls/${pollId}`, { method: 'DELETE' });
             if (res.ok) {
                 toast.success('Poll deleted');
-                // Remove from local state
+                const removed = polls.find(p => p.message_id === pollId);
                 setPolls(prev => prev.filter(p => p.message_id !== pollId));
+                setTotal(t => (t === null ? t : Math.max(0, t - 1)));
+                if (removed) {
+                    setServerSummary(prev => prev ? {
+                        total: prev.total - 1,
+                        active: prev.active - (removed.active ? 1 : 0),
+                        closed: prev.closed - (removed.active ? 0 : 1),
+                        channels: prev.channels
+                            .map(c => c.channel_id === removed.channel_id ? { ...c, count: c.count - 1, open: c.open - (removed.active ? 1 : 0) } : c)
+                            .filter(c => c.count > 0),
+                    } : prev);
+                }
             } else {
-                toast.error('Failed to delete poll');
-                console.error('Failed to delete poll');
+                toast.error("Couldn't delete the poll");
             }
         } catch (err) {
-            toast.error('Failed to delete poll');
+            toast.error("Couldn't delete the poll");
             console.error('Error deleting poll:', err);
         }
     };
 
-    const handleEditPoll = async (poll: Poll) => {
-        // Fetch roles if we don't have them
-        if (roles.length === 0) {
-            try {
-                const res = await fetch(`/api/user/guilds/${guildId}/roles`, {
-                    credentials: 'include',
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    setRoles(data.roles || []);
-                }
-            } catch (err) {
-                console.error('Error fetching roles:', err);
-            }
-        }
-        setEditingPoll(poll);
-    };
-
-    const handleSaveSettings = async (pollId: string, newSettings: PollSettings) => {
-        // Clear any previous permission error
+    const handleSaveSettings = async (pollId: string, newSettings: PollSettings): Promise<boolean> => {
         setPermissionError(null);
-        
         try {
             const res = await apiFetch(`/api/user/polls/${pollId}`, {
                 method: 'PATCH',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ settings: newSettings }),
             });
 
             if (res.ok) {
                 const updatedPoll = await res.json();
                 toast.success('Poll settings saved');
-                // Update local state
-                setPolls(prev => prev.map(p =>
-                    p.message_id === pollId ? { ...p, settings: updatedPoll.settings } : p
-                ));
+                setPolls(prev => prev.map(p => p.message_id === pollId
+                    ? {
+                        ...p,
+                        settings: updatedPoll.settings,
+                        vote_counts: updatedPoll.vote_counts ?? p.vote_counts,
+                        total_votes: updatedPoll.total_votes ?? p.total_votes,
+                        unique_voters: updatedPoll.unique_voters ?? p.unique_voters,
+                    }
+                    : p));
+                return true;
             } else if (res.status === 403) {
-                // Check if this is a permission error
                 const errorData = await res.json();
                 if (errorData.permission_error) {
                     const poll = polls.find(p => p.message_id === pollId);
                     setPermissionError({
                         pollId,
-                        pollTitle: poll?.title || 'Unknown Poll',
+                        pollTitle: poll?.title || 'Unknown poll',
                         channelId: errorData.channel_id || poll?.channel_id || '',
                         missingPermissions: errorData.missing_permissions || ['View Channel', 'Send Messages', 'Attach Files'],
                         timestamp: Date.now(),
                     });
+                    toast.error('PollBot is missing Discord channel permissions');
                 } else {
-                    console.error('Failed to save poll settings:', errorData.error);
+                    toast.error(errorData.error || "Couldn't save the poll settings");
                 }
+                return false;
             } else {
-                console.error('Failed to save poll settings');
+                const errorData = await res.json().catch(() => ({}));
+                toast.error(errorData.error || "Couldn't save the poll settings");
+                return false;
             }
         } catch (err) {
+            toast.error("Couldn't save the poll settings");
             console.error('Error saving poll settings:', err);
+            return false;
         }
     };
 
-    if (loading) {
+    const toggleExpanded = (id: string) => setExpanded(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+    });
+
+    const clearChannel = () => {
+        const next = new URLSearchParams(searchParams);
+        next.delete('channel');
+        setSearchParams(next);
+    };
+
+    /* ------------------------------------------------------------- render */
+
+    const sidebar = (
+        <GuildSidebar
+            guildId={guildId}
+            name={guild?.name}
+            iconUrl={guild ? guild.icon_url : undefined}
+            memberCount={guild?.member_count}
+            totalPolls={serverSummary?.total ?? (hasData ? summary.total : null)}
+            channels={sidebarChannels}
+            activeChannel={channelFilter}
+            section="polls"
+        />
+    );
+
+    if (fatalError) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-slate-950">
-                <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
-            </div>
+            <AppShell sidebar={sidebar} mobileTitle="Polls">
+                <PageHeader title="Polls" />
+                <Panel>
+                    <EmptyBlock
+                        title="This server can't be opened"
+                        action={<button type="button" className="btn btn-outline" onClick={() => navigate('/dashboard')}>Back to servers</button>}
+                    >
+                        {fatalError}
+                    </EmptyBlock>
+                </Panel>
+            </AppShell>
         );
     }
 
-    if (error) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-slate-950">
-                <div className="glass-panel p-8 text-center max-w-md">
-                    <XCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
-                    <h2 className="text-xl font-bold text-white mb-2">Access Denied</h2>
-                    <p className="text-slate-400 mb-6">{error}</p>
-                    <button
-                        onClick={() => navigate('/dashboard')}
-                        className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-400 transition-colors"
-                    >
-                        Back to Dashboard
-                    </button>
-                </div>
-            </div>
-        );
-    }
+    const currentChannelName = channelFilter ? channelName(channelFilter) : null;
+    const title = channelFilter ? (
+        <span className="inline-flex items-center gap-1.5"><Hash className="w-6 h-6 text-faint" aria-hidden="true" />{currentChannelName || 'unknown-channel'}</span>
+    ) : 'Polls';
+
+    const subtitle = loading && !hasData
+        ? 'Loading polls…'
+        : channelFilter
+            ? <>{plural(scopeTotal, 'poll')} in this channel · {fmtCount(scopeOpen)} open · <button type="button" className="text-brand-text hover:underline" onClick={clearChannel}>Show all channels</button></>
+            : <>{guild?.name ?? 'This server'} · {plural(scopeTotal, 'poll')} · {fmtCount(scopeOpen)} open</>;
 
     return (
-        <div className="min-h-screen pb-20">
-            {/* Header */}
-            <header className="glass-panel sticky top-0 z-50 border-t-0 border-r-0 border-l-0 rounded-none">
-                <div className="container-wide py-4 flex justify-between items-center">
-                    <div className="flex items-center gap-4">
-                        <button
-                            onClick={() => navigate('/dashboard')}
-                            aria-label="Back to Dashboard"
-                            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors"
-                        >
-                            <ArrowLeft className="w-5 h-5 text-slate-400" />
-                        </button>
+        <AppShell sidebar={sidebar} mobileTitle={guild?.name || 'Polls'}>
+            <PageHeader
+                title={title}
+                subtitle={subtitle}
+                actions={
+                    <>
+                        <Freshness updatedAt={updatedAt} onRefresh={() => void fetchPolls('refresh')} title="Refresh polls" />
                         {guild && (
-                            <div className="flex items-center gap-3">
-                                {guild.icon_url ? (
-                                    <img src={guild.icon_url} alt={guild.name} className="w-10 h-10 rounded-xl" />
-                                ) : (
-                                    <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-slate-400 font-bold">
-                                        {guild.name.charAt(0)}
-                                    </div>
-                                )}
-                                <div>
-                                    <h1 className="text-lg font-bold text-white">{guild.name}</h1>
-                                    <div className="flex items-center gap-2 text-xs">
-                                        <span className="text-slate-500">
-                                            {guild.member_count?.toLocaleString()} members
-                                        </span>
-                                        <span className="text-slate-600">•</span>
-                                        <span className="flex items-center gap-1 text-indigo-400">
-                                            <BarChart3 className="w-3 h-3" />
-                                            {polls.length} poll{polls.length !== 1 ? 's' : ''}
-                                        </span>
-                                        <span className="flex items-center gap-1 text-emerald-400">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                            Live
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
-                    {user && (
-                        <div className="flex items-center gap-4">
-                            <button
-                                onClick={() => setShowCreateModal(true)}
-                                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-500 transition-colors"
-                            >
+                            <button type="button" className="btn btn-primary" onClick={() => setShowCreateModal(true)}>
                                 <Plus className="w-4 h-4" />
-                                Create Poll
+                                Create poll
                             </button>
-                            <div className="flex items-center gap-2">
-                                <img src={user.avatar_url} alt={user.username} className="w-8 h-8 rounded-full" />
-                                <span className="text-sm text-slate-300">{user.username}</span>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </header>
+                        )}
+                    </>
+                }
+            />
 
-            {/* Create Poll Modal (also handles duplicate-poll prefill) */}
+            <PermissionErrorBanner
+                error={permissionError}
+                onDismiss={() => setPermissionError(null)}
+                onRetry={permissionError ? () => {
+                    const poll = polls.find(p => p.message_id === permissionError.pollId);
+                    if (poll) void handleStatusChange(permissionError.pollId, !poll.active);
+                } : undefined}
+            />
+
+            {/* Toolbar: status filter carries the counts */}
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <div className="segmented" role="group" aria-label="Filter by status">
+                    {([
+                        ['all', 'All', scopeTotal],
+                        ['active', 'Open', scopeOpen],
+                        ['closed', 'Closed', scopeTotal - scopeOpen],
+                    ] as const).map(([key, label, n]) => (
+                        <button key={key} type="button" aria-pressed={status === key} onClick={() => setStatus(key)}>
+                            {label}
+                            <span className="num text-faint">{hasData ? fmtCount(n) : DASH}</span>
+                        </button>
+                    ))}
+                </div>
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                    <span className="text-xs text-faint num hidden sm:inline">
+                        {hasData ? `${fmtCount(Math.min(visiblePolls.length, listTotal))} of ${fmtCount(listTotal)}` : ''}
+                    </span>
+                    <SearchField value={query} onChange={setQuery} placeholder="Search polls" className="w-full sm:w-64" />
+                </div>
+            </div>
+
+            <Panel>
+                {listError ? (
+                    <InlineError message={listError} onRetry={() => void fetchPolls('reset')} />
+                ) : loading && !hasData ? (
+                    <ul aria-hidden="true">
+                        {[0, 1, 2, 3, 4, 5].map(i => (
+                            <li key={i} className={`h-[68px] px-5 flex items-center gap-4 ${i ? 'border-t border-rule' : ''}`}>
+                                <div className="flex-1">
+                                    <div className="skeleton h-4 w-72 max-w-full" />
+                                    <div className="skeleton h-3 w-44 mt-2" />
+                                </div>
+                                <div className="skeleton h-5 w-16 rounded-full" />
+                            </li>
+                        ))}
+                    </ul>
+                ) : visiblePolls.length === 0 ? (
+                    summary.total === 0 && !debouncedQuery && status === 'all' && !channelFilter ? (
+                        <EmptyBlock
+                            title="No polls in this server yet"
+                            action={<button type="button" className="btn btn-primary" onClick={() => setShowCreateModal(true)}><Plus className="w-4 h-4" />Create the first poll</button>}
+                        >
+                            Create one here, or run /poll in any channel PollBot can post in.
+                        </EmptyBlock>
+                    ) : (
+                        <EmptyBlock
+                            title={debouncedQuery ? `No polls match “${debouncedQuery}”` : status === 'active' ? 'No open polls here' : status === 'closed' ? 'No closed polls here' : 'No polls here'}
+                            action={(debouncedQuery || status !== 'all') ? (
+                                <button type="button" className="btn btn-outline btn-sm" onClick={() => { setQuery(''); setStatus('all'); }}>
+                                    Clear filters
+                                </button>
+                            ) : undefined}
+                        />
+                    )
+                ) : (
+                    <ul>
+                        {visiblePolls.map((poll, i) => (
+                            <PollRow
+                                key={poll.message_id}
+                                first={i === 0}
+                                poll={poll}
+                                channelName={channelName(poll.channel_id)}
+                                showChannel={!channelFilter}
+                                roleById={roleById}
+                                expanded={expanded.has(poll.message_id)}
+                                onToggle={() => toggleExpanded(poll.message_id)}
+                                onStatusChange={handleStatusChange}
+                                onDeletePoll={handleDeletePoll}
+                                onEditPoll={setEditingPoll}
+                                onDuplicatePoll={p => { setDuplicateSource(p); setShowCreateModal(true); }}
+                                cooldownEndTime={cooldownPolls.get(poll.message_id)}
+                            />
+                        ))}
+                    </ul>
+                )}
+                {hasMore && !listError && (
+                    <div className="border-t border-rule px-5 py-3 flex items-center justify-between">
+                        <span className="text-xs text-faint num">Showing {fmtCount(polls.length)} of {fmtCount(total)}</span>
+                        <button type="button" className="btn btn-outline btn-sm" onClick={() => void fetchPolls('more')} disabled={loadingMore}>
+                            {loadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                            Load {Math.min(PAGE_SIZE, (total ?? 0) - polls.length)} more
+                        </button>
+                    </div>
+                )}
+            </Panel>
+
+            {/* Create (also handles duplicate prefill) */}
             {guild && (
                 <CreatePollModal
                     isOpen={showCreateModal}
-                    onClose={() => {
-                        setShowCreateModal(false);
-                        setDuplicateSource(null);
-                    }}
-                    guildId={guildId || ''}
+                    onClose={() => { setShowCreateModal(false); setDuplicateSource(null); }}
+                    guildId={guildId}
                     guildName={guild.name}
                     onPollCreated={(poll) => {
                         setPolls(prev => [poll, ...prev]);
+                        setTotal(t => (t === null ? t : t + 1));
+                        setServerSummary(prev => prev ? {
+                            total: prev.total + 1,
+                            active: prev.active + (poll.active ? 1 : 0),
+                            closed: prev.closed + (poll.active ? 0 : 1),
+                            channels: prev.channels.some(c => c.channel_id === poll.channel_id)
+                                ? prev.channels.map(c => c.channel_id === poll.channel_id ? { ...c, count: c.count + 1, open: c.open + (poll.active ? 1 : 0) } : c)
+                                : [...prev.channels, { channel_id: poll.channel_id, count: 1, open: poll.active ? 1 : 0 }],
+                        } : prev);
                     }}
                     initialValues={duplicateSource ? {
                         title: duplicateSource.title,
@@ -386,113 +575,76 @@ export const UserServerView: React.FC = () => {
                 />
             )}
 
-            <main className="container-wide mt-8">
-                {/* Permission Error Banner */}
-                <PermissionErrorBanner
-                    error={permissionError}
-                    onDismiss={() => setPermissionError(null)}
-                    onRetry={permissionError ? () => {
-                        const poll = polls.find(p => p.message_id === permissionError.pollId);
-                        if (poll) {
-                            handleStatusChange(permissionError.pollId, !poll.active);
-                        }
-                    } : undefined}
-                />
-
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                >
-                    {polls.length === 0 ? (
-                        <div className="glass-panel p-12 text-center">
-                            <BarChart3 className="w-12 h-12 text-slate-500 mx-auto mb-4" />
-                            <h3 className="text-xl font-bold text-white mb-2">No Polls Yet</h3>
-                            <p className="text-slate-400">
-                                No polls have been created in this server yet.
-                            </p>
-                        </div>
-                    ) : (
-                        <div className="grid gap-4">
-                            {polls.map(poll => (
-                                <PollCard
-                                    key={poll.message_id}
-                                    poll={poll}
-                                    formatDate={formatDate}
-                                    onStatusChange={handleStatusChange}
-                                    onDeletePoll={handleDeletePoll}
-                                    onEditPoll={handleEditPoll}
-                                    onDuplicatePoll={(p) => {
-                                        setDuplicateSource(p);
-                                        setShowCreateModal(true);
-                                    }}
-                                    cooldownEndTime={cooldownPolls.get(poll.message_id)}
-                                />
-                            ))}
-                        </div>
-                    )}
-                </motion.div>
-
-                {guildId && <GuildAnalyticsPanel guildId={guildId} />}
-            </main>
-
-            {/* Edit Poll Modal */}
             {editingPoll && (
                 <EditPollModal
+                    key={editingPoll.message_id}
                     isOpen={!!editingPoll}
                     onClose={() => setEditingPoll(null)}
                     poll={editingPoll}
-                    roles={roles}
+                    roles={roles.map(r => ({ ...r, managed: !!r.managed }))}
                     onSave={handleSaveSettings}
                 />
             )}
-        </div>
+        </AppShell>
     );
 };
 
-const PollCard: React.FC<{
+/* ==========================================================================
+   One poll: a 68px summary row that opens to its results, settings and
+   actions.
+   ========================================================================== */
+
+const PollRow: React.FC<{
     poll: Poll;
-    formatDate: (d: string) => string;
+    first: boolean;
+    channelName: string | null;
+    showChannel: boolean;
+    roleById: Map<string, Role>;
+    expanded: boolean;
+    onToggle: () => void;
     onStatusChange: (pollId: string, active: boolean) => Promise<void>;
     onDeletePoll: (pollId: string) => Promise<void>;
     onEditPoll: (poll: Poll) => void;
     onDuplicatePoll: (poll: Poll) => void;
     cooldownEndTime?: number;
-}> = ({ poll, formatDate, onStatusChange, onDeletePoll, onEditPoll, onDuplicatePoll, cooldownEndTime }) => {
-    const [isExpanded, setIsExpanded] = useState(false);
+}> = ({ poll, first, channelName, showChannel, roleById, expanded, onToggle, onStatusChange, onDeletePoll, onEditPoll, onDuplicatePoll, cooldownEndTime }) => {
     const [isUpdating, setIsUpdating] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [confirmingDelete, setConfirmingDelete] = useState(false);
-    const [cooldownRemaining, setCooldownRemaining] = useState(0);
+    const [rawCooldownRemaining, setCooldownRemaining] = useState(0);
+    const cooldownRemaining = cooldownEndTime ? rawCooldownRemaining : 0;
 
-    // Cooldown timer effect
-    useEffect(() => {
-        if (!cooldownEndTime) {
-            setCooldownRemaining(0);
-            return;
-        }
-
-        const updateRemaining = () => {
-            const remaining = Math.max(0, Math.ceil((cooldownEndTime - Date.now()) / 1000));
-            setCooldownRemaining(remaining);
-        };
-
-        updateRemaining();
-        const interval = setInterval(updateRemaining, 1000);
-
-        return () => clearInterval(interval);
-    }, [cooldownEndTime]);
-    const voteCounts = poll.vote_counts || {};
-    const maxVotes = Math.max(...Object.values(voteCounts), 1);
-    const settings = poll.settings || {};
-
-    // View/Export modal states
     const [showPremiumModal, setShowPremiumModal] = useState(false);
     const [showVoterModal, setShowVoterModal] = useState(false);
     const [showExportModal, setShowExportModal] = useState(false);
     const [premiumStatus, setPremiumStatus] = useState<PremiumStatus | null>(null);
     const [checkingPremium, setCheckingPremium] = useState(false);
 
-    // Check premium status
+    useEffect(() => {
+        if (!cooldownEndTime) return;
+        const update = () => setCooldownRemaining(Math.max(0, Math.ceil((cooldownEndTime - Date.now()) / 1000)));
+        const initial = setTimeout(update, 0);
+        const interval = setInterval(update, 1000);
+        return () => { clearTimeout(initial); clearInterval(interval); };
+    }, [cooldownEndTime]);
+
+    const settings = poll.settings || {};
+    const countsKnown = !poll.counts_error && poll.total_votes !== null && poll.total_votes !== undefined;
+    const totalVotes = countsKnown ? (poll.total_votes as number) : 0;
+    const voteCounts = poll.vote_counts || {};
+    const maxCount = Math.max(0, ...poll.options.map((_, i) => voteCounts[i] || 0));
+    const weighted = !!(settings.vote_weights && Object.keys(settings.vote_weights).length > 0);
+    const voters = poll.unique_voters;
+    const discordUrl = `https://discord.com/channels/${poll.guild_id}/${poll.channel_id}/${poll.message_id}`;
+
+    const roleLabel = (id: string) => {
+        const r = roleById.get(id);
+        return {
+            name: r?.name ?? settings.role_metadata?.[id]?.name ?? 'Unknown role',
+            color: r?.color ?? settings.role_metadata?.[id]?.color ?? 0,
+        };
+    };
+
     const checkPremium = async (): Promise<boolean> => {
         try {
             const res = await fetch('/api/user/premium/status', { credentials: 'include' });
@@ -507,12 +659,9 @@ const PollCard: React.FC<{
         return false;
     };
 
-    // Refresh premium status (after voting)
     const refreshPremium = async (): Promise<boolean> => {
         try {
-            const res = await apiFetch('/api/user/premium/refresh', {
-                method: 'POST',
-            });
+            const res = await apiFetch('/api/user/premium/refresh', { method: 'POST' });
             if (res.ok) {
                 const data: PremiumStatus = await res.json();
                 setPremiumStatus(data);
@@ -524,65 +673,41 @@ const PollCard: React.FC<{
         return false;
     };
 
-    // Handle View button click
-    const handleViewClick = async (e: React.MouseEvent) => {
-        e.stopPropagation();
+    const handleViewVoters = async () => {
         setCheckingPremium(true);
         try {
-            const isPremium = await checkPremium();
-            if (isPremium) {
-                setShowVoterModal(true);
-            } else {
-                setShowPremiumModal(true);
-            }
+            if (await checkPremium()) setShowVoterModal(true);
+            else setShowPremiumModal(true);
         } finally {
             setCheckingPremium(false);
         }
     };
 
-    // Handle Export button click
-    const handleExportClick = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        setShowExportModal(true);
-    };
-
-    // Fetch voters for a specific option
     const fetchVoters = async (optionIndex: number): Promise<VoterResponse> => {
-        const res = await fetch(`/api/user/polls/${poll.message_id}/voters?option=${optionIndex}`, {
-            credentials: 'include'
-        });
+        const res = await fetch(`/api/user/polls/${poll.message_id}/voters?option=${optionIndex}`, { credentials: 'include' });
         if (!res.ok) {
-            const err = await res.json();
-            throw new Error(err.message || err.error || 'Failed to fetch voters');
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.message || err.error || "Couldn't load voters");
         }
         return res.json();
     };
 
-    // Fetch export data
     const fetchExport = async (): Promise<ExportResponse> => {
-        const res = await fetch(`/api/user/polls/${poll.message_id}/export`, {
-            credentials: 'include'
-        });
+        const res = await fetch(`/api/user/polls/${poll.message_id}/export`, { credentials: 'include' });
         if (!res.ok) {
-            const err = await res.json();
-            throw new Error(err.message || err.error || 'Failed to fetch export');
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.message || err.error || "Couldn't export the poll");
         }
         return res.json();
     };
 
-    const handleStatusToggle = async (e: React.MouseEvent) => {
-        e.stopPropagation();
+    const handleStatusToggle = async () => {
         setIsUpdating(true);
         try {
             await onStatusChange(poll.message_id, !poll.active);
         } finally {
             setIsUpdating(false);
         }
-    };
-
-    const handleDelete = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        setConfirmingDelete(true);
     };
 
     const confirmDelete = async () => {
@@ -595,332 +720,173 @@ const PollCard: React.FC<{
         }
     };
 
+    const voteSummary = countsKnown
+        ? (weighted && voters != null && voters !== totalVotes
+            ? `${plural(totalVotes, 'vote')} from ${plural(voters, 'voter')}`
+            : plural(totalVotes, 'vote'))
+        : null;
+
+    const panelId = `poll-${poll.message_id}`;
+
     return (
-        <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="glass-panel overflow-hidden"
-        >
+        <li className={first ? '' : 'border-t border-rule'}>
             <ConfirmDialog
                 open={confirmingDelete}
-                title="Delete poll?"
-                message="This permanently removes the poll and its votes from the database. This cannot be undone."
-                confirmLabel="Delete Poll"
+                title="Delete this poll?"
+                message={`“${poll.title}” and all of its votes will be removed from PollBot. This can't be undone.`}
+                confirmLabel="Delete poll"
                 danger
                 busy={isDeleting}
                 onConfirm={confirmDelete}
                 onCancel={() => setConfirmingDelete(false)}
             />
-            {/* Compact Header - Always visible */}
+
+            {/* Summary row */}
             <button
-                onClick={() => setIsExpanded(!isExpanded)}
-                className="w-full p-4 flex items-center justify-between hover:bg-slate-800/30 transition-colors text-left"
+                type="button"
+                onClick={onToggle}
+                aria-expanded={expanded}
+                aria-controls={panelId}
+                className="row-interactive w-full min-h-[68px] px-5 py-3 flex items-center gap-4 text-left"
             >
-                <div className="flex items-center gap-4 flex-1 min-w-0">
-                    <h3 className="text-lg font-bold text-white truncate">{poll.title}</h3>
-                    <div className="flex items-center gap-4 text-xs text-slate-500 shrink-0">
-                        <span className="flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {formatDate(poll.created_at)}
-                        </span>
-                        <span className="flex items-center gap-1">
-                            <Users className="w-3 h-3" />
-                            {poll.total_votes} vote{poll.total_votes !== 1 ? 's' : ''}
-                        </span>
+                <div className="flex-1 min-w-0">
+                    <div className="text-[15px] leading-5 font-medium text-ink line-clamp-2 sm:line-clamp-1 break-words">{poll.title}</div>
+                    <div className="mt-1 text-xs text-faint flex flex-wrap items-center gap-x-1.5 num">
+                        {showChannel && (
+                            <span className="inline-flex items-center gap-0.5 text-muted"><Hash className="w-3 h-3 text-cyan" aria-hidden="true" />{channelName || 'unknown-channel'}</span>
+                        )}
+                        {showChannel && <span aria-hidden="true">·</span>}
+                        <span title={fmtDateTime(poll.created_at)}>Created {fmtRelative(poll.created_at)}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{voteSummary ?? <Dash title="Votes couldn't be counted right now" />}</span>
+                        {weighted && <><span aria-hidden="true">·</span><span className="text-brand-text">Weighted</span></>}
                     </div>
                 </div>
-                <div className="flex items-center gap-3 shrink-0">
-                    <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${poll.discord_deleted
-                        ? 'bg-amber-500/20 text-amber-400'
-                        : !poll.active
-                            ? 'bg-slate-700 text-slate-400'
-                            : 'bg-emerald-500/20 text-emerald-400'
-                        }`}>
+                <PollStatusChip active={poll.active} deleted={!!poll.discord_deleted} endsAt={poll.ends_at} />
+                <ChevronDown className={`w-4 h-4 text-faint shrink-0 transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`} aria-hidden="true" />
+            </button>
+
+            {/* Detail */}
+            {expanded && (
+                <div id={panelId} className="px-5 pb-5 pt-1 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-5">
+                    {/* Results */}
+                    <div className="min-w-0">
+                        {poll.description && (
+                            <p className="text-sm text-muted mb-4 whitespace-pre-line">{poll.description}</p>
+                        )}
+                        <ol className="flex flex-col gap-3" aria-label="Results">
+                            {poll.options.map((option, index) => {
+                                const votes = voteCounts[index] || 0;
+                                const leader = countsKnown && votes > 0 && votes === maxCount;
+                                const width = countsKnown && maxCount > 0 ? (votes / maxCount) * 100 : 0;
+                                return (
+                                    <li key={index}>
+                                        <div className="flex items-baseline justify-between gap-4 text-sm">
+                                            <span className={`truncate ${leader ? 'text-ink font-medium' : 'text-muted'}`}>{option}</span>
+                                            <span className="num shrink-0 text-ink">
+                                                {countsKnown ? fmtCount(votes) : DASH}
+                                                <span className="text-faint ml-2 inline-block w-12 text-right">{countsKnown ? fmtPct(votes, totalVotes) : ''}</span>
+                                            </span>
+                                        </div>
+                                        <div className="mt-1.5 h-2 rounded-full bg-[#22252e] overflow-hidden" aria-hidden="true">
+                                            {width > 0 && <div className={`h-full rounded-full ${leader ? 'bg-brand' : 'bg-[#4b5494]'}`} style={{ width: `${width}%` }} />}
+                                        </div>
+                                    </li>
+                                );
+                            })}
+                        </ol>
+                        {countsKnown && (
+                            <p className="mt-4 text-xs text-faint num">
+                                {weighted ? 'Weighted totals' : 'Totals'} · {plural(totalVotes, 'vote')}
+                                {voters != null && <> · {plural(voters, 'voter')}</>}
+                                {(settings.max_votes ?? 1) > 1 && <> · voters could pick up to {settings.max_votes}</>}
+                            </p>
+                        )}
+                    </div>
+
+                    {/* Settings */}
+                    <dl className="rounded-lg bg-[#23262f] border border-[#343846] px-4 py-3 text-sm self-start">
+                        <SettingRow label="Results" value={settings.public !== false ? 'Shown live' : 'Hidden until closed'} />
+                        <SettingRow
+                            label="Choices"
+                            value={(settings.min_votes ?? 1) === (settings.max_votes ?? 1)
+                                ? `Pick ${settings.max_votes ?? 1}`
+                                : `Pick ${settings.min_votes ?? 1}–${settings.max_votes ?? 1}`}
+                        />
+                        <SettingRow
+                            label="Who can vote"
+                            value={settings.allowed_roles && settings.allowed_roles.length > 0 ? (
+                                <span className="flex flex-wrap justify-end gap-1">
+                                    {settings.allowed_roles.map(id => <RoleChip key={id} {...roleLabel(id)} />)}
+                                </span>
+                            ) : 'Everyone'}
+                        />
+                        {weighted && (
+                            <SettingRow
+                                label="Vote weights"
+                                value={(
+                                    <span className="flex flex-wrap justify-end gap-1">
+                                        {Object.entries(settings.vote_weights || {}).map(([id, w]) => <RoleChip key={id} {...roleLabel(id)} suffix={`×${w}`} />)}
+                                    </span>
+                                )}
+                            />
+                        )}
+                        <SettingRow label="Exports" value={settings.allow_exports !== false ? 'Allowed' : 'Off'} />
+                        <SettingRow label="Thread" value={settings.allow_thread ? 'Created' : 'None'} />
+                        {poll.ends_at && poll.active && <SettingRow label="Closes" value={fmtDateTime(poll.ends_at)} />}
+                    </dl>
+
+                    {/* Actions */}
+                    <div className="lg:col-span-2 flex flex-wrap items-center gap-2 pt-1">
                         {poll.discord_deleted ? (
                             <>
-                                <XCircle className="w-3 h-3" />
-                                Deleted
-                            </>
-                        ) : !poll.active ? (
-                            <>
-                                <XCircle className="w-3 h-3" />
-                                Closed
+                                <p className="text-sm text-faint mr-auto">The Discord message for this poll was deleted, so it can't be closed or edited.</p>
+                                <button type="button" className="btn btn-danger" onClick={() => setConfirmingDelete(true)} disabled={isDeleting}>
+                                    <Trash2 className="w-4 h-4" />
+                                    Delete from PollBot
+                                </button>
                             </>
                         ) : (
                             <>
-                                <CheckCircle className="w-3 h-3" />
-                                Active
+                                <button
+                                    type="button"
+                                    className="btn btn-outline"
+                                    onClick={handleStatusToggle}
+                                    disabled={isUpdating || cooldownRemaining > 0}
+                                    title={cooldownRemaining > 0 ? 'Fix the channel permissions, then try again' : undefined}
+                                >
+                                    {isUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : poll.active ? <Lock className="w-4 h-4" /> : <LockOpen className="w-4 h-4" />}
+                                    {poll.active ? 'Close poll' : 'Reopen poll'}
+                                    {cooldownRemaining > 0 && <span className="num text-faint">{cooldownRemaining}s</span>}
+                                </button>
+                                <button type="button" className="btn btn-tonal" onClick={() => onEditPoll(poll)}>
+                                    <Settings2 className="w-4 h-4" />
+                                    Edit settings
+                                </button>
+                                <button type="button" className="btn btn-ghost" onClick={handleViewVoters} disabled={checkingPremium}>
+                                    {checkingPremium ? <Loader2 className="w-4 h-4 animate-spin" /> : <Users className="w-4 h-4" />}
+                                    Voters
+                                </button>
+                                <button type="button" className="btn btn-ghost" onClick={() => setShowExportModal(true)}>
+                                    <FileSpreadsheet className="w-4 h-4" />
+                                    Export
+                                </button>
                             </>
                         )}
+                        <button type="button" className="btn btn-ghost" onClick={() => onDuplicatePoll(poll)}>
+                            <CopyPlus className="w-4 h-4" />
+                            Duplicate
+                        </button>
+                        {!poll.discord_deleted && (
+                            <a className="btn btn-ghost ml-auto" href={discordUrl} target="_blank" rel="noopener noreferrer">
+                                Open in Discord
+                                <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                        )}
                     </div>
-                    {poll.active && poll.ends_at && !poll.discord_deleted && (
-                        <div className="px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 bg-indigo-500/20 text-indigo-300">
-                            <Clock className="w-3 h-3" />
-                            Auto-closes {new Date(poll.ends_at).toLocaleString()}
-                        </div>
-                    )}
-                    {isExpanded ? (
-                        <ChevronUp className="w-5 h-5 text-slate-400" />
-                    ) : (
-                        <ChevronDown className="w-5 h-5 text-slate-400" />
-                    )}
                 </div>
-            </button>
+            )}
 
-            {/* Expanded Content */}
-            <AnimatePresence>
-                {isExpanded && (
-                    <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className="overflow-hidden"
-                    >
-                        <div className="px-6 pb-6 pt-2 border-t border-slate-700/50">
-                            <div className="flex gap-6">
-                                {/* Left side - Poll content */}
-                                <div className="flex-1 min-w-0">
-                                    {poll.description && (
-                                        <p className="text-sm text-slate-400 mb-4" style={{ whiteSpace: 'pre-line' }}>
-                                            {poll.description}
-                                        </p>
-                                    )}
-
-                                    {/* Options with vote bars */}
-                                    <div className="space-y-2">
-                                        {poll.options.map((option, index) => {
-                                            const votes = voteCounts[index] || 0;
-                                            const totalVotes = poll.total_votes || 0;
-                                            const percentage = totalVotes > 0 ? (votes / totalVotes) * 100 : 0;
-                                            const barWidth = (votes / maxVotes) * 100;
-
-                                            return (
-                                                <div key={index} className="relative">
-                                                    <div
-                                                        className="absolute inset-0 bg-indigo-500/20 rounded-lg transition-all duration-500"
-                                                        style={{ width: `${barWidth}%` }}
-                                                    />
-                                                    <div className="relative px-4 py-2 flex justify-between items-center">
-                                                        <span className="text-white text-sm font-medium">{option}</span>
-                                                        <span className="text-slate-400 text-sm">
-                                                            {votes} ({percentage.toFixed(1)}%)
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-
-                                {/* Right side - Settings panel */}
-                                <div className="w-56 shrink-0 border-l border-slate-700/50 pl-6">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <Settings2 className="w-4 h-4 text-slate-500" />
-                                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Settings</span>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        {/* Vote visibility */}
-                                        <SettingRow
-                                            icon={settings.public !== false ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                                            label="Visibility"
-                                            value={settings.public !== false ? 'Public' : 'Hidden'}
-                                            enabled={settings.public !== false}
-                                            tooltip="Whether vote counts are visible to all users before the poll closes"
-                                        />
-
-                                        {/* Min/Max votes */}
-                                        <SettingRow
-                                            icon={<Vote className="w-3.5 h-3.5" />}
-                                            label="Choices"
-                                            value={settings.min_votes === settings.max_votes
-                                                ? `${settings.max_votes || 1}`
-                                                : `${settings.min_votes || 1}-${settings.max_votes || 1}`
-                                            }
-                                            enabled={true}
-                                            tooltip="How many options each user can select (min-max range)"
-                                        />
-
-                                        {/* Exports allowed */}
-                                        <SettingRow
-                                            icon={<Download className="w-3.5 h-3.5" />}
-                                            label="Exports"
-                                            value={settings.allow_exports !== false ? 'Allowed' : 'Disabled'}
-                                            enabled={settings.allow_exports !== false}
-                                            tooltip="Whether users can export detailed voting results"
-                                        />
-
-                                        {/* Discussion thread */}
-                                        <SettingRow
-                                            icon={<MessageSquare className="w-3.5 h-3.5" />}
-                                            label="Thread"
-                                            value={settings.allow_thread ? 'Created' : 'None'}
-                                            enabled={!!settings.allow_thread}
-                                            tooltip="Whether a discussion thread was created for this poll"
-                                        />
-
-                                        {/* Role restriction */}
-                                        <SettingRow
-                                            icon={<Lock className="w-3.5 h-3.5" />}
-                                            label="Restricted"
-                                            value={settings.allowed_roles && settings.allowed_roles.length > 0
-                                                ? `${settings.allowed_roles.length} role${settings.allowed_roles.length > 1 ? 's' : ''}`
-                                                : 'No'
-                                            }
-                                            enabled={!!(settings.allowed_roles && settings.allowed_roles.length > 0)}
-                                            variant={settings.allowed_roles && settings.allowed_roles.length > 0 ? 'warning' : 'default'}
-                                            tooltip="Role restrictions limiting who can vote on this poll"
-                                            roleDetails={settings.allowed_roles && settings.role_metadata
-                                                ? settings.allowed_roles.map(roleId => ({
-                                                    id: roleId,
-                                                    name: settings.role_metadata?.[roleId]?.name || roleId,
-                                                    color: settings.role_metadata?.[roleId]?.color || 0,
-                                                }))
-                                                : undefined
-                                            }
-                                        />
-
-                                        {/* Vote weights */}
-                                        <SettingRow
-                                            icon={<Scale className="w-3.5 h-3.5" />}
-                                            label="Weighted"
-                                            value={settings.vote_weights && Object.keys(settings.vote_weights).length > 0
-                                                ? `${Object.keys(settings.vote_weights).length} role${Object.keys(settings.vote_weights).length > 1 ? 's' : ''}`
-                                                : 'No'
-                                            }
-                                            enabled={!!(settings.vote_weights && Object.keys(settings.vote_weights).length > 0)}
-                                            variant={settings.vote_weights && Object.keys(settings.vote_weights).length > 0 ? 'purple' : 'default'}
-                                            tooltip="Vote weighting where some roles count for more than others"
-                                            roleDetails={settings.vote_weights && settings.role_metadata
-                                                ? Object.entries(settings.vote_weights).map(([roleId, weight]) => ({
-                                                    id: roleId,
-                                                    name: settings.role_metadata?.[roleId]?.name || roleId,
-                                                    color: settings.role_metadata?.[roleId]?.color || 0,
-                                                    weight: weight,
-                                                }))
-                                                : undefined
-                                            }
-                                        />
-                                    </div>
-
-                                    {/* Actions */}
-                                    <div className="mt-4 pt-4 border-t border-slate-700/50 space-y-2">
-                                        {poll.discord_deleted ? (
-                                            <>
-                                                <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-center">
-                                                    <p className="text-amber-400 text-xs font-medium">
-                                                        ⚠️ Discord message deleted
-                                                    </p>
-                                                    <p className="text-slate-400 text-xs mt-1">
-                                                        This poll no longer exists in Discord
-                                                    </p>
-                                                </div>
-                                                <button
-                                                    onClick={handleDelete}
-                                                    disabled={isDeleting}
-                                                    className="w-full py-2 px-4 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    {isDeleting ? (
-                                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                                    ) : (
-                                                        <>
-                                                            <XCircle className="w-4 h-4" />
-                                                            Delete from Database
-                                                        </>
-                                                    )}
-                                                </button>
-                                            </>
-                                        ) : (
-                                            <button
-                                                onClick={handleStatusToggle}
-                                                disabled={isUpdating || cooldownRemaining > 0}
-                                                className={`w-full py-2 px-4 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 ${
-                                                    cooldownRemaining > 0
-                                                        ? 'bg-slate-700/50 text-slate-400 border border-slate-600 cursor-not-allowed'
-                                                        : poll.active
-                                                            ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30'
-                                                            : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30'
-                                                } disabled:opacity-50 disabled:cursor-not-allowed`}
-                                            >
-                                                {isUpdating ? (
-                                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                                ) : cooldownRemaining > 0 ? (
-                                                    <>
-                                                        <Clock className="w-4 h-4" />
-                                                        {poll.active ? 'Close Poll' : 'Reopen Poll'} ({cooldownRemaining}s)
-                                                    </>
-                                                ) : poll.active ? (
-                                                    <>
-                                                        <XCircle className="w-4 h-4" />
-                                                        Close Poll
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <CheckCircle className="w-4 h-4" />
-                                                        Reopen Poll
-                                                    </>
-                                                )}
-                                            </button>
-                                        )}
-
-                                        {/* Edit Settings Button */}
-                                        {!poll.discord_deleted && (
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    onEditPoll(poll);
-                                                }}
-                                                className="w-full py-2 px-4 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 border border-indigo-500/30"
-                                            >
-                                                <Settings2 className="w-4 h-4" />
-                                                Edit Settings
-                                            </button>
-                                        )}
-
-                                        {/* Duplicate Button */}
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                onDuplicatePoll(poll);
-                                            }}
-                                            aria-label="Duplicate poll"
-                                            className="w-full py-2 px-4 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 border border-cyan-500/30"
-                                        >
-                                            <CopyPlus className="w-4 h-4" />
-                                            Duplicate
-                                        </button>
-
-                                        {/* View | Export Split Button */}
-                                        <div className="flex gap-0 w-full">
-                                            <button
-                                                onClick={handleViewClick}
-                                                disabled={checkingPremium}
-                                                className="flex-1 py-2 px-4 rounded-l-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 bg-violet-500/20 text-violet-400 hover:bg-violet-500/30 border border-violet-500/30 border-r-0 disabled:opacity-50"
-                                            >
-                                                {checkingPremium ? (
-                                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                                ) : (
-                                                    <Eye className="w-4 h-4" />
-                                                )}
-                                                View
-                                            </button>
-                                            <button
-                                                onClick={handleExportClick}
-                                                className="flex-1 py-2 px-4 rounded-r-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 bg-slate-600/30 text-slate-300 hover:bg-slate-600/50 border border-slate-600"
-                                            >
-                                                <FileSpreadsheet className="w-4 h-4" />
-                                                Export
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-
-            {/* Premium Gate Modal */}
             <PremiumGateModal
                 isOpen={showPremiumModal}
                 onClose={() => setShowPremiumModal(false)}
@@ -934,8 +900,6 @@ const PollCard: React.FC<{
                     return isPremium;
                 }}
             />
-
-            {/* Voter View Modal */}
             <VoterViewModal
                 isOpen={showVoterModal}
                 onClose={() => setShowVoterModal(false)}
@@ -944,106 +908,28 @@ const PollCard: React.FC<{
                 options={poll.options}
                 fetchVoters={fetchVoters}
             />
-
-            {/* Export Modal */}
             <ExportModal
                 isOpen={showExportModal}
                 onClose={() => setShowExportModal(false)}
                 pollTitle={poll.title}
                 fetchExport={fetchExport}
             />
-        </motion.div>
+        </li>
     );
 };
 
-const SettingRow: React.FC<{
-    icon: React.ReactNode;
-    label: string;
-    value: string;
-    enabled: boolean;
-    tooltip: string;
-    variant?: 'default' | 'warning' | 'purple';
-    roleDetails?: Array<{ id: string; name: string; color: number; weight?: number }>;
-}> = ({ icon, label, value, enabled, tooltip, variant = 'default', roleDetails }) => {
-    const [showTooltip, setShowTooltip] = useState(false);
-    const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0 });
-    const rowRef = useRef<HTMLDivElement>(null);
+const SettingRow: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
+    <div className="flex items-start justify-between gap-3 py-1.5">
+        <dt className="text-faint shrink-0">{label}</dt>
+        <dd className="text-ink text-right min-w-0">{value}</dd>
+    </div>
+);
 
-    const handleMouseEnter = () => {
-        if (rowRef.current) {
-            const rect = rowRef.current.getBoundingClientRect();
-            setTooltipPos({
-                top: rect.top,
-                left: rect.left - 8
-            });
-            setShowTooltip(true);
-        }
-    };
-
-    const getValueClasses = () => {
-        if (variant === 'warning' && enabled) return 'text-amber-400';
-        if (variant === 'purple' && enabled) return 'text-violet-400';
-        return enabled ? 'text-emerald-400' : 'text-slate-500';
-    };
-
-    const getRoleColor = (color: number) => {
-        if (color === 0) return '#99AAB5';
-        return `#${color.toString(16).padStart(6, '0')}`;
-    };
-
-    return (
-        <>
-            <div
-                ref={rowRef}
-                className="relative group"
-                onMouseEnter={handleMouseEnter}
-                onMouseLeave={() => setShowTooltip(false)}
-            >
-                <div className={`flex items-center justify-between px-2 py-1.5 rounded-md text-xs transition-colors ${enabled ? 'bg-slate-700/30' : 'bg-slate-800/30'
-                    }`}>
-                    <div className={`flex items-center gap-2 ${enabled ? 'text-slate-300' : 'text-slate-500'}`}>
-                        {icon}
-                        <span>{label}</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                        <span className={`font-medium ${getValueClasses()}`}>{value}</span>
-                        <HelpCircle className="w-3 h-3 text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </div>
-                </div>
-            </div>
-
-            {showTooltip && createPortal(
-                <div
-                    className="fixed z-[9999] w-56 p-2 bg-slate-900 border border-slate-700 rounded-lg shadow-xl text-xs text-slate-300 pointer-events-none"
-                    style={{
-                        top: tooltipPos.top,
-                        left: tooltipPos.left,
-                        transform: 'translateX(-100%)',
-                    }}
-                >
-                    <div className="absolute top-2 -right-1 w-2 h-2 bg-slate-900 border-r border-t border-slate-700 transform rotate-45" />
-                    <p className="mb-2">{tooltip}</p>
-                    {roleDetails && roleDetails.length > 0 && (
-                        <div className="pt-2 border-t border-slate-700/50">
-                            <div className="flex flex-wrap gap-1.5">
-                                {roleDetails.map(role => (
-                                    <span
-                                        key={role.id}
-                                        className="px-2 py-0.5 rounded-full text-[10px] font-medium"
-                                        style={{
-                                            backgroundColor: `${getRoleColor(role.color)}20`,
-                                            color: getRoleColor(role.color),
-                                        }}
-                                    >
-                                        {role.name}{role.weight && role.weight > 1 ? ` (×${role.weight})` : ''}
-                                    </span>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                </div>,
-                document.body
-            )}
-        </>
-    );
-};
+/** Discord-style role chip: the role's colour as a dot. */
+const RoleChip: React.FC<{ name: string; color: number; suffix?: string }> = ({ name, color, suffix }) => (
+    <span className="chip bg-[#323643] text-ink">
+        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: roleHex(color) }} aria-hidden="true" />
+        {name}
+        {suffix && <span className="text-faint num">{suffix}</span>}
+    </span>
+);

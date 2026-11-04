@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle2, AlertCircle, X } from 'lucide-react';
 
@@ -18,11 +18,12 @@ const ToastContext = createContext<ToastApi>({
     error: () => { },
 });
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useToast = () => useContext(ToastContext);
 
 const TOAST_MS = 4000;
 
-/** App-wide toast stack. Mount once (see App.tsx); trigger via useToast(). */
+/** App-wide toast stack (Fluent toast, bottom-right). Mount once (see App.tsx); trigger via useToast(). */
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [toasts, setToasts] = useState<ToastItem[]>([]);
     const nextId = useRef(1);
@@ -33,35 +34,39 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), TOAST_MS);
     }, []);
 
-    const api = useRef<ToastApi>({
+    const api = useMemo<ToastApi>(() => ({
         success: (m: string) => push('success', m),
         error: (m: string) => push('error', m),
-    });
+    }), [push]);
 
     return (
-        <ToastContext.Provider value={api.current}>
+        <ToastContext.Provider value={api}>
             {children}
-            <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 items-end pointer-events-none">
+            <div className="fixed bottom-4 right-4 left-4 sm:left-auto z-[100] flex flex-col gap-2 items-stretch sm:items-end pointer-events-none">
                 <AnimatePresence>
                     {toasts.map(t => (
                         <motion.div
                             key={t.id}
-                            initial={{ opacity: 0, y: 12 }}
+                            layout
+                            initial={{ opacity: 0, y: 8 }}
                             animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: 12 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.15, ease: [0, 0, 0, 1] }}
                             role={t.kind === 'error' ? 'alert' : 'status'}
-                            className="glass-panel px-4 py-3 flex items-center gap-3 pointer-events-auto max-w-sm"
+                            style={{ boxShadow: 'var(--shadow-float)' }}
+                            className="pointer-events-auto sm:w-[360px] flex items-start gap-3 pl-4 pr-2 py-3 bg-overlay border border-[#3d3d3d] rounded-card"
                         >
                             {t.kind === 'success'
-                                ? <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-                                : <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />}
-                            <span className="text-sm text-white">{t.message}</span>
+                                ? <CheckCircle2 className="w-4 h-4 mt-0.5 text-positive shrink-0" aria-hidden="true" />
+                                : <AlertCircle className="w-4 h-4 mt-0.5 text-negative shrink-0" aria-hidden="true" />}
+                            <span className="flex-1 min-w-0 text-sm text-ink py-px">{t.message}</span>
                             <button
+                                type="button"
                                 onClick={() => setToasts(list => list.filter(x => x.id !== t.id))}
                                 aria-label="Dismiss notification"
-                                className="text-slate-500 hover:text-white transition-colors"
+                                className="btn btn-ghost btn-sm btn-icon -my-1 shrink-0"
                             >
-                                <X className="w-4 h-4" />
+                                <X className="w-3.5 h-3.5" />
                             </button>
                         </motion.div>
                     ))}

@@ -141,6 +141,7 @@
     "messages": {
         "common": {
             "error": "An error occurred.",
+            "generic_error": "An unexpected error occurred. Please try again.",
             "guild_only": "This command can only be used in a server.",
             "no_permission": "You need the \"Manage Server\" permission to use this command.",
             "none": "None",
@@ -258,7 +259,7 @@
         "export_btn": "Export List",
         "export_restricted": "Exports and detailed views are disabled for this poll (or it is private). Only the Poll Creator or Poll Managers can view them.",
         "export_fail": "Failed to export list.",
-        "export_content": "Voters for Option: {option}\n\nUser ID | Username | Display Name | Nickname\n--------------------------------------------------\n",
+        "export_content": "Voters for Option: {{option}}\n\nUser ID | Username | Display Name | Nickname\n--------------------------------------------------\n",
         "winner_upper": "WINNER",
         "nav_first": "First",
         "nav_last": "Last",

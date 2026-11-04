@@ -15,6 +15,8 @@ export interface MyVoteRow {
         guild_id: string;
         channel_id: string;
         active: boolean;
+        ends_at?: string | null;
+        discord_deleted?: boolean | null;
         options: string[];
         guilds: {
             name: string;
@@ -31,6 +33,8 @@ export interface MyVote {
     guild_icon_url: string | null;
     channel_id: string;
     active: boolean;
+    ends_at: string | null;
+    discord_deleted: boolean;
     chosen_options: string[];
     weight: number;
     voted_at: string;
@@ -65,6 +69,8 @@ export function groupVoteRows(rows: MyVoteRow[]): MyVote[] {
                 guild_icon_url: poll.guilds?.icon_url ?? null,
                 channel_id: poll.channel_id,
                 active: poll.active,
+                ends_at: poll.ends_at ?? null,
+                discord_deleted: poll.discord_deleted ?? false,
                 chosen_options: [optionLabel],
                 weight: row.weight,
                 voted_at: row.created_at,

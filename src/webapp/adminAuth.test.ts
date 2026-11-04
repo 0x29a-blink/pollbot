@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Request } from 'express';
 
-const single = vi.fn();
+const maybeSingle = vi.fn();
 
 vi.mock('../lib/db', () => ({
     supabase: {
-        from: () => ({ select: () => ({ eq: () => ({ single }) }) }),
+        from: () => ({ select: () => ({ eq: () => ({ maybeSingle }) }) }),
     },
 }));
 
@@ -19,7 +19,7 @@ function req(cookies: Record<string, string> = {}, headers: Record<string, strin
 }
 
 beforeEach(() => {
-    single.mockReset();
+    maybeSingle.mockReset();
 });
 
 describe('isAdminId', () => {
@@ -42,31 +42,36 @@ describe('getAdminUserId', () => {
 
     it('returns null when no session is presented', async () => {
         expect(await getAdminUserId(req())).toBeNull();
-        expect(single).not.toHaveBeenCalled();
+        expect(maybeSingle).not.toHaveBeenCalled();
+    });
+
+    it('rejects overly long session tokens without querying the database', async () => {
+        expect(await getAdminUserId(req({ pollbot_session: 'x'.repeat(200) }))).toBeNull();
+        expect(maybeSingle).not.toHaveBeenCalled();
     });
 
     it('resolves a live session belonging to an admin', async () => {
-        single.mockResolvedValue({ data: { user_id: 'admin-1', expires_at: future } });
+        maybeSingle.mockResolvedValue({ data: { user_id: 'admin-1', expires_at: future } });
         expect(await getAdminUserId(req({ pollbot_session: 'abc' }))).toBe('admin-1');
     });
 
     it('accepts the session from an Authorization header too', async () => {
-        single.mockResolvedValue({ data: { user_id: 'admin-2', expires_at: future } });
+        maybeSingle.mockResolvedValue({ data: { user_id: 'admin-2', expires_at: future } });
         expect(await getAdminUserId(req({}, { authorization: 'Bearer abc' }))).toBe('admin-2');
     });
 
     it('rejects a valid session belonging to a non-admin', async () => {
-        single.mockResolvedValue({ data: { user_id: 'someone-else', expires_at: future } });
+        maybeSingle.mockResolvedValue({ data: { user_id: 'someone-else', expires_at: future } });
         expect(await getAdminUserId(req({ pollbot_session: 'abc' }))).toBeNull();
     });
 
     it('rejects an expired admin session', async () => {
-        single.mockResolvedValue({ data: { user_id: 'admin-1', expires_at: past } });
+        maybeSingle.mockResolvedValue({ data: { user_id: 'admin-1', expires_at: past } });
         expect(await getAdminUserId(req({ pollbot_session: 'abc' }))).toBeNull();
     });
 
     it('rejects an unknown session id', async () => {
-        single.mockResolvedValue({ data: null });
+        maybeSingle.mockResolvedValue({ data: null });
         expect(await getAdminUserId(req({ pollbot_session: 'nope' }))).toBeNull();
     });
 });

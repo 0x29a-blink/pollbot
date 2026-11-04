@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, Line, ComposedChart, Legend } from 'recharts';
+import React, { useEffect, useMemo, useState } from 'react';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
 import { adminSupabase } from '../../lib/supabase';
-import { motion } from 'framer-motion';
-import { TrendingUp } from 'lucide-react';
-import { FilterButton } from '../ui/FilterButton';
+import { Panel } from '../ui/primitives';
+import { ChartBody, ChartSummary, Segmented } from '../admin/adminUi';
+import { fmtDayUTC, lastDaysUTC, countAxis } from '../admin/adminFormat';
+import { axisProps, chart, gridProps, tooltipProps } from '../../lib/chartTheme';
+import { fmtCount, toNum } from '../../lib/format';
 
 interface HistoryRow {
     day: string;
@@ -13,137 +15,121 @@ interface HistoryRow {
 }
 
 interface ChartRow {
-    date: string;
+    day: string;
+    label: string;
     votes: number;
     voters: number;
     polls: number;
 }
 
+type Metric = 'votes' | 'voters' | 'polls';
+
+const METRICS: { value: Metric; label: string; caption: (d: number) => string; unit: string }[] = [
+    { value: 'votes', label: 'Votes', caption: d => `votes in the last ${d} days`, unit: 'votes' },
+    { value: 'voters', label: 'Voters', caption: d => `unique voters per day, ${d}-day average`, unit: 'voters' },
+    { value: 'polls', label: 'Polls', caption: d => `polls created in the last ${d} days`, unit: 'polls' },
+];
+
 /**
- * Votes / unique voters / polls created per day, from the get_vote_history RPC.
- * Aggregated in Postgres — the old raw-row fetch silently truncated at
- * PostgREST's 1000-row cap once weekly volume passed 1000 votes.
+ * Votes / unique voters / polls created per UTC day, from the get_vote_history
+ * RPC (aggregated in Postgres, so it never hits PostgREST's 1000-row cap).
+ * One series at a time; the segmented control switches the metric.
  */
-export const VoteHistoryChart: React.FC = () => {
-    const [data, setData] = useState<ChartRow[]>([]);
-    const [days, setDays] = useState<7 | 30>(7);
-    const [loading, setLoading] = useState(true);
-    const [failed, setFailed] = useState(false);
+export const VoteHistoryChart: React.FC<{ refreshKey?: number; className?: string; height?: number }> = ({ refreshKey = 0, className = '', height = 240 }) => {
+    const [rows, setRows] = useState<ChartRow[] | null>(null);
+    const [days, setDays] = useState<7 | 30>(30);
+    const [metric, setMetric] = useState<Metric>('votes');
+    const [error, setError] = useState<string | null>(null);
+    const [retry, setRetry] = useState(0);
 
     useEffect(() => {
         let cancelled = false;
         (async () => {
-            setLoading(true);
             try {
-                const { data: rows, error } = await adminSupabase.rpc('get_vote_history', { p_days: days });
+                const { data, error: rpcError } = await adminSupabase.rpc('get_vote_history', { p_days: days });
                 if (cancelled) return;
-                if (error || !rows) {
-                    setFailed(true);
+                if (rpcError || !Array.isArray(data)) {
+                    setError("Couldn't load vote history.");
                     return;
                 }
-                setFailed(false);
-                setData((rows as HistoryRow[]).map(r => ({
-                    date: new Date(r.day).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }),
-                    votes: Number(r.votes),
-                    voters: Number(r.unique_voters),
-                    polls: Number(r.polls_created),
-                })));
-            } catch (error) {
-                console.error('Error fetching vote history:', error);
-                if (!cancelled) setFailed(true);
-            } finally {
-                if (!cancelled) setLoading(false);
+                // Zero-fill the window so a quiet day is drawn as zero, not skipped.
+                const byDay = new Map((data as HistoryRow[]).map(r => [String(r.day).slice(0, 10), r]));
+                setRows(lastDaysUTC(days).map(day => {
+                    const r = byDay.get(day);
+                    return {
+                        day,
+                        label: fmtDayUTC(day),
+                        votes: toNum(r?.votes) ?? 0,
+                        voters: toNum(r?.unique_voters) ?? 0,
+                        polls: toNum(r?.polls_created) ?? 0,
+                    };
+                }));
+                setError(null);
+            } catch (err) {
+                console.error('Error fetching vote history:', err);
+                if (!cancelled) setError("Couldn't load vote history.");
             }
         })();
         return () => { cancelled = true; };
-    }, [days]);
+    }, [days, refreshKey, retry]);
 
-    if (loading && data.length === 0) return <div className="h-64 animate-pulse bg-slate-800/20 rounded-xl"></div>;
+    const m = METRICS.find(x => x.value === metric)!;
+    const total = useMemo(() => (rows ?? []).reduce((s, r) => s + r[metric], 0), [rows, metric]);
+    const allZero = total === 0;
+    const loading = rows === null && !error;
 
     return (
-        <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="glass-panel p-6"
-        >
-            <div className="flex items-start justify-between gap-4 mb-6">
+        <Panel
+            title="Activity per day"
+            meta="(UTC)"
+            className={`min-w-0 ${className}`}
+            bodyClassName="px-5 pb-4"
+            actions={
                 <div className="flex items-center gap-2">
-                    <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
-                        <TrendingUp className="w-5 h-5" />
-                    </div>
-                    <div>
-                        <h3 className="text-lg font-bold text-white">Voting Trends</h3>
-                        <p className="text-slate-400 text-xs">Votes, unique voters &amp; polls created — last {days} days</p>
-                    </div>
+                    <Segmented label="Metric" value={metric} onChange={setMetric} options={METRICS.map(x => ({ value: x.value, label: x.label }))} className="hidden sm:inline-flex" />
+                    <Segmented label="Range" value={days} onChange={v => { setDays(v); }} options={[{ value: 7, label: '7d' }, { value: 30, label: '30d' }]} />
                 </div>
-                <div className="flex items-center gap-1 bg-slate-900/50 p-1 rounded-lg border border-slate-700">
-                    <FilterButton active={days === 7} onClick={() => setDays(7)}>7D</FilterButton>
-                    <FilterButton active={days === 30} onClick={() => setDays(30)}>30D</FilterButton>
-                </div>
-            </div>
-
-            {failed ? (
-                <div className="h-64 flex items-center justify-center text-sm text-slate-500">
-                    Couldn't load voting history — is the analytics migration applied?
-                </div>
-            ) : (
-                <div className="h-64 w-full" style={{ width: '100%', height: '300px', minWidth: 0 }}>
-                    <ResponsiveContainer width="99%" height="100%">
-                        <ComposedChart data={data}>
-                            <defs>
-                                <linearGradient id="colorVotes" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3} />
-                                    <stop offset="95%" stopColor="#818cf8" stopOpacity={0} />
-                                </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                            <XAxis
-                                dataKey="date"
-                                stroke="#64748b"
-                                fontSize={12}
-                                tickLine={false}
-                                axisLine={false}
-                            />
-                            <YAxis
-                                stroke="#64748b"
-                                fontSize={12}
-                                tickLine={false}
-                                axisLine={false}
-                            />
-                            <Tooltip
-                                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff' }}
-                            />
-                            <Legend wrapperStyle={{ fontSize: 12 }} />
-                            <Area
-                                type="monotone"
-                                dataKey="votes"
-                                name="Votes"
-                                stroke="#818cf8"
-                                strokeWidth={3}
-                                fillOpacity={1}
-                                fill="url(#colorVotes)"
-                            />
-                            <Line
-                                type="monotone"
-                                dataKey="voters"
-                                name="Unique voters"
-                                stroke="#34d399"
-                                strokeWidth={2}
-                                dot={false}
-                            />
-                            <Line
-                                type="monotone"
-                                dataKey="polls"
-                                name="Polls created"
-                                stroke="#fbbf24"
-                                strokeWidth={2}
-                                strokeDasharray="5 3"
-                                dot={false}
-                            />
-                        </ComposedChart>
-                    </ResponsiveContainer>
-                </div>
-            )}
-        </motion.div>
+            }
+        >
+            <Segmented label="Metric" value={metric} onChange={setMetric} options={METRICS.map(x => ({ value: x.value, label: x.label }))} className="sm:hidden mb-2" />
+            <ChartSummary
+                loading={loading}
+                value={fmtCount(metric === 'voters' ? Math.round(total / days) : total)}
+                caption={m.caption(days)}
+            />
+            <ChartBody
+                height={height}
+                loading={loading}
+                error={error}
+                onRetry={() => { setError(null); setRows(null); setRetry(n => n + 1); }}
+                empty={allZero}
+                emptyText={`No ${m.unit} in the last ${days} days.`}
+            >
+                <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={rows ?? []} margin={{ top: 8, right: 4, bottom: 0, left: -8 }}>
+                        <CartesianGrid {...gridProps} />
+                        <XAxis dataKey="label" {...axisProps} interval="preserveStartEnd" minTickGap={28} />
+                        <YAxis {...axisProps} width={44} {...countAxis(Math.max(0, ...(rows ?? []).map(r => r[metric])))} />
+                        <Tooltip
+                            {...tooltipProps}
+                            cursor={{ stroke: chart.grid }}
+                            formatter={((value: unknown) => [fmtCount(value), m.label]) as never}
+                        />
+                        <Area
+                            type="linear"
+                            dataKey={metric}
+                            name={m.label}
+                            stroke={chart.data}
+                            strokeWidth={2}
+                            fill={chart.data}
+                            fillOpacity={0.12}
+                            dot={false}
+                            activeDot={{ r: 4, strokeWidth: 0, fill: chart.data }}
+                            isAnimationActive={false}
+                        />
+                    </AreaChart>
+                </ResponsiveContainer>
+            </ChartBody>
+        </Panel>
     );
 };

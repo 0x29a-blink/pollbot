@@ -30,9 +30,20 @@ export class I18n {
         }
     }
 
+    private static resolveLocale(locale: Locale | string): string {
+        if (this.locales[locale]) return locale;
+        const prefix = String(locale).split('-')[0];
+        if (prefix) {
+            if (this.locales[prefix]) return prefix;
+            const match = Object.keys(this.locales).find(k => k.split('-')[0] === prefix);
+            if (match) return match;
+        }
+        return this.defaultLocale;
+    }
+
     static t(key: string, locale: Locale | string, args?: Record<string, any>): string {
-        // Fallback to default locale if specific locale not found
-        const targetLocale = this.locales[locale] ? locale : this.defaultLocale;
+        // Fallback to language match or default locale if specific locale not found
+        const targetLocale = this.resolveLocale(locale);
 
         let value = this.getNestedValue(this.locales[targetLocale], key);
 
@@ -45,7 +56,8 @@ export class I18n {
 
         if (args) {
             for (const [argKey, argValue] of Object.entries(args)) {
-                value = value.replace(new RegExp(`{{${argKey}}}`, 'g'), String(argValue));
+                const escapedKey = argKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                value = value.replace(new RegExp(`{{${escapedKey}}}`, 'g'), () => String(argValue));
             }
         }
 

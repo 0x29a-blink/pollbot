@@ -1,5 +1,4 @@
 import winston from 'winston';
-import path from 'path';
 
 // Define log format
 const logFormat = winston.format.printf(({ level, message, timestamp, ...metadata }) => {
@@ -17,7 +16,7 @@ const logFormat = winston.format.printf(({ level, message, timestamp, ...metadat
         };
         try {
             msg += ` ${JSON.stringify(metadata, replacer)}`;
-        } catch (e) {
+        } catch {
             msg += ` [Circular or non-serializable metadata]`;
         }
     }

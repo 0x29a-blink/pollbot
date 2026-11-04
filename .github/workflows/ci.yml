@@ -23,7 +23,6 @@ jobs:
         run: npm run typecheck
       - name: Lint
         run: npm run lint
-        continue-on-error: true
       - name: Unit tests
         run: npm test
         env:
@@ -52,6 +51,5 @@ jobs:
         run: npx tsc -b --noEmit
       - name: Lint
         run: npm run lint
-        continue-on-error: true
       - name: Build
         run: npm run build

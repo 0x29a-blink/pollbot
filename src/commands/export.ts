@@ -1,8 +1,9 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, AttachmentBuilder, MessageFlags, PermissionsBitField, GuildMember } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, AttachmentBuilder, MessageFlags } from 'discord.js';
 import { ExportManager } from '../lib/exportManager';
 import { I18n } from '../lib/i18n';
 import { logger } from '../lib/logger';
 import { supabase } from '../lib/db';
+import { extractMessageId, memberHasManageGuild, memberHasRoleName } from '../lib/guildUtils';
 
 export default {
     data: new SlashCommandBuilder()
@@ -19,41 +20,41 @@ export default {
         }
 
         const pollInput = interaction.options.getString('message_id', true);
-
-        // Extract Message ID
-        // Supports raw ID or https://discord.com/channels/GUILD/CHANNEL/MESSAGE_ID
-        let pollId = pollInput;
-        const match = pollInput.match(/channels\/\d+\/\d+\/(\d+)/);
-        if (match && match[1]) {
-            pollId = match[1];
+        const pollId = extractMessageId(pollInput);
+        if (!/^\d+$/.test(pollId)) {
+            return interaction.reply({ content: I18n.t('messages.manager.invalid_id', interaction.locale), flags: MessageFlags.Ephemeral });
         }
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         try {
-            // Check Permissions first
+            // Check Poll & Permissions first (scoped to this guild to prevent cross-server IDOR)
             const { data: poll } = await supabase
                 .from('polls')
-                .select('settings, creator_id')
+                .select('settings, creator_id, guild_id')
                 .eq('message_id', pollId)
+                .eq('guild_id', interaction.guildId)
                 .single();
 
-            if (poll) {
-                const settings = poll.settings as any || {};
-                const allowExports = settings.allow_exports !== false;
-                const isPublic = settings.public !== false;
+            if (!poll) {
+                return interaction.editReply({
+                    content: I18n.t('messages.export.not_found', interaction.locale)
+                });
+            }
 
-                if (!allowExports || !isPublic) {
-                    const member = interaction.member as GuildMember;
-                    const hasRole = member.roles.cache.some(r => r.name === 'Poll Manager');
-                    const hasPermission = member.permissions.has(PermissionsBitField.Flags.ManageGuild);
-                    const isCreator = poll.creator_id === interaction.user.id;
+            const settings = (poll.settings as any) || {};
+            const allowExports = settings.allow_exports !== false;
+            const isPublic = settings.public !== false;
 
-                    if (!isCreator && !hasRole && !hasPermission) {
-                        return interaction.editReply({
-                            content: I18n.t('view.export_restricted', interaction.locale)
-                        });
-                    }
+            if (!allowExports || !isPublic) {
+                const hasRole = memberHasRoleName(interaction.guild, interaction.member, 'Poll Manager');
+                const hasPermission = memberHasManageGuild(interaction.member);
+                const isCreator = poll.creator_id === interaction.user.id;
+
+                if (!isCreator && !hasRole && !hasPermission) {
+                    return interaction.editReply({
+                        content: I18n.t('view.export_restricted', interaction.locale)
+                    });
                 }
             }
 

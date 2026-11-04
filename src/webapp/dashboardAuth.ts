@@ -8,6 +8,9 @@ const router = Router();
 
 // Cookie configuration
 const COOKIE_NAME = 'pollbot_session';
+const OAUTH_STATE_COOKIE = 'pollbot_oauth_state';
+const OAUTH_STATE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_PENDING_STATES = 5000;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 // The dashboard is served over HTTPS (cloudflared) in production, so the session
 // cookie must carry Secure there. COOKIE_SECURE lets the deployment force it on
@@ -23,6 +26,19 @@ const COOKIE_OPTIONS = {
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
     path: '/',
 };
+const CLEAR_COOKIE_OPTIONS = {
+    httpOnly: true,
+    secure: COOKIE_SECURE,
+    sameSite: 'lax' as const,
+    path: '/',
+};
+const OAUTH_STATE_COOKIE_OPTIONS = {
+    httpOnly: true,
+    secure: COOKIE_SECURE,
+    sameSite: 'lax' as const,
+    maxAge: OAUTH_STATE_TTL_MS,
+    path: '/',
+};
 
 // Discord OAuth2 configuration
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
@@ -36,11 +52,14 @@ const ADMIN_IDS = (process.env.DISCORD_ADMIN_IDS || '').split(',').map(id => id.
 // In-memory session store (for simplicity - in production use Redis or DB)
 const sessions = new Map<string, { userId: string; expiresAt: number }>();
 
-// State tokens for CSRF protection (short-lived)
+// State tokens for CSRF protection (short-lived, bounded, and bound to browser cookie)
 const pendingStates = new Map<string, number>();
 
 // Clean up expired sessions and states periodically
-setInterval(() => {
+let lastDbSessionCleanup = 0;
+const DB_SESSION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // Hourly
+
+const cleanupInterval = setInterval(() => {
     const now = Date.now();
     for (const [key, session] of sessions) {
         if (session.expiresAt < now) {
@@ -52,20 +71,50 @@ setInterval(() => {
             pendingStates.delete(state);
         }
     }
+    if (process.env.SUPABASE_URL && now - lastDbSessionCleanup > DB_SESSION_CLEANUP_INTERVAL_MS) {
+        lastDbSessionCleanup = now;
+        void supabase
+            .from('dashboard_sessions')
+            .delete()
+            .lt('expires_at', new Date(now).toISOString())
+            .then(({ error }) => {
+                if (error) {
+                    logger.warn('[Dashboard Auth] Failed to purge expired dashboard_sessions:', error);
+                }
+            });
+    }
 }, 60000); // Every minute
+cleanupInterval.unref();
+
+export function getSessionIdFromRequest(req: Request): string | null {
+    const cookieSession = typeof req.cookies?.[COOKIE_NAME] === 'string'
+        ? req.cookies[COOKIE_NAME]
+        : '';
+    const authHeader = typeof req.headers.authorization === 'string'
+        ? req.headers.authorization
+        : '';
+    const headerSession = authHeader.startsWith('Bearer ')
+        ? authHeader.slice(7).trim()
+        : '';
+    const sessionId = cookieSession || headerSession;
+    if (!sessionId || sessionId.length > 128) {
+        return null;
+    }
+    return sessionId;
+}
 
 /**
  * Refresh Discord access token using refresh token
  * Returns new access token or null if refresh failed
  */
-async function refreshAccessToken(sessionId: string): Promise<string | null> {
+export async function refreshAccessToken(sessionId: string): Promise<string | null> {
     try {
         // Get session with refresh token from database
         const { data: session, error: sessionError } = await supabase
             .from('dashboard_sessions')
             .select('refresh_token, user_id')
             .eq('id', sessionId)
-            .single();
+            .maybeSingle();
 
         if (sessionError || !session?.refresh_token) {
             logger.warn(`[Dashboard Auth] No refresh token for session ${sessionId.substring(0, 8)}...`);
@@ -123,14 +172,64 @@ async function refreshAccessToken(sessionId: string): Promise<string | null> {
     }
 }
 
+export interface DashboardSessionRecord {
+    id: string;
+    user_id: string;
+    access_token: string;
+    expires_at: string;
+    access_token_expires_at?: string | null;
+    cached_guilds?: any;
+    guilds_cached_at?: string | null;
+}
+
+/**
+ * Loads a valid dashboard session from Supabase and proactively refreshes the
+ * Discord OAuth access token if it has expired (or is within 2 minutes of expiry).
+ */
+export async function getValidDashboardSession(req: Request): Promise<DashboardSessionRecord | null> {
+    const sessionId = getSessionIdFromRequest(req);
+    if (!sessionId) return null;
+
+    const { data: session, error } = await supabase
+        .from('dashboard_sessions')
+        .select('id, user_id, access_token, expires_at, access_token_expires_at, cached_guilds, guilds_cached_at')
+        .eq('id', sessionId)
+        .maybeSingle();
+
+    if (error || !session) return null;
+    if (new Date(session.expires_at).getTime() < Date.now()) {
+        sessions.delete(sessionId);
+        return null;
+    }
+
+    if (session.access_token_expires_at) {
+        const tokenExpiry = new Date(session.access_token_expires_at).getTime();
+        if (tokenExpiry - Date.now() < 2 * 60 * 1000) {
+            const refreshed = await refreshAccessToken(sessionId);
+            if (refreshed) {
+                session.access_token = refreshed;
+            }
+        }
+    }
+
+    return session as DashboardSessionRecord;
+}
+
 /**
  * GET /api/auth/discord
  * Redirect user to Discord OAuth authorization page
  */
-router.get('/discord', (req: Request, res: Response) => {
-    // Generate a state token for CSRF protection
-    const state = crypto.randomBytes(16).toString('hex');
-    pendingStates.set(state, Date.now() + 300000); // 5 minutes expiry
+router.get('/discord', (_req: Request, res: Response) => {
+    // Generate a state token for OAuth Login CSRF protection, bound to the browser cookie
+    const state = crypto.randomBytes(24).toString('hex');
+    if (pendingStates.size >= MAX_PENDING_STATES) {
+        const oldestState = pendingStates.keys().next().value;
+        if (oldestState) {
+            pendingStates.delete(oldestState);
+        }
+    }
+    pendingStates.set(state, Date.now() + OAUTH_STATE_TTL_MS);
+    res.cookie(OAUTH_STATE_COOKIE, state, OAUTH_STATE_COOKIE_OPTIONS);
 
     const params = new URLSearchParams({
         client_id: CLIENT_ID,
@@ -151,26 +250,42 @@ router.get('/discord', (req: Request, res: Response) => {
  */
 router.get('/callback', async (req: Request, res: Response) => {
     const { code, state, error } = req.query;
+    const cookieState = typeof req.cookies?.[OAUTH_STATE_COOKIE] === 'string'
+        ? req.cookies[OAUTH_STATE_COOKIE]
+        : '';
+    res.clearCookie(OAUTH_STATE_COOKIE, CLEAR_COOKIE_OPTIONS);
 
     // Handle OAuth errors
     if (error) {
+        if (typeof state === 'string') {
+            pendingStates.delete(state);
+        }
         logger.warn(`[Dashboard Auth] OAuth error: ${error}`);
         return res.redirect('/login?error=oauth_denied');
     }
 
-    // Validate state for CSRF protection
-    if (!state || typeof state !== 'string' || !pendingStates.has(state)) {
-        logger.warn(`[Dashboard Auth] Invalid state token`);
+    // Validate state against both the server-side store (non-expired) and the browser cookie
+    if (!state || typeof state !== 'string' || state.length > 128 || !cookieState) {
+        logger.warn(`[Dashboard Auth] Missing or malformed OAuth state token`);
         return res.redirect('/login?error=invalid_state');
     }
+
+    const stateExpiry = pendingStates.get(state);
     pendingStates.delete(state);
+
+    const stateBuf = Buffer.from(state, 'utf8');
+    const cookieBuf = Buffer.from(cookieState, 'utf8');
+    const stateMatchesCookie = stateBuf.length === cookieBuf.length && crypto.timingSafeEqual(stateBuf, cookieBuf);
+
+    if (!stateMatchesCookie || !stateExpiry || stateExpiry <= Date.now()) {
+        logger.warn(`[Dashboard Auth] Invalid or expired OAuth state token`);
+        return res.redirect('/login?error=invalid_state');
+    }
 
     if (!code || typeof code !== 'string') {
         logger.warn(`[Dashboard Auth] No authorization code provided`);
         return res.redirect('/login?error=no_code');
     }
-
-
 
     try {
         // Exchange code for tokens
@@ -221,10 +336,13 @@ router.get('/callback', async (req: Request, res: Response) => {
             global_name: string | null;
         };
 
-        // Build avatar URL
+        // Build avatar URL (handle migrated pomelo usernames where discriminator is "0")
+        const defaultAvatarIndex = (!discordUser.discriminator || discordUser.discriminator === '0')
+            ? Number((BigInt(discordUser.id) >> 22n) % 6n)
+            : (parseInt(discordUser.discriminator, 10) % 5);
         const avatarUrl = discordUser.avatar
             ? `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png`
-            : `https://cdn.discordapp.com/embed/avatars/${parseInt(discordUser.discriminator || '0') % 5}.png`;
+            : `https://cdn.discordapp.com/embed/avatars/${defaultAvatarIndex}.png`;
 
         // Check if user is admin
         const isAdmin = ADMIN_IDS.includes(discordUser.id);
@@ -252,11 +370,6 @@ router.get('/callback', async (req: Request, res: Response) => {
         const expiresAt = Date.now() + (7 * 24 * 60 * 60 * 1000); // 7 days
         const accessTokenExpiresAt = new Date(Date.now() + tokens.expires_in * 1000); // Discord token expiry
 
-        sessions.set(sessionId, {
-            userId: discordUser.id,
-            expiresAt,
-        });
-
         // Fetch and cache user's guilds immediately at login
         let cachedGuilds = null;
         let guildsCachedAt = null;
@@ -278,7 +391,7 @@ router.get('/callback', async (req: Request, res: Response) => {
         }
 
         // Store session in database for persistence across restarts
-        await supabase.from('dashboard_sessions').upsert({
+        const { error: sessionDbError } = await supabase.from('dashboard_sessions').upsert({
             id: sessionId,
             user_id: discordUser.id,
             access_token: tokens.access_token,
@@ -289,6 +402,16 @@ router.get('/callback', async (req: Request, res: Response) => {
             guilds_cached_at: guildsCachedAt,
         }, {
             onConflict: 'id',
+        });
+
+        if (sessionDbError) {
+            logger.error(`[Dashboard Auth] Failed to persist dashboard session: ${sessionDbError.message}`);
+            return res.redirect('/login?error=session_failed');
+        }
+
+        sessions.set(sessionId, {
+            userId: discordUser.id,
+            expiresAt,
         });
 
         logger.info(`[Dashboard Auth] User ${discordUser.username} (${discordUser.id}) logged in, admin: ${isAdmin}`);
@@ -308,11 +431,7 @@ router.get('/callback', async (req: Request, res: Response) => {
  * Return current user info from session
  */
 router.get('/me', async (req: Request, res: Response) => {
-    // Support both cookie and header auth for backwards compatibility during migration
-    const cookieSession = req.cookies?.[COOKIE_NAME];
-    const authHeader = req.headers.authorization;
-    const headerSession = authHeader?.replace('Bearer ', '');
-    const sessionId = cookieSession || headerSession;
+    const sessionId = getSessionIdFromRequest(req);
 
     if (!sessionId) {
         return res.status(401).json({ error: 'No session token provided' });
@@ -327,7 +446,7 @@ router.get('/me', async (req: Request, res: Response) => {
             .from('dashboard_sessions')
             .select('user_id, expires_at')
             .eq('id', sessionId)
-            .single();
+            .maybeSingle();
 
         if (dbSession && new Date(dbSession.expires_at).getTime() > Date.now()) {
             session = {
@@ -349,7 +468,7 @@ router.get('/me', async (req: Request, res: Response) => {
         .from('users')
         .select('id, username, discriminator, avatar_url, is_admin')
         .eq('id', session.userId)
-        .single();
+        .maybeSingle();
 
     if (error || !user) {
         return res.status(404).json({ error: 'User not found' });
@@ -373,11 +492,7 @@ router.get('/me', async (req: Request, res: Response) => {
  * Clear session
  */
 router.post('/logout', async (req: Request, res: Response) => {
-    // Support both cookie and header auth
-    const cookieSession = req.cookies?.[COOKIE_NAME];
-    const authHeader = req.headers.authorization;
-    const headerSession = authHeader?.replace('Bearer ', '');
-    const sessionId = cookieSession || headerSession;
+    const sessionId = getSessionIdFromRequest(req);
 
     if (sessionId) {
         sessions.delete(sessionId);
@@ -385,8 +500,8 @@ router.post('/logout', async (req: Request, res: Response) => {
         logger.info(`[Dashboard Auth] Session ${sessionId.substring(0, 8)}... logged out`);
     }
 
-    // Clear the cookie
-    res.clearCookie(COOKIE_NAME, { path: '/' });
+    // Clear the cookie using matching flags
+    res.clearCookie(COOKIE_NAME, CLEAR_COOKIE_OPTIONS);
     return res.json({ success: true });
 });
 

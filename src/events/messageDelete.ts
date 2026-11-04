@@ -1,12 +1,14 @@
 import { Events, Message, PartialMessage } from 'discord.js';
 import { supabase } from '../lib/db';
 import { logger } from '../lib/logger';
+import { cancelPendingRender } from '../lib/renderQueue';
 
 export default {
     name: Events.MessageDelete,
     async execute(message: Message | PartialMessage) {
         // If message is partial, we only have the ID, which is enough for DB lookup
         const messageId = message.id;
+        cancelPendingRender(messageId);
 
         if (!process.env.SUPABASE_URL) return;
 

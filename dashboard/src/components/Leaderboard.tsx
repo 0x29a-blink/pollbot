@@ -1,81 +1,95 @@
 import React from 'react';
-import { motion } from 'framer-motion';
+import { Panel, InlineError } from './ui/primitives';
 
-// Complete class strings per accent color — Tailwind only generates classes it
-// sees as literals, so these must never be built by string interpolation.
-const accentClasses: Record<string, { tile: string; value: string }> = {
-    yellow: { tile: 'bg-yellow-500/10 text-yellow-400', value: 'text-yellow-400' },
-    amber: { tile: 'bg-amber-500/10 text-amber-400', value: 'text-amber-400' },
-    indigo: { tile: 'bg-indigo-500/10 text-indigo-400', value: 'text-indigo-400' },
-    emerald: { tile: 'bg-emerald-500/10 text-emerald-400', value: 'text-emerald-400' },
-};
-const fallbackAccent = { tile: 'bg-slate-500/10 text-slate-400', value: 'text-slate-400' };
+export interface LeaderboardItem {
+    id: string;
+    label: React.ReactNode;
+    /** Grey second line: what the row is, not the value again. */
+    subLabel?: React.ReactNode;
+    value: React.ReactNode;
+    /** Optional media slot (server icon, avatar) after the rank. */
+    leading?: React.ReactNode;
+    onClick?: () => void;
+}
 
 interface LeaderboardProps {
     title: string;
-    icon: React.ReactNode;
-    color: string;
-    items: {
-        id: string;
-        label: string;
-        subLabel?: string;
-        value: string | number;
-        rank?: number;
-        onClick?: () => void;
-    }[];
+    /** Grey meta in the header: the measure and the window ("by votes, 30 days"). */
+    subtitle?: string;
+    items: LeaderboardItem[];
+    /** Rows drawn (and skeleton rows while loading). */
+    rows?: number;
+    loading?: boolean;
+    error?: string | null;
+    onRetry?: () => void;
+    emptyText?: string;
+    /** Header action, e.g. a "View all" link. */
+    action?: React.ReactNode;
+    className?: string;
 }
 
-export const Leaderboard: React.FC<LeaderboardProps> = ({ title, icon, color, items }) => {
-    const accent = accentClasses[color] ?? fallbackAccent;
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="glass-panel p-6"
-        >
-            <div className="flex items-center gap-2 mb-6">
-                <div className={`p-2 rounded-lg ${accent.tile}`}>
-                    {icon}
-                </div>
-                <div>
-                    <h3 className="text-lg font-bold text-white">{title}</h3>
-                    <p className="text-slate-400 text-xs">Top Performers</p>
-                </div>
+const ROW = 'h-[52px] flex items-center gap-3 px-5';
+
+/**
+ * A capped ranking list: plain grey rank, identity, a grey line saying what
+ * the row is, and the value right-aligned in tabular ink.
+ */
+export const Leaderboard: React.FC<LeaderboardProps> = ({
+    title,
+    subtitle,
+    items,
+    rows = 5,
+    loading = false,
+    error,
+    onRetry,
+    emptyText = 'Nothing to rank yet.',
+    action,
+    className = '',
+}) => (
+    <Panel title={title} meta={subtitle} actions={action} className={`min-w-0 ${className}`} bodyClassName="pb-2">
+        {error ? (
+            <div className="flex items-center" style={{ height: rows * 52 }}>
+                <InlineError message={error} onRetry={onRetry} className="w-full" />
             </div>
-
-            <div className="space-y-4">
-                {items.length === 0 ? (
-                    <div className="text-center text-slate-500 py-4 text-sm">No data available</div>
-                ) : (
-                    items.map((item, index) => (
-                        <div
-                            key={item.id}
-                            onClick={item.onClick}
-                            className={`flex items-center gap-4 group ${item.onClick ? 'cursor-pointer' : ''}`}
-                        >
-                            <div className={`w-8 h-8 flex items-center justify-center rounded-full font-bold text-sm
-                                ${index === 0 ? 'bg-yellow-500/20 text-yellow-400' :
-                                    index === 1 ? 'bg-slate-400/20 text-slate-300' :
-                                        index === 2 ? 'bg-amber-700/20 text-amber-600' :
-                                            'bg-slate-800 text-slate-500'}
-                            `}>
-                                {index + 1}
-                            </div>
-
-                            <div className="flex-1 min-w-0">
-                                <div className={`text-white text-sm font-medium truncate transition-colors ${item.onClick ? 'group-hover:text-indigo-400' : 'group-hover:text-indigo-300'}`}>
-                                    {item.label}
-                                </div>
-                                {item.subLabel && <div className="text-xs text-slate-500 truncate">{item.subLabel}</div>}
-                            </div>
-
-                            <div className="text-right">
-                                <span className={`font-mono font-bold text-sm ${accent.value}`}>{item.value}</span>
-                            </div>
-                        </div>
-                    ))
-                )}
+        ) : loading ? (
+            <ul aria-busy="true">
+                {Array.from({ length: rows }, (_, i) => (
+                    <li key={i} className={ROW}>
+                        <div className="skeleton h-3 w-3" />
+                        <div className="flex-1 space-y-1.5"><div className="skeleton h-3.5 w-3/5" /><div className="skeleton h-3 w-2/5" /></div>
+                        <div className="skeleton h-3.5 w-10" />
+                    </li>
+                ))}
+            </ul>
+        ) : items.length === 0 ? (
+            <div className="px-5" style={{ height: rows * 52 }}>
+                <div className="h-full flex items-center justify-center text-sm text-faint border border-dashed border-line rounded-lg">{emptyText}</div>
             </div>
-        </motion.div>
-    );
-};
+        ) : (
+            <ol>
+                {items.slice(0, rows).map((item, index) => {
+                    const body = (
+                        <>
+                            <span className="num text-[13px] text-faint w-5 shrink-0">{index + 1}.</span>
+                            {item.leading}
+                            <div className="flex-1 min-w-0 text-left">
+                                <div className="text-sm text-ink truncate">{item.label}</div>
+                                {item.subLabel && <div className="text-xs text-faint truncate">{item.subLabel}</div>}
+                            </div>
+                            <span className="num text-sm text-ink shrink-0 text-right">{item.value}</span>
+                        </>
+                    );
+                    return (
+                        <li key={item.id}>
+                            {item.onClick ? (
+                                <button type="button" onClick={item.onClick} className={`${ROW} w-full row-interactive`}>{body}</button>
+                            ) : (
+                                <div className={ROW}>{body}</div>
+                            )}
+                        </li>
+                    );
+                })}
+            </ol>
+        )}
+    </Panel>
+);

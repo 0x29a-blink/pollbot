@@ -1,4 +1,4 @@
-import { Events, Interaction, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, TextChannel, GuildChannel, GuildMember } from 'discord.js';
+import { Events, Interaction, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, AttachmentBuilder } from 'discord.js';
 import { ExtendedClient } from '../bot';
 import { supabase } from '../lib/db';
 import { Renderer } from '../lib/renderer';
@@ -8,7 +8,7 @@ import { I18n } from '../lib/i18n';
 import { aggregateVotes, replaceUserVotes } from '../lib/voteUtils';
 import { scheduleRender } from '../lib/renderQueue';
 import { trackUsage } from '../lib/usageTracker';
-import { AttachmentBuilder } from 'discord.js';
+import { memberHasAnyRoleName, memberHasManageGuild, memberRoleIds } from '../lib/guildUtils';
 
 export default {
     name: Events.InteractionCreate,
@@ -25,24 +25,41 @@ export default {
             }
 
             // View Details
-            if (interaction.customId === 'view_details' || interaction.customId.startsWith('view_details_')) {
+            if (interaction.customId === 'view_details' || interaction.customId === 'poll_view_details' || interaction.customId.startsWith('view_details_')) {
+                if (!interaction.inGuild()) {
+                    await interaction.reply({
+                        content: I18n.t('messages.common.guild_only', interaction.locale),
+                        flags: MessageFlags.Ephemeral
+                    });
+                    return;
+                }
+
                 // Determine Poll ID: from message ID if static, or parsed if using old dynamic logic (backup)
                 let pollId = interaction.message.id;
                 if (interaction.customId.startsWith('view_details_')) {
                     pollId = interaction.customId.replace('view_details_', '');
                 }
 
-                // Permission Check
-                const member = interaction.member as GuildMember;
-                const isAdmin = member.permissions.has(PermissionFlagsBits.ManageGuild);
-                const isPollManager = member.roles.cache.some(r => r.name === 'Poll Manager' || r.name === 'Poll Creator');
+                // Permission Check (safe when member is evicted from GuildMemberManager cache)
+                const isAdmin = memberHasManageGuild(interaction.member);
+                const isPollManager = memberHasAnyRoleName(interaction.guild, interaction.member, ['Poll Manager', 'Poll Creator']);
 
                 if (!isAdmin && !isPollManager) {
-                    await interaction.reply({
-                        content: I18n.t('messages.common.view_details_deny', interaction.locale),
-                        flags: MessageFlags.Ephemeral
-                    });
-                    return;
+                    // Also allow the poll's own creator to view details
+                    const { data: pollOwner } = await supabase
+                        .from('polls')
+                        .select('creator_id')
+                        .eq('message_id', pollId)
+                        .eq('guild_id', interaction.guildId)
+                        .single();
+
+                    if (!pollOwner || pollOwner.creator_id !== interaction.user.id) {
+                        await interaction.reply({
+                            content: I18n.t('messages.common.view_details_deny', interaction.locale),
+                            flags: MessageFlags.Ephemeral
+                        });
+                        return;
+                    }
                 }
 
                 const { handleViewPoll } = await import('../commands/view');
@@ -80,13 +97,18 @@ export default {
 
         // Handle Select Menus (Voting)
         if (interaction.isStringSelectMenu() && interaction.customId === 'poll_vote') {
+            if (!interaction.inGuild()) {
+                return interaction.reply({ content: I18n.t('messages.common.guild_only', interaction.locale), flags: MessageFlags.Ephemeral });
+            }
+
             const pollId = interaction.message.id;
             const userId = interaction.user.id;
-            const selectedIndices = interaction.values.map(v => parseInt(v));
+            const parsedIndices = interaction.values.map(v => parseInt(v, 10));
 
-            if (selectedIndices.some(isNaN)) {
+            if (parsedIndices.length === 0 || parsedIndices.some(Number.isNaN)) {
                 return interaction.reply({ content: I18n.t('messages.poll.invalid_selection', interaction.locale), flags: MessageFlags.Ephemeral });
             }
+            const selectedIndices = [...new Set(parsedIndices)];
 
             try {
                 // Defer immediately to prevent timeout on slow DB ops
@@ -104,17 +126,30 @@ export default {
                     return;
                 }
 
-                if (!pollData.active) {
+                const isExpired = Boolean(pollData.ends_at && new Date(pollData.ends_at).getTime() <= Date.now());
+                if (!pollData.active || isExpired) {
                     await interaction.editReply({ content: I18n.t('messages.poll.closed', interaction.locale) });
                     return;
                 }
 
-                // 2. Role Restriction Check
-                const member = interaction.member as GuildMember;
-                const allowedRoles = pollData.settings?.allowed_roles as string[];
+                const optionCount = Array.isArray(pollData.options) ? pollData.options.length : 0;
+                const maxVotes = Math.min(Math.max(pollData.settings?.max_votes || 1, 1), Math.max(optionCount, 1));
+                const minVotes = Math.min(Math.max(pollData.settings?.min_votes || 1, 1), maxVotes);
+                if (
+                    selectedIndices.length < minVotes ||
+                    selectedIndices.length > maxVotes ||
+                    selectedIndices.some(idx => idx < 0 || idx >= optionCount)
+                ) {
+                    await interaction.editReply({ content: I18n.t('messages.poll.invalid_selection', interaction.locale) });
+                    return;
+                }
+
+                // 2. Role Restriction Check (safe for both cached and uncached members)
+                const allowedRoles = pollData.settings?.allowed_roles as string[] | undefined;
 
                 if (allowedRoles && allowedRoles.length > 0) {
-                    const hasAllowedRole = allowedRoles.some(roleId => member.roles.cache.has(roleId));
+                    const voterRoles = new Set(memberRoleIds(interaction.member));
+                    const hasAllowedRole = allowedRoles.some(roleId => voterRoles.has(roleId));
                     if (!hasAllowedRole) {
                         await interaction.editReply({ content: I18n.t('messages.poll.role_restricted', interaction.locale) });
                         return;
@@ -130,7 +165,7 @@ export default {
                         .from('guild_settings')
                         .select('vote_weights, locale')
                         .eq('guild_id', interaction.guildId)
-                        .single();
+                        .maybeSingle();
                     if (guildSettings?.vote_weights) {
                         globalWeights = guildSettings.vote_weights;
                     }
@@ -157,7 +192,7 @@ export default {
 
                 // 4. Calculate Weight
                 const pollWeights = pollData.settings?.vote_weights || {};
-                const voteWeight = PollManager.calculateUserWeight(member, globalWeights, pollWeights);
+                const voteWeight = PollManager.calculateUserWeight(interaction.member, globalWeights, pollWeights);
 
                 // 5. Record Vote atomically (replace the user's previous votes).
                 // A partial failure here can never erase the user's prior vote.
@@ -202,9 +237,21 @@ export default {
                 // totals when it runs, so the final image reflects every vote in the
                 // burst rather than each intermediate state.
                 const messageToEdit = interaction.message;
-                const showVotes = pollData.settings.public;
 
                 scheduleRender(pollId, async () => {
+                    // Re-verify the poll is still active and not deleted so a trailing
+                    // debounced render cannot clobber a poll closed/deleted meanwhile.
+                    const { data: latestPoll } = await supabase
+                        .from('polls')
+                        .select('active, discord_deleted, settings')
+                        .eq('message_id', pollId)
+                        .single();
+
+                    if (!latestPoll || !latestPoll.active || latestPoll.discord_deleted) {
+                        return;
+                    }
+
+                    const showVotes = latestPoll.settings?.public !== false;
                     const voteAggregation = await aggregateVotes(pollId, pollData.options.length);
 
                     // If the count query failed, skip the refresh rather than

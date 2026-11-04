@@ -1,7 +1,8 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionsBitField, MessageFlags, GuildMember } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { supabase } from '../lib/db';
 import { logger } from '../lib/logger';
 import { I18n } from '../lib/i18n';
+import { memberHasManageGuild } from '../lib/guildUtils';
 
 export default {
     data: new SlashCommandBuilder()
@@ -42,9 +43,10 @@ export default {
                                 .setRequired(true))
                         .addIntegerOption(option =>
                             option.setName('value')
-                                .setDescription('The vote weight value')
+                                .setDescription('The vote weight value (1–100)')
                                 .setRequired(true)
-                                .setMinValue(1)))
+                                .setMinValue(1)
+                                .setMaxValue(100)))
                 .addSubcommand(subcommand =>
                     subcommand
                         .setName('remove')
@@ -67,18 +69,32 @@ export default {
             return interaction.reply({ content: I18n.t('messages.common.guild_only', interaction.locale), flags: MessageFlags.Ephemeral });
         }
 
-        const member = interaction.member as GuildMember;
-        if (!member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+        if (!memberHasManageGuild(interaction.member)) {
             return interaction.reply({ content: I18n.t('messages.common.no_permission', interaction.locale), flags: MessageFlags.Ephemeral });
         }
 
-        let subcommand, subcommandGroup;
+        let subcommand: string | undefined;
+        let subcommandGroup: string | null = null;
         try {
             subcommand = interaction.options.getSubcommand();
-            subcommandGroup = interaction.options.getSubcommandGroup();
-        } catch (e) {
+            subcommandGroup = interaction.options.getSubcommandGroup(false);
+        } catch {
             // Should not happen if builder is correct
         }
+
+        // Validate locale synchronously before deferring if setting locale
+        if (!subcommandGroup && subcommand === 'locale') {
+            const lang = interaction.options.getString('lang', true);
+            const available = I18n.getAvailableLocales();
+            if (!available.includes(lang)) {
+                return interaction.reply({
+                    content: I18n.t('messages.config.invalid_locale', interaction.locale, { available: available.join(', ') }),
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+        }
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         const guildId = interaction.guildId!;
 
@@ -88,14 +104,14 @@ export default {
                 .from('guild_settings')
                 .select('vote_weights')
                 .eq('guild_id', guildId)
-                .single();
+                .maybeSingle();
 
             if (fetchError && fetchError.code !== 'PGRST116') { // Ignore not found, treat as empty
                 logger.error('Failed to fetch guild settings:', fetchError);
-                return interaction.reply({ content: I18n.t('messages.config.update_fail', interaction.locale), flags: MessageFlags.Ephemeral });
+                return interaction.editReply({ content: I18n.t('messages.config.update_fail', interaction.locale) });
             }
 
-            let weights = (currentSettings?.vote_weights as Record<string, number>) || {};
+            const weights = { ...((currentSettings?.vote_weights as Record<string, number>) || {}) };
 
             if (subcommand === 'set') {
                 const role = interaction.options.getRole('role', true);
@@ -112,10 +128,10 @@ export default {
 
                 if (error) {
                     logger.error('Failed to update weights:', error);
-                    return interaction.reply({ content: I18n.t('messages.config.update_fail', interaction.locale), flags: MessageFlags.Ephemeral });
+                    return interaction.editReply({ content: I18n.t('messages.config.update_fail', interaction.locale) });
                 }
 
-                return interaction.reply({ content: I18n.t('messages.config.weight_updated', interaction.locale, { role: role.name, value: value }), flags: MessageFlags.Ephemeral });
+                return interaction.editReply({ content: I18n.t('messages.config.weight_updated', interaction.locale, { role: role.name, value: value }) });
 
             } else if (subcommand === 'remove') {
                 const role = interaction.options.getRole('role', true);
@@ -132,20 +148,20 @@ export default {
 
                     if (error) {
                         logger.error('Failed to update weights:', error);
-                        return interaction.reply({ content: I18n.t('messages.config.update_fail', interaction.locale), flags: MessageFlags.Ephemeral });
+                        return interaction.editReply({ content: I18n.t('messages.config.update_fail', interaction.locale) });
                     }
-                    return interaction.reply({ content: I18n.t('messages.config.weight_removed', interaction.locale, { role: role.name }), flags: MessageFlags.Ephemeral });
+                    return interaction.editReply({ content: I18n.t('messages.config.weight_removed', interaction.locale, { role: role.name }) });
                 } else {
-                    return interaction.reply({ content: I18n.t('messages.config.weight_none', interaction.locale, { role: role.name }), flags: MessageFlags.Ephemeral });
+                    return interaction.editReply({ content: I18n.t('messages.config.weight_none', interaction.locale, { role: role.name }) });
                 }
 
             } else if (subcommand === 'view') {
                 if (Object.keys(weights).length === 0) {
-                    return interaction.reply({ content: I18n.t('messages.config.weight_empty', interaction.locale), flags: MessageFlags.Ephemeral });
+                    return interaction.editReply({ content: I18n.t('messages.config.weight_empty', interaction.locale) });
                 }
 
                 const lines = Object.entries(weights).map(([roleId, weight]) => `<@&${roleId}>: ${weight}`);
-                return interaction.reply({ content: I18n.t('messages.config.weight_list', interaction.locale, { list: lines.join('\n') }), flags: MessageFlags.Ephemeral });
+                return interaction.editReply({ content: I18n.t('messages.config.weight_list', interaction.locale, { list: lines.join('\n') }) });
 
             } else if (subcommand === 'clear') {
                 const { error } = await supabase
@@ -158,9 +174,9 @@ export default {
 
                 if (error) {
                     logger.error('Failed to clear weights:', error);
-                    return interaction.reply({ content: I18n.t('messages.config.update_fail', interaction.locale), flags: MessageFlags.Ephemeral });
+                    return interaction.editReply({ content: I18n.t('messages.config.update_fail', interaction.locale) });
                 }
-                return interaction.reply({ content: I18n.t('messages.config.weight_cleared', interaction.locale), flags: MessageFlags.Ephemeral });
+                return interaction.editReply({ content: I18n.t('messages.config.weight_cleared', interaction.locale) });
             }
         }
 
@@ -176,26 +192,16 @@ export default {
 
             if (error) {
                 logger.error('Failed to update guild settings:', error);
-                return interaction.reply({ content: I18n.t('messages.config.update_fail', interaction.locale), flags: MessageFlags.Ephemeral });
+                return interaction.editReply({ content: I18n.t('messages.config.update_fail', interaction.locale) });
             }
 
             const successKey = enabled ? 'messages.config.update_success_enabled' : 'messages.config.update_success_disabled';
-            await interaction.reply({
+            await interaction.editReply({
                 content: I18n.t(successKey, interaction.locale),
-                flags: MessageFlags.Ephemeral
             });
             logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} executed command /config poll-buttons with parameters "enabled:${enabled}"`);
         } else if (subcommand === 'locale') {
             const lang = interaction.options.getString('lang', true);
-
-            // Validate locale
-            const available = I18n.getAvailableLocales();
-            if (!available.includes(lang)) {
-                return interaction.reply({
-                    content: I18n.t('messages.config.invalid_locale', interaction.locale, { available: available.join(', ') }),
-                    flags: MessageFlags.Ephemeral
-                });
-            }
 
             const { error } = await supabase
                 .from('guild_settings')
@@ -207,20 +213,19 @@ export default {
 
             if (error) {
                 logger.error('Failed to update guild settings (locale):', error);
-                return interaction.reply({ content: I18n.t('messages.config.update_fail', interaction.locale), flags: MessageFlags.Ephemeral });
+                return interaction.editReply({ content: I18n.t('messages.config.update_fail', interaction.locale) });
             }
 
-            await interaction.reply({
-                content: I18n.t('messages.config.locale_success', lang, { lang }), // Respond in the NEW locale if possible, or interaction locale. Let's use new locale to demonstrate.
-                flags: MessageFlags.Ephemeral
+            await interaction.editReply({
+                content: I18n.t('messages.config.locale_success', lang, { lang }),
             });
             logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} executed command /config locale with parameters "lang:${lang}"`);
         }
     },
     async autocomplete(interaction: any) {
-        const focusedValue = interaction.options.getFocused();
+        const focusedValue = String(interaction.options.getFocused() || '').toLowerCase();
         const choices = I18n.getAvailableLocales();
-        const filtered = choices.filter(choice => choice.startsWith(focusedValue));
+        const filtered = choices.filter(choice => choice.toLowerCase().startsWith(focusedValue)).slice(0, 25);
         await interaction.respond(
             filtered.map(choice => ({ name: choice, value: choice }))
         );

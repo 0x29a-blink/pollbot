@@ -1,905 +1,264 @@
-import SimpleSolutionsLogo from '../assets/simplesolutions.webp';
-import React, { useEffect, useState } from 'react';
-import { supabase, adminSupabase } from '../lib/supabase';
-import { motion } from 'framer-motion';
-import { Activity, Users, BarChart3, Search, Filter, Server, Trophy, Medal, RefreshCw, Shield, Plus, ExternalLink, Loader2 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
-import { VoteHistoryChart } from '../components/charts/VoteHistoryChart';
-import { LanguagePieChart } from '../components/charts/LanguagePieChart';
-import { UsageSourceChart } from '../components/charts/UsageSourceChart';
-import { PeakHoursChart } from '../components/charts/PeakHoursChart';
-import { BotListVotesPanel } from '../components/charts/BotListVotesPanel';
-import { Leaderboard } from '../components/Leaderboard';
-import { useAuth } from '../App';
-import { Modal } from '../components/ui/Modal';
-import { useToast } from '../components/ui/Toast';
-import { apiFetch } from '../utils/api';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { ChevronRight, ExternalLink, Plus } from 'lucide-react';
+import { AppShell } from '../components/shell/AppShell';
+import { HomeSidebar } from '../components/shell/Sidebars';
+import { useGuilds, botInviteUrl } from '../components/shell/GuildsProvider';
+import {
+    Dash, EmptyBlock, Freshness, GuildIcon, InlineError, Kpi, KpiStrip, PageHeader, Panel, SearchField, ShareBar,
+} from '../components/ui/primitives';
+import { fmtCount, fmtRelative, plural } from '../lib/format';
+import type { MyVote } from '../types';
 
-interface GlobalStats {
-    total_polls: number;
-    total_votes: number;
-    peak_active_servers: number;
-}
-
-interface GuildData {
-    id: string;
-    name: string;
-    member_count: number;
-    icon_url: string | null;
-    joined_at: string;
-}
-
-interface UserGuild {
-    id: string;
-    name: string;
-    icon_url: string | null;
-    member_count?: number;
-    poll_count?: number;
-    has_bot: boolean;
-}
-
+/**
+ * Home for a signed-in server manager.
+ * Question: "Which of my servers do I open, and is anything happening there?"
+ * The server list is the biggest block; recent votes and servers without the
+ * bot sit in the rail beside it.
+ */
 export const Home: React.FC = () => {
-    const [stats, setStats] = useState<GlobalStats | null>(null);
-    const [guilds, setGuilds] = useState<GuildData[]>([]);
-    const [totalServerCount, setTotalServerCount] = useState(0);
-    const [totalMembers, setTotalMembers] = useState(0);
-    const [topCreators, setTopCreators] = useState<any[]>([]);
-    const [topActiveServers, setTopActiveServers] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [filter, setFilter] = useState('');
-    const [showCurated, setShowCurated] = useState(false); // Only show servers with polls
-    const [sort, setSort] = useState<'members_desc' | 'members_asc' | 'recent' | 'polls_desc' | 'ratio_desc'>('members_desc');
-    const [page, setPage] = useState(1);
-    const [totalPages, setTotalPages] = useState(1);
-    const [activePremiumCount, setActivePremiumCount] = useState(0);
     const navigate = useNavigate();
-    const toast = useToast();
-    const { user, logout } = useAuth();
+    const {
+        withBot, withoutBot, loading, loaded, error, lastRefreshed, cooldown, refreshing, reload, refreshFromDiscord,
+    } = useGuilds();
+    const [query, setQuery] = useState('');
 
-    const ITEMS_PER_PAGE = 24;
-
-    // Everything below is admin-only telemetry. Non-admins never render it, so
-    // don't fetch it either — the backend would reject them anyway.
-    const isAdmin = !!user?.is_admin;
-
+    // Recent votes for the rail (own votes only)
+    const [votes, setVotes] = useState<MyVote[] | null>(null);
+    const [votesTotal, setVotesTotal] = useState<number | null>(null);
+    const [votesError, setVotesError] = useState(false);
+    const loadVotes = async () => {
+        setVotesError(false);
+        try {
+            const res = await fetch('/api/user/votes?limit=4&offset=0', { credentials: 'include' });
+            if (!res.ok) throw new Error(String(res.status));
+            const data = await res.json();
+            setVotes(data.votes || []);
+            setVotesTotal(typeof data.total === 'number' ? data.total : null);
+        } catch {
+            setVotesError(true);
+        }
+    };
     useEffect(() => {
-        if (!isAdmin) {
-            setLoading(false);
-            return;
-        }
+        void (async () => { await loadVotes(); })();
+    }, []);
 
-        fetchData(); // Initial load
+    const totals = useMemo(() => {
+        const polls = withBot.reduce((s, g) => s + (g.poll_count || 0), 0);
+        const known = withBot.filter(g => g.member_count != null);
+        const members = known.reduce((s, g) => s + (g.member_count || 0), 0);
+        const maxPolls = withBot.reduce((m, g) => Math.max(m, g.poll_count || 0), 0);
+        return { polls, members, unsynced: withBot.length - known.length, maxPolls };
+    }, [withBot]);
 
-        // Only `global_stats` is still readable with the public anon key, and
-        // the bot's counters update it on every poll and vote — so one channel
-        // on that row is an adequate "something changed" signal. The old
-        // subscription listened on polls/votes/guilds directly, which required
-        // those tables to be world-readable.
-        const channel = supabase
-            .channel('dashboard-updates')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'global_stats' }, () => fetchData())
-            .subscribe();
+    const rows = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        return q ? withBot.filter(g => g.name.toLowerCase().includes(q)) : withBot;
+    }, [withBot, query]);
 
-        return () => {
-            supabase.removeChannel(channel);
-        };
-    }, [isAdmin]);
-
-    // Effect to refetch guilds when filters/page change
-    useEffect(() => {
-        if (!isAdmin) return;
-        fetchGuildsList();
-    }, [isAdmin, page, filter, sort, showCurated]);
-
-    const fetchData = async () => {
-        try {
-            // Global Stats
-            const { data: statsData } = await adminSupabase.from('global_stats').select('*').eq('id', 1).single();
-            if (statsData) setStats(statsData);
-
-            // Active Premium Users — via aggregate RPC so we don't need blanket
-            // read on the `users` table from the public anon key.
-            const { data: activeVoterCount } = await adminSupabase.rpc('get_active_voter_count');
-            if (activeVoterCount !== null && activeVoterCount !== undefined) {
-                setActivePremiumCount(Number(activeVoterCount));
-            }
-
-            // Calculations for Totals (Servers & Members)
-            // Current server count — excludes guilds the bot has left
-            const { count: totalGuildCount } = await adminSupabase
-                .from('guilds')
-                .select('id', { count: 'exact', head: true })
-                .is('left_at', null);
-            setTotalServerCount(totalGuildCount || 0);
-
-            // Get true total members using RPC function (avoids 1000 row limit approximation).
-            // Coerce: Postgres BIGINT aggregates can arrive as strings.
-            const { data: memberSumData } = await adminSupabase.rpc('get_total_members');
-            if (memberSumData !== null && memberSumData !== undefined) {
-                setTotalMembers(Number(memberSumData));
-            }
-
-
-            // Top Creators — aggregate RPC; the old raw-row tally silently
-            // capped at PostgREST's 1000-row response limit.
-            const { data: creatorsData } = await adminSupabase.rpc('get_top_creators', { p_limit: 5 });
-            if (creatorsData) {
-                setTopCreators((creatorsData as { creator_id: string; polls: number | string }[]).map(c => ({
-                    id: c.creator_id,
-                    label: `User ${c.creator_id.substr(0, 8)}...`,
-                    subLabel: 'Poll Creator',
-                    value: Number(c.polls),
-                    onClick: () => navigate(`/polls?user_id=${c.creator_id}`)
-                })));
-            }
-
-            // Most active servers by vote volume (last 30 days)
-            const { data: topGuildsData } = await adminSupabase.rpc('get_top_guilds', { p_days: 30, p_limit: 5 });
-            if (topGuildsData) {
-                setTopActiveServers((topGuildsData as { guild_id: string; guild_name: string; votes: number | string; polls: number | string }[]).map(g => ({
-                    id: g.guild_id,
-                    label: g.guild_name,
-                    subLabel: `${Number(g.polls)} poll${Number(g.polls) === 1 ? '' : 's'} voted on`,
-                    value: `${Number(g.votes)} votes`,
-                })));
-            }
-
-        } catch (error) {
-            console.error('Error fetching data:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleRefreshData = () => {
-        fetchData();
-        fetchGuildsList();
-    };
-
-    // Sync guilds from Discord (admin-only, calls backend)
-    const [syncing, setSyncing] = useState(false);
-    const [showSyncConfirm, setShowSyncConfirm] = useState(false);
-
-    const handleSyncGuilds = async () => {
-        setShowSyncConfirm(false);
-        setSyncing(true);
-
-        try {
-            const res = await apiFetch('/api/admin/sync-guilds', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                }
-            });
-
-            if (res.ok) {
-                toast.success('Guild sync started');
-                // Wait a moment for sync to complete, then refresh data
-                setTimeout(() => {
-                    handleRefreshData();
-                    setSyncing(false);
-                }, 3000);
-            } else {
-                const err = await res.json();
-                toast.error(`Sync failed: ${err.error}`);
-                setSyncing(false);
-            }
-        } catch (error) {
-            console.error('Sync error:', error);
-            toast.error('Failed to sync guilds');
-            setSyncing(false);
-        }
-    };
-
-    // User's manageable guilds (for non-admin view)
-    const [userGuildsWithBot, setUserGuildsWithBot] = useState<UserGuild[]>([]);
-    const [userGuildsWithoutBot, setUserGuildsWithoutBot] = useState<UserGuild[]>([]);
-    const [userGuildsLoading, setUserGuildsLoading] = useState(false);
-    const [userGuildsError, setUserGuildsError] = useState<string | null>(null);
-    const [lastGuildRefresh, setLastGuildRefresh] = useState<Date | null>(null);
-    const [refreshCooldown, setRefreshCooldown] = useState(0); // seconds remaining
-    const [isRefreshingGuilds, setIsRefreshingGuilds] = useState(false);
-
-    const fetchUserGuilds = async () => {
-        setUserGuildsLoading(true);
-        setUserGuildsError(null);
-
-        try {
-            const res = await fetch('/api/user/guilds', {
-                credentials: 'include'
-            });
-
-            if (res.ok) {
-                const data = await res.json();
-                setUserGuildsWithBot(data.withBot || []);
-                setUserGuildsWithoutBot(data.withoutBot || []);
-                if (data.lastRefreshed) {
-                    setLastGuildRefresh(new Date(data.lastRefreshed));
-                }
-            } else if (res.status === 401) {
-                setUserGuildsError('Please log out and log back in to see your servers.');
-            } else {
-                setUserGuildsError('Failed to load your servers.');
-            }
-        } catch (error) {
-            console.error('Error fetching user guilds:', error);
-            setUserGuildsError('Failed to load your servers.');
-        } finally {
-            setUserGuildsLoading(false);
-        }
-    };
-
-    // Manual refresh with rate limiting
-    const refreshUserGuilds = async () => {
-        if (isRefreshingGuilds || refreshCooldown > 0) return;
-
-        setIsRefreshingGuilds(true);
-        setUserGuildsError(null);
-
-        try {
-            const res = await apiFetch('/api/user/guilds/refresh', {
-                method: 'POST',
-            });
-
-            if (res.ok) {
-                const data = await res.json();
-                setUserGuildsWithBot(data.withBot || []);
-                setUserGuildsWithoutBot(data.withoutBot || []);
-                setLastGuildRefresh(new Date());
-                // Start 5-minute cooldown
-                setRefreshCooldown(300);
-            } else if (res.status === 429) {
-                const data = await res.json();
-                setRefreshCooldown(data.retryAfter || 300);
-            } else if (res.status === 401) {
-                setUserGuildsError('Please log out and log back in.');
-            } else {
-                setUserGuildsError('Failed to refresh servers.');
-            }
-        } catch (error) {
-            console.error('Error refreshing guilds:', error);
-            setUserGuildsError('Failed to refresh servers.');
-        } finally {
-            setIsRefreshingGuilds(false);
-        }
-    };
-
-    // Cooldown timer effect
-    useEffect(() => {
-        if (refreshCooldown <= 0) return;
-        const timer = setInterval(() => {
-            setRefreshCooldown(prev => Math.max(0, prev - 1));
-        }, 1000);
-        return () => clearInterval(timer);
-    }, [refreshCooldown]);
-
-    // Fetch user guilds when component mounts (for all users - shown when admin panel is hidden)
-    useEffect(() => {
-        if (user) {
-            fetchUserGuilds();
-        }
-    }, [user]);
-
-    // Bot invite URL with guild pre-selection
-    const getBotInviteUrl = (guildId: string) => {
-        const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID || '';
-        return `https://discord.com/oauth2/authorize?client_id=${clientId}&scope=bot+applications.commands&permissions=534992383040&guild_id=${guildId}`;
-    };
-
-    const fetchGuildsList = async () => {
-        setLoading(true);
-        try {
-            const start = (page - 1) * ITEMS_PER_PAGE;
-            const end = start + ITEMS_PER_PAGE - 1;
-
-            let guildIdsToFilter: string[] | null = null;
-
-            // If Curated, first fetch valid guild IDs manually to avoid Foreign Key issues (400 Bad Request)
-            if (showCurated) {
-                const { data: pollGuilds, error: pollError } = await adminSupabase
-                    .from('polls')
-                    .select('guild_id');
-
-                if (pollError) throw pollError;
-
-                if (pollGuilds) {
-                    // Get unique IDs
-                    guildIdsToFilter = Array.from(new Set(pollGuilds.map(p => p.guild_id)));
-                } else {
-                    guildIdsToFilter = [];
-                }
-            }
-
-            // Exclude guilds the bot has left (left_at set on GuildDelete)
-            let query = adminSupabase.from('guilds').select('*', { count: 'exact' }).is('left_at', null);
-
-            // Apply manual filter if needed
-            if (showCurated) {
-                if (guildIdsToFilter && guildIdsToFilter.length > 0) {
-                    query = query.in('id', guildIdsToFilter);
-                } else {
-                    // If no polls found, return empty result immediately
-                    setGuilds([]);
-                    setTotalPages(0);
-                    setLoading(false);
-                    return;
-                }
-            }
-
-            // Search Filter
-            if (filter) query = query.ilike('name', `%${filter}%`);
-
-            // Sorting
-            if (sort === 'members_desc') query = query.order('member_count', { ascending: false });
-            if (sort === 'members_asc') query = query.order('member_count', { ascending: true });
-            if (sort === 'recent') query = query.order('joined_at', { ascending: false });
-
-            // Advanced Analytics Sorting (Client-side mainly since no DB views yet)
-            if (sort === 'polls_desc' || sort === 'ratio_desc') {
-                // Fetch ALL polls to aggregate stats (Heavy operation, but needed for this specific filter)
-                const { data: allPolls } = await adminSupabase.from('polls').select('guild_id, message_id');
-
-                if (allPolls) {
-                    const guildStats: Record<string, { polls: number, votes: number }> = {};
-                    allPolls.forEach(p => {
-                        if (!guildStats[p.guild_id]) guildStats[p.guild_id] = { polls: 0, votes: 0 };
-                        guildStats[p.guild_id].polls++;
-                    });
-
-                    // For Ratio, we need votes too — via aggregate RPC (guild_id ->
-                    // vote_count) so the anon key doesn't need blanket read on `votes`.
-                    if (sort === 'ratio_desc') {
-                        const { data: guildVoteCounts } = await adminSupabase.rpc('get_guild_vote_counts');
-
-                        if (guildVoteCounts) {
-                            (guildVoteCounts as { guild_id: string; vote_count: number }[]).forEach(row => {
-                                if (guildStats[row.guild_id]) {
-                                    guildStats[row.guild_id].votes += Number(row.vote_count);
-                                }
-                            });
-                        }
-                    }
-
-                    // Sort Guild IDs based on stats
-                    const sortedGuildIds = Object.entries(guildStats)
-                        .sort(([, statA], [, statB]) => {
-                            if (sort === 'polls_desc') return statB.polls - statA.polls;
-                            if (sort === 'ratio_desc') {
-                                const ratioA = statA.polls > 0 ? statA.votes / statA.polls : 0;
-                                const ratioB = statB.polls > 0 ? statB.votes / statB.polls : 0;
-                                return ratioB - ratioA;
-                            }
-                            return 0;
-                        })
-                        .map(([id]) => id);
-
-                    // Now filter the query to these IDs and ideally preserve order (Supabase doesn't preserve order of IN clause easily)
-                    // So we fetch matching guilds and sort in memory
-                    if (sortedGuildIds.length > 0) {
-                        query = query.in('id', sortedGuildIds);
-                    } else {
-                        setGuilds([]);
-                        setLoading(false);
-                        return;
-                    }
-
-                    // execute query
-                    const { data: unsortedData } = await query;
-
-                    if (unsortedData) {
-                        // Re-sort client side
-                        const sortedData = unsortedData.sort((a, b) => {
-                            return sortedGuildIds.indexOf(a.id) - sortedGuildIds.indexOf(b.id);
-                        });
-
-                        // Pagination slice handling for client-side sorted list
-                        // Note: This logic retrieves ALL matching guilds then slices. 
-                        // It defies the backend pagination but is necessary for these computed sorts without DB func.
-                        setTotalPages(Math.ceil(sortedData.length / ITEMS_PER_PAGE));
-                        setGuilds(sortedData.slice(start, end + 1));
-                    }
-                    setLoading(false);
-                    return; // Return early since we handled data setting
-                }
-            }
-
-            // Pagination (Standard)
-            query = query.range(start, end);
-
-            const { data, count } = await query;
-
-            if (data) {
-                setGuilds(data);
-                if (count !== null) setTotalPages(Math.ceil(count / ITEMS_PER_PAGE));
-            }
-        } catch (error) {
-            console.error('Error fetching guilds:', error);
-            setGuilds([]);
-        } finally {
-            setLoading(false);
-        }
-    }
-
-
-    const handleLogout = async () => {
-        await logout();
-        navigate('/');
-    };
-
-    // State for showing admin telemetry panel
-    const [showTelemetry, setShowTelemetry] = useState(false);
+    const cooldownLabel = cooldown > 0 ? `${Math.floor(cooldown / 60)}:${String(cooldown % 60).padStart(2, '0')}` : null;
+    const firstLoad = !loaded && loading;
+    const noServersAtAll = loaded && !error && withBot.length === 0 && withoutBot.length === 0;
 
     return (
-        <div className="min-h-screen pb-20">
-            {/* Header */}
-            <header className="glass-panel sticky top-0 z-50 border-t-0 border-r-0 border-l-0 rounded-none bg-opacity-80">
-                <div className="container-wide py-4 flex justify-between items-center">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center text-indigo-400 overflow-hidden">
-                            <img src={SimpleSolutionsLogo} alt="Logo" className="w-full h-full object-contain p-1" />
-                        </div>
-                        <h1 className="text-xl font-bold title-gradient">Simple Poll Bot Dashboard</h1>
-                    </div>
-
-                    <div className="flex items-center gap-4">
-                        {/* Admin Panel Toggle - only visible to admins */}
-                        {user?.is_admin && (
-                            <button
-                                onClick={() => setShowTelemetry(!showTelemetry)}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${showTelemetry
-                                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                                    : 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700'
-                                    }`}
-                            >
-                                <Shield className="w-4 h-4" />
-                                {showTelemetry ? 'Hide Admin Panel' : 'Admin Panel'}
-                            </button>
-                        )}
-                        <div className="h-4 w-px bg-slate-700"></div>
-                        {/* User info */}
-                        {user && (
-                            <div className="flex items-center gap-2">
-                                <img
-                                    src={user.avatar_url}
-                                    alt={user.username}
-                                    className="w-8 h-8 rounded-full"
-                                />
-                                <span className="text-sm text-slate-300">{user.username}</span>
-                            </div>
-                        )}
-                        <button
-                            onClick={handleLogout}
-                            className="text-sm text-slate-400 hover:text-white transition-colors"
-                        >
-                            Logout
-                        </button>
-                    </div>
-                </div>
-            </header>
-
-            <main className="container-wide mt-8 animate-fade-in">
-                {/* Sync Confirmation Modal */}
-                <Modal
-                    open={showSyncConfirm}
-                    onClose={() => setShowSyncConfirm(false)}
-                    title="Sync Guild Data?"
-                    width="max-w-md"
-                    closeOnBackdrop={false}
-                >
-                    <div className="p-5">
-                        <p className="text-slate-400 mb-6">
-                            This will refresh ALL server data from Discord including names, icons, and member counts.
-                            This is a heavy operation and may take a moment.
-                        </p>
-                        <div className="flex gap-3 justify-end">
-                            <button
-                                onClick={() => setShowSyncConfirm(false)}
-                                className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={handleSyncGuilds}
-                                className="px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-bold hover:bg-amber-400 transition-colors"
-                            >
-                                Sync All Guilds
-                            </button>
-                        </div>
-                    </div>
-                </Modal>
-
-                {/* Admin Telemetry Panel - Only visible when toggled */}
-                {user?.is_admin && showTelemetry ? (
+        <AppShell sidebar={<HomeSidebar />} mobileTitle="Servers">
+            <PageHeader
+                title="Servers"
+                subtitle={
+                    firstLoad ? 'Loading your servers from Discord…'
+                        : error ? 'Your server list could not be loaded.'
+                            : `${plural(withBot.length, 'server')} with PollBot · ${plural(totals.polls, 'poll')} created`
+                }
+                actions={
                     <>
-                        {/* Admin Navigation */}
-                        <div className="flex items-center gap-4 mb-6">
-                            <button onClick={() => navigate('/polls')} className="text-sm font-bold text-indigo-400 hover:text-indigo-300">Global Polls</button>
-                            <button onClick={() => navigate('/voters')} className="text-sm font-bold text-indigo-400 hover:text-indigo-300">Voters</button>
-                            <button onClick={handleRefreshData} className="flex items-center gap-2 text-sm font-bold text-emerald-400 hover:text-emerald-300 transition-colors">
-                                <RefreshCw className="w-4 h-4" />
-                                Refresh View
-                            </button>
-                            <button
-                                onClick={() => setShowSyncConfirm(true)}
-                                disabled={syncing}
-                                className="flex items-center gap-2 text-sm font-bold text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-50"
-                            >
-                                <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-                                {syncing ? 'Syncing...' : 'Sync from Discord'}
-                            </button>
-                        </div>
-
-                        {/* Stats Deck */}
-                        <section className="grid-stats">
-                            <StatsCard title="Total Polls" value={stats?.total_polls || 0} icon={<BarChart3 className="text-blue-400" />} color="blue" />
-                            <StatsCard title="Total Votes" value={stats?.total_votes || 0} icon={<Users className="text-emerald-400" />} color="emerald" />
-                            <StatsCard
-                                title="Servers"
-                                value={totalServerCount}
-                                subLabel={`${totalMembers.toLocaleString()} members`}
-                                icon={<Server className="text-violet-400" />}
-                                color="violet"
-                            />
-                            <StatsCard title="Active Premium Users" value={activePremiumCount} icon={<Activity className="text-amber-400" />} color="amber" />
-                        </section>
-
-                        {/* Analytics Section */}
-                        <section className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
-                            <div className="md:col-span-2 chart-container" style={{ width: '100%', minHeight: '300px', minWidth: 0 }}>
-                                <VoteHistoryChart />
-                            </div>
-                            <div className="chart-container" style={{ width: '100%', minHeight: '300px', minWidth: 0 }}>
-                                <LanguagePieChart />
-                            </div>
-                        </section>
-                        <section className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
-                            <div className="chart-container" style={{ width: '100%', minHeight: '300px', minWidth: 0 }}>
-                                <UsageSourceChart />
-                            </div>
-                            <div className="chart-container" style={{ width: '100%', minHeight: '300px', minWidth: 0 }}>
-                                <PeakHoursChart />
-                            </div>
-                        </section>
-
-                        {/* Bot-list voting analytics (Top.gg + DiscordForge) */}
-                        <section className="mt-8">
-                            <div className="chart-container" style={{ width: '100%', minHeight: '300px', minWidth: 0 }}>
-                                <BotListVotesPanel />
-                            </div>
-                        </section>
-
-                        {/* Leaderboards */}
-                        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
-                            <Leaderboard
-                                title="Top Servers"
-                                icon={<Trophy className="w-5 h-5" />}
-                                color="yellow"
-                                items={guilds.slice(0, 5).map(g => ({
-                                    id: g.id,
-                                    label: g.name,
-                                    subLabel: `${g.member_count.toLocaleString()} members`,
-                                    value: g.member_count.toLocaleString()
-                                }))}
-                            />
-                            <Leaderboard title="Most Active Servers" icon={<Activity className="w-5 h-5" />} color="indigo" items={topActiveServers} />
-                            <Leaderboard title="Top Creators" icon={<Medal className="w-5 h-5" />} color="amber" items={topCreators} />
-                        </section>
-
-                        {/* Server Browser */}
-                        <section className="mt-12">
-                            <div className="flex flex-col md:flex-row justify-between items-end md:items-center mb-6 gap-4">
-                                <div className="flex items-center gap-4">
-                                    <h2 className="text-2xl font-bold text-white">Connected Servers</h2>
-                                    <div className="flex items-center gap-2 bg-slate-900/50 p-1 rounded-lg border border-slate-700">
-                                        <button
-                                            onClick={() => { setShowCurated(false); setPage(1); }}
-                                            className={`px-3 py-1 rounded text-xs font-bold transition-all ${!showCurated ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                                        >
-                                            All
-                                        </button>
-                                        <button
-                                            onClick={() => { setShowCurated(true); setPage(1); }}
-                                            className={`px-3 py-1 rounded text-xs font-bold transition-all ${showCurated ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                                        >
-                                            Curated Polls
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div className="flex gap-3 w-full md:w-auto">
-                                    <div className="relative flex-1 md:w-64">
-                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                                        <input
-                                            type="text"
-                                            placeholder="Search servers..."
-                                            value={filter}
-                                            onChange={(e) => { setFilter(e.target.value); setPage(1); }}
-                                            className="w-full bg-slate-900/50 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                                        />
-                                    </div>
-                                    <div className="relative">
-                                        <select
-                                            value={sort}
-                                            onChange={(e) => { setSort(e.target.value as any); setPage(1); }}
-                                            className="appearance-none bg-slate-900/50 border border-slate-700 rounded-lg pl-4 pr-10 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 cursor-pointer"
-                                        >
-                                            <option value="members_desc">Most Members</option>
-                                            <option value="members_asc">Least Members</option>
-                                            <option value="recent">Recently Joined</option>
-                                            <option value="polls_desc">Most Polls</option>
-                                            <option value="ratio_desc">Highest Engagement</option>
-                                        </select>
-                                        <Filter className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="server-grid">
-                                {loading ? (
-                                    [...Array(6)].map((_, i) => <SkeletonCard key={i} />)
-                                ) : guilds.map(guild => (
-                                    <ServerCard key={guild.id} guild={guild} onClick={() => navigate(`/server/${guild.id}`)} />
-                                ))}
-                            </div>
-
-                            {/* Pagination Controls */}
-                            <div className="flex justify-center items-center gap-4 mt-8">
-                                <button
-                                    disabled={page === 1}
-                                    onClick={() => setPage(p => Math.max(1, p - 1))}
-                                    className="px-4 py-2 rounded-lg bg-slate-800 text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-700 transition-colors"
-                                >
-                                    Previous
-                                </button>
-                                <span className="text-slate-400 font-mono text-sm">Page {page} of {totalPages}</span>
-                                <button
-                                    disabled={page === totalPages}
-                                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                                    className="px-4 py-2 rounded-lg bg-slate-800 text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-700 transition-colors"
-                                >
-                                    Next
-                                </button>
-                            </div>
-                        </section>
+                        <Freshness
+                            updatedAt={lastRefreshed}
+                            label={cooldownLabel ? `Refresh again in ${cooldownLabel}` : lastRefreshed ? `Synced from Discord ${fmtRelative(lastRefreshed.toISOString())}` : undefined}
+                            onRefresh={refreshFromDiscord}
+                            refreshing={refreshing}
+                            disabled={cooldown > 0}
+                            title="Refresh your servers, channels and roles from Discord"
+                        />
+                        <a className="btn btn-primary" href={botInviteUrl()} target="_blank" rel="noopener noreferrer">
+                            <Plus className="w-4 h-4" />
+                            Add to a server
+                        </a>
                     </>
-                ) : (
-                    /* User Dashboard - Show their manageable servers */
-                    <div className="animate-fade-in">
-                        <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.3 }}
+                }
+            />
+
+            {noServersAtAll ? (
+                <Panel>
+                    <EmptyBlock
+                        title="You don't manage any servers yet"
+                        action={<a className="btn btn-primary" href={botInviteUrl()} target="_blank" rel="noopener noreferrer"><Plus className="w-4 h-4" />Add PollBot to a server</a>}
+                    >
+                        Servers appear here when you have the Manage Server permission in them. Add PollBot to one you own to start running polls.
+                    </EmptyBlock>
+                </Panel>
+            ) : (
+                <>
+                    <KpiStrip className="mb-4">
+                        <Kpi tone="brand" label="Servers with PollBot" value={fmtCount(withBot.length)} caption={withoutBot.length ? `${withoutBot.length} more you could add it to` : 'Every server you manage'} loading={firstLoad} />
+                        <Kpi tone="cyan" label="Polls created" value={fmtCount(totals.polls)} caption="All time, across your servers" loading={firstLoad} />
+                        <Kpi
+                            tone="positive"
+                            label="Members reached"
+                            value={withBot.length && totals.unsynced === withBot.length ? <Dash /> : fmtCount(totals.members)}
+                            caption={totals.unsynced ? `${totals.unsynced} not synced yet` : 'Sum of server members'}
+                            loading={firstLoad}
+                        />
+                        <Kpi
+                            tone="warning"
+                            label="Polls you voted in"
+                            value={votesError ? <Dash /> : fmtCount(votesTotal)}
+                            caption={<Link to="/my-votes" className="text-brand-text hover:underline">See my votes</Link>}
+                            loading={votes === null && !votesError}
+                        />
+                    </KpiStrip>
+
+                    <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-4 items-start">
+                        {/* Servers - the screen's answer */}
+                        <Panel
+                            title="Your servers"
+                            meta={loaded && !error ? `${rows.length} of ${withBot.length} · most polls first` : undefined}
+                            actions={withBot.length > 6 ? <SearchField value={query} onChange={setQuery} placeholder="Find a server" className="w-56" /> : undefined}
                         >
-                            <h2 className="text-2xl font-bold text-white mb-2">Welcome, {user?.username}!</h2>
-                            <p className="text-slate-400 mb-8">Manage polls in your servers</p>
-                        </motion.div>
-
-                        {userGuildsLoading ? (
-                            <div className="flex items-center justify-center py-20">
-                                <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
-                                <span className="ml-3 text-slate-400">Loading your servers...</span>
-                            </div>
-                        ) : userGuildsError ? (
-                            <div className="glass-panel p-8 text-center">
-                                <p className="text-amber-400 mb-4">{userGuildsError}</p>
-                                <button
-                                    onClick={fetchUserGuilds}
-                                    className="text-indigo-400 hover:text-indigo-300 text-sm"
-                                >
-                                    Try Again
-                                </button>
-                            </div>
-                        ) : (
-                            <>
-                                {/* Servers WITH Bot - Manageable */}
-                                <section className="mb-12">
-                                    <div className="flex items-center justify-between mb-4">
-                                        <div className="flex items-center gap-3">
-                                            <Server className="w-5 h-5 text-emerald-400" />
-                                            <h3 className="text-lg font-bold text-white">Your Servers</h3>
-                                            <span className="text-sm text-slate-500">({userGuildsWithBot.length} servers)</span>
-                                            <button
-                                                onClick={() => navigate('/my-votes')}
-                                                className="text-sm font-bold text-indigo-400 hover:text-indigo-300 transition-colors"
+                            {error ? (
+                                <InlineError message={error} onRetry={reload} />
+                            ) : firstLoad ? (
+                                <ul aria-hidden="true">
+                                    {[0, 1, 2, 3, 4].map(i => (
+                                        <li key={i} className="h-16 px-5 flex items-center gap-3 border-t border-rule">
+                                            <div className="skeleton w-10 h-10 rounded-xl" />
+                                            <div className="skeleton h-4 w-48" />
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : withBot.length === 0 ? (
+                                <EmptyBlock title="PollBot isn't in any of your servers yet">
+                                    Add it to one of the servers listed on the right, then come back here to create and manage polls.
+                                </EmptyBlock>
+                            ) : rows.length === 0 ? (
+                                <EmptyBlock title={`No server matches “${query}”`} />
+                            ) : (
+                                <table className="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th className="pl-5">Server</th>
+                                            <th className="num w-28">Members</th>
+                                            <th className="w-48 hidden md:table-cell">Polls</th>
+                                            <th className="w-12"><span className="sr-only">Open</span></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {rows.map(g => (
+                                            <tr
+                                                key={g.id}
+                                                className="row-interactive"
+                                                onClick={() => navigate(`/manage/${g.id}`)}
                                             >
-                                                My Votes
-                                            </button>
-                                        </div>
-                                        <button
-                                            onClick={refreshUserGuilds}
-                                            disabled={isRefreshingGuilds || refreshCooldown > 0}
-                                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${refreshCooldown > 0
-                                                ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                                                : isRefreshingGuilds
-                                                    ? 'bg-slate-800 text-slate-400'
-                                                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white'
-                                                }`}
-                                            title={refreshCooldown > 0
-                                                ? `Wait ${Math.floor(refreshCooldown / 60)}:${(refreshCooldown % 60).toString().padStart(2, '0')}`
-                                                : lastGuildRefresh
-                                                    ? `Last refreshed: ${lastGuildRefresh.toLocaleString()} - Click to refresh`
-                                                    : 'Refresh your server list, channels, and roles from Discord'}
-                                        >
-                                            <RefreshCw className={`w-4 h-4 ${isRefreshingGuilds ? 'animate-spin' : ''}`} />
-                                            {refreshCooldown > 0 ? (
-                                                <span>{Math.floor(refreshCooldown / 60)}:{(refreshCooldown % 60).toString().padStart(2, '0')}</span>
-                                            ) : (
-                                                <span>Refresh</span>
-                                            )}
-                                        </button>
-                                    </div>
-
-                                    {userGuildsWithBot.length > 0 ? (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                                            {userGuildsWithBot.map(guild => (
-                                                <motion.div
-                                                    key={guild.id}
-                                                    whileHover={{ y: -4 }}
-                                                    onClick={() => navigate(`/manage/${guild.id}`)}
-                                                    className="glass-panel p-4 cursor-pointer hover:border-emerald-500/30 transition-colors group"
-                                                >
-                                                    <div className="flex items-center gap-4">
-                                                        {guild.icon_url ? (
-                                                            <img src={guild.icon_url} alt={guild.name} className="w-12 h-12 rounded-xl object-cover bg-slate-800" />
-                                                        ) : (
-                                                            <div className="w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center text-slate-500 text-lg font-bold">
-                                                                {guild.name.charAt(0)}
-                                                            </div>
-                                                        )}
-                                                        <div className="flex-1 min-w-0">
-                                                            <h4 className="text-white font-medium truncate group-hover:text-emerald-400 transition-colors">{guild.name}</h4>
-                                                            <div className="flex items-center gap-2 text-xs mt-1">
-                                                                {guild.member_count && (
-                                                                    <span
-                                                                        className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-700/50 text-slate-400 border border-slate-600/30"
-                                                                        title={`${guild.member_count.toLocaleString()} members in this server`}
-                                                                    >
-                                                                        <Users className="w-3 h-3" />
-                                                                        {guild.member_count.toLocaleString()}
-                                                                    </span>
-                                                                )}
-                                                                <span
-                                                                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
-                                                                    title={`${guild.poll_count || 0} poll${(guild.poll_count || 0) !== 1 ? 's' : ''} created in this server`}
-                                                                >
-                                                                    <BarChart3 className="w-3 h-3" />
-                                                                    {guild.poll_count || 0}
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                        <ExternalLink className="w-4 h-4 text-slate-500 group-hover:text-emerald-400 transition-colors" />
+                                                <td className="pl-5 h-16">
+                                                    <Link to={`/manage/${g.id}`} className="flex items-center gap-3 min-w-0 rounded" onClick={e => e.stopPropagation()}>
+                                                        <GuildIcon name={g.name} iconUrl={g.icon_url} size={40} radius="14px" />
+                                                        <span className="min-w-0">
+                                                            <span className="block text-ink font-medium truncate">{g.name}</span>
+                                                            <span className="block text-xs text-faint md:hidden num">{plural(g.poll_count || 0, 'poll')}</span>
+                                                        </span>
+                                                    </Link>
+                                                </td>
+                                                <td className="num">{g.member_count != null ? fmtCount(g.member_count) : <Dash title="Member count not synced yet" />}</td>
+                                                <td className="hidden md:table-cell">
+                                                    <div className="flex items-center gap-3">
+                                                        <span className="num text-ink w-8 text-right shrink-0">{fmtCount(g.poll_count || 0)}</span>
+                                                        <ShareBar value={g.poll_count || 0} max={totals.maxPolls} />
                                                     </div>
-                                                </motion.div>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <div className="glass-panel p-8 text-center">
-                                            <p className="text-slate-400">No servers with the bot installed yet.</p>
-                                        </div>
-                                    )}
-                                </section>
+                                                </td>
+                                                <td className="pr-3 text-right">
+                                                    <ChevronRight className="w-4 h-4 text-faint inline" aria-hidden="true" />
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
+                        </Panel>
 
-                                {/* Servers WITHOUT Bot - Can Add */}
-                                {userGuildsWithoutBot.length > 0 && (
-                                    <section>
-                                        <div className="flex items-center gap-3 mb-4">
-                                            <Plus className="w-5 h-5 text-indigo-400" />
-                                            <h3 className="text-lg font-bold text-white">Add Bot to These Servers</h3>
-                                            <span className="text-sm text-slate-500">({userGuildsWithoutBot.length} servers)</span>
-                                        </div>
-
-                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                                            {userGuildsWithoutBot.map(guild => (
-                                                <motion.a
-                                                    key={guild.id}
-                                                    whileHover={{ y: -4 }}
-                                                    href={getBotInviteUrl(guild.id)}
+                        <div className="flex flex-col gap-4">
+                            {/* Recent votes */}
+                            <Panel
+                                title="Your recent votes"
+                                actions={<Link to="/my-votes" className="btn btn-ghost btn-sm">View all</Link>}
+                            >
+                                {votesError ? (
+                                    <InlineError message="Couldn't load your votes." onRetry={loadVotes} />
+                                ) : votes === null ? (
+                                    <ul aria-hidden="true">
+                                        {[0, 1, 2].map(i => (
+                                            <li key={i} className="px-5 py-3 border-t border-rule">
+                                                <div className="skeleton h-4 w-44" />
+                                                <div className="skeleton h-3 w-28 mt-2" />
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ) : votes.length === 0 ? (
+                                    <p className="px-5 pb-5 text-sm text-faint">You haven't voted on a PollBot poll yet.</p>
+                                ) : (
+                                    <ul>
+                                        {votes.slice(0, 4).map(v => (
+                                            <li key={v.poll_id} className="border-t border-rule">
+                                                <a
+                                                    href={`https://discord.com/channels/${v.guild_id}/${v.channel_id}/${v.poll_id}`}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
-                                                    className="glass-panel p-4 hover:border-indigo-500/30 transition-colors group block"
+                                                    className="row-interactive flex gap-3 px-5 py-3"
                                                 >
-                                                    <div className="flex items-center gap-4">
-                                                        {guild.icon_url ? (
-                                                            <img src={guild.icon_url} alt={guild.name} className="w-12 h-12 rounded-xl object-cover bg-slate-800" />
-                                                        ) : (
-                                                            <div className="w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center text-slate-500 text-lg font-bold">
-                                                                {guild.name.charAt(0)}
-                                                            </div>
-                                                        )}
-                                                        <div className="flex-1 min-w-0">
-                                                            <h4 className="text-white font-medium truncate group-hover:text-indigo-400 transition-colors">{guild.name}</h4>
-                                                            <div className="flex items-center gap-2 text-xs text-indigo-400 mt-1">
-                                                                <Plus className="w-3 h-3" />
-                                                                <span>Click to add bot</span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </motion.a>
-                                            ))}
-                                        </div>
-                                    </section>
+                                                    <GuildIcon name={v.guild_name} iconUrl={v.guild_icon_url} size={28} radius="9px" className="mt-0.5" />
+                                                    <span className="min-w-0 flex-1">
+                                                        <span className="block text-sm text-ink truncate">{v.title}</span>
+                                                        <span className="block text-xs text-faint truncate">
+                                                            {v.chosen_options.join(', ')} · {fmtRelative(v.voted_at)}
+                                                        </span>
+                                                    </span>
+                                                </a>
+                                            </li>
+                                        ))}
+                                    </ul>
                                 )}
+                            </Panel>
 
-                                {/* Empty state if no servers at all */}
-                                {userGuildsWithBot.length === 0 && userGuildsWithoutBot.length === 0 && (
-                                    <div className="glass-panel p-12 text-center">
-                                        <div className="w-16 h-16 rounded-2xl bg-slate-800 flex items-center justify-center mx-auto mb-4">
-                                            <Server className="w-8 h-8 text-slate-500" />
-                                        </div>
-                                        <h3 className="text-xl font-bold text-white mb-2">No Servers Found</h3>
-                                        <p className="text-slate-400 max-w-md mx-auto">
-                                            You need the <strong>Manage Server</strong> permission in a Discord server to manage polls here.
+                            {/* Servers without the bot */}
+                            {withoutBot.length > 0 && (
+                                <Panel title="Add PollBot" meta={plural(withoutBot.length, 'server')}>
+                                    <ul>
+                                        {withoutBot.slice(0, 5).map(g => (
+                                            <li key={g.id} className="flex items-center gap-3 px-5 h-12 border-t border-rule">
+                                                <GuildIcon name={g.name} iconUrl={g.icon_url} size={28} radius="9px" />
+                                                <span className="flex-1 min-w-0 text-sm text-muted truncate">{g.name}</span>
+                                                <a
+                                                    className="btn btn-outline btn-sm"
+                                                    href={botInviteUrl(g.id)}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    aria-label={`Add PollBot to ${g.name}`}
+                                                >
+                                                    Add
+                                                    <ExternalLink className="w-3 h-3" />
+                                                </a>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                    {withoutBot.length > 5 && (
+                                        <p className="px-5 py-3 border-t border-rule text-xs text-faint">
+                                            and {plural(withoutBot.length - 5, 'more server')} you manage
                                         </p>
-                                    </div>
-                                )}
-                            </>
-                        )}
+                                    )}
+                                </Panel>
+                            )}
+                        </div>
                     </div>
-                )}
-            </main>
-        </div>
+                </>
+            )}
+        </AppShell>
     );
 };
-
-// Complete literal class strings — Tailwind can't generate interpolated names.
-const statTileClasses: Record<string, string> = {
-    blue: 'bg-blue-500/10',
-    emerald: 'bg-emerald-500/10',
-    violet: 'bg-violet-500/10',
-    amber: 'bg-amber-500/10',
-};
-
-const StatsCard = ({ title, value, subLabel, icon, color }: any) => (
-    <div className={`glass-panel p-6 relative overflow-hidden group`}>
-        <div className={`absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity`}>
-            {React.cloneElement(icon, { className: `w-24 h-24` })}
-        </div>
-        <div className="relative z-10">
-            <div className="flex items-center gap-3 mb-2">
-                <div className={`p-2 rounded-lg ${statTileClasses[color] ?? 'bg-slate-500/10'}`}>
-                    {icon}
-                </div>
-                <span className="text-slate-400 font-medium">{title}</span>
-            </div>
-            <div className="flex items-baseline gap-2">
-                <div className="text-4xl font-bold text-white tracking-tight">
-                    {value.toLocaleString()}
-                </div>
-                {subLabel && <span className="text-sm text-slate-500 font-medium">{subLabel}</span>}
-            </div>
-        </div>
-    </div>
-);
-
-const ServerCard = ({ guild, onClick }: { guild: GuildData, onClick: () => void }) => (
-    <motion.div
-        whileHover={{ y: -4 }}
-        onClick={onClick}
-        role="button"
-        tabIndex={0}
-        aria-label={`View server ${guild.name}`}
-        onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
-        className="glass-panel p-4 cursor-pointer hover:border-indigo-500/30 transition-colors group focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none"
-    >
-        <div className="flex items-center gap-4">
-            {guild.icon_url ? (
-                <img src={guild.icon_url} alt={guild.name} className="w-12 h-12 rounded-xl object-cover bg-slate-800" />
-            ) : (
-                <div className="w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center text-slate-500 text-lg font-bold">
-                    {guild.name.charAt(0)}
-                </div>
-            )}
-            <div className="flex-1 min-w-0">
-                <h3 className="text-white font-medium truncate group-hover:text-indigo-400 transition-colors">{guild.name}</h3>
-                <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
-                    <Users className="w-3 h-3" />
-                    <span>{guild.member_count.toLocaleString()} members</span>
-                </div>
-            </div>
-        </div>
-    </motion.div>
-);
-
-const SkeletonCard = () => (
-    <div className="glass-panel p-4 h-20 animate-pulse bg-slate-800/20" />
-);

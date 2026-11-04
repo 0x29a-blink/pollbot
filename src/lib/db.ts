@@ -19,7 +19,7 @@ export const supabase = createClient(supabaseUrl || '', supabaseKey || '');
  * @returns true if connection is healthy, false otherwise
  */
 export async function checkDbConnection(): Promise<boolean> {
-    const { count, error } = await supabase.from('polls').select('*', { count: 'exact', head: true });
+    const { error } = await supabase.from('polls').select('*', { count: 'exact', head: true });
     if (error) {
         logger.error('Database connection failed:', error.message);
         return false;

@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Crown, ExternalLink, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { ExternalLink, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Modal } from './ui/Modal';
 
 interface PremiumGateModalProps {
@@ -21,10 +20,6 @@ export const PremiumGateModal: React.FC<PremiumGateModalProps> = ({
 }) => {
     const [checking, setChecking] = useState(false);
     const [checkResult, setCheckResult] = useState<'success' | 'failed' | null>(null);
-
-    const handleVoteClick = () => {
-        window.open(voteUrl, '_blank', 'noopener,noreferrer');
-    };
 
     const handleIVoted = async () => {
         setChecking(true);
@@ -51,93 +46,46 @@ export const PremiumGateModal: React.FC<PremiumGateModalProps> = ({
         <Modal
             open={isOpen}
             onClose={onClose}
-            ariaLabel="Premium Feature"
+            title="Unlock with a vote"
             width="max-w-md"
-            header={
-                <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
-                        <Crown className="w-5 h-5 text-white" />
-                    </div>
-                    <div>
-                        <h2 className="text-lg font-bold text-white">Premium Feature</h2>
-                        <p className="text-xs text-slate-400">Unlock with top.gg vote</p>
-                    </div>
-                </div>
+            footer={
+                <>
+                    <button type="button" onClick={handleIVoted} disabled={checking} className="btn btn-ghost">
+                        {checking ? (
+                            <>
+                                <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                                Checking…
+                            </>
+                        ) : (
+                            'I\u2019ve voted \u2014 check again'
+                        )}
+                    </button>
+                    <a href={voteUrl} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
+                        Vote on top.gg
+                        <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                    </a>
+                </>
             }
         >
-                    {/* Content */}
-                    <div className="p-6">
-                        <div className="text-center mb-6">
-                            <p className="text-slate-300 mb-2">
-                                <strong className="text-white">{featureName}</strong> is a premium feature.
-                            </p>
-                            <p className="text-sm text-slate-400">
-                                Vote for Pollbot on top.gg to unlock this feature for <span className="text-amber-400 font-medium">12 hours</span>!
-                            </p>
-                        </div>
+            <p className="text-sm text-muted">
+                <span className="text-ink font-medium">{featureName}</span> is a premium feature. Vote for PollBot on top.gg
+                and it unlocks for <span className="text-ink">12 hours</span>. Voting is free; come back here and check once you have.
+            </p>
 
-                        {/* Status Message */}
-                        <AnimatePresence mode="wait">
-                            {checkResult === 'success' && (
-                                <motion.div
-                                    initial={{ opacity: 0, y: -10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, y: -10 }}
-                                    className="mb-4 p-3 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center gap-2"
-                                >
-                                    <CheckCircle className="w-5 h-5 text-emerald-400" />
-                                    <span className="text-sm text-emerald-400">Premium unlocked! Refreshing...</span>
-                                </motion.div>
-                            )}
-                            {checkResult === 'failed' && (
-                                <motion.div
-                                    initial={{ opacity: 0, y: -10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, y: -10 }}
-                                    className="mb-4 p-3 rounded-lg bg-red-500/20 border border-red-500/30 flex items-center gap-2"
-                                >
-                                    <XCircle className="w-5 h-5 text-red-400" />
-                                    <span className="text-sm text-red-400">Vote not detected yet. Try again in a moment.</span>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-
-                        {/* Buttons */}
-                        <div className="space-y-3">
-                            <button
-                                onClick={handleVoteClick}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-lg font-bold hover:from-amber-400 hover:to-orange-500 transition-all shadow-lg shadow-amber-500/25"
-                            >
-                                <ExternalLink className="w-4 h-4" />
-                                Vote on top.gg
-                            </button>
-
-                            <button
-                                onClick={handleIVoted}
-                                disabled={checking}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-700 text-white rounded-lg font-medium hover:bg-slate-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {checking ? (
-                                    <>
-                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                        Checking...
-                                    </>
-                                ) : (
-                                    <>
-                                        <CheckCircle className="w-4 h-4" />
-                                        I've Voted
-                                    </>
-                                )}
-                            </button>
-
-                            <button
-                                onClick={onClose}
-                                className="w-full px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors"
-                            >
-                                Maybe Later
-                            </button>
-                        </div>
-                    </div>
+            <div aria-live="polite">
+                {checkResult === 'success' && (
+                    <p className="mt-4 flex items-center gap-2 text-sm text-ink">
+                        <CheckCircle2 className="w-4 h-4 text-positive shrink-0" aria-hidden="true" />
+                        Premium unlocked. Opening it now…
+                    </p>
+                )}
+                {checkResult === 'failed' && (
+                    <p className="mt-4 flex items-center gap-2 text-sm text-ink">
+                        <AlertCircle className="w-4 h-4 text-negative shrink-0" aria-hidden="true" />
+                        Vote not detected yet. top.gg can take a minute; try again shortly.
+                    </p>
+                )}
+            </div>
         </Modal>
     );
 };

@@ -1,11 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { supabase } from '../lib/db';
 import { logger } from '../lib/logger';
+import { getValidDashboardSession, refreshAccessToken } from './dashboardAuth';
 
 const router = Router();
 
-// Cookie name must match dashboardAuth.ts
-const COOKIE_NAME = 'pollbot_session';
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 
 // Discord permission flags
@@ -24,14 +23,6 @@ interface DiscordGuild {
     permissions: string; // Bitfield as string
 }
 
-interface CachedGuildData {
-    id: string;
-    name: string;
-    icon: string | null;
-    owner: boolean;
-    permissions: string;
-}
-
 interface GuildWithBotStatus {
     id: string;
     name: string;
@@ -45,11 +36,22 @@ interface GuildWithBotStatus {
  * Helper: Fetch guilds from Discord API and cache them
  */
 async function fetchAndCacheGuilds(sessionId: string, accessToken: string): Promise<DiscordGuild[] | null> {
-    const discordResponse = await fetch(`${DISCORD_API_BASE}/users/@me/guilds`, {
+    let discordResponse = await fetch(`${DISCORD_API_BASE}/users/@me/guilds`, {
         headers: {
             Authorization: `Bearer ${accessToken}`,
         },
     });
+
+    if (discordResponse.status === 401) {
+        const newToken = await refreshAccessToken(sessionId);
+        if (newToken) {
+            discordResponse = await fetch(`${DISCORD_API_BASE}/users/@me/guilds`, {
+                headers: {
+                    Authorization: `Bearer ${newToken}`,
+                },
+            });
+        }
+    }
 
     if (!discordResponse.ok) {
         const errorText = await discordResponse.text();
@@ -89,27 +91,39 @@ async function processGuilds(userGuilds: DiscordGuild[], userId: string): Promis
         return { withBot: [], withoutBot: [] };
     }
 
-    // Get all bot's guilds from database
+    // Get all active bot guilds from database (exclude servers the bot has left)
     const guildIds = manageableGuilds.map(g => g.id);
     const { data: botGuilds } = await supabase
         .from('guilds')
         .select('id, name, icon_url, member_count')
-        .in('id', guildIds);
+        .in('id', guildIds)
+        .is('left_at', null);
 
     const botGuildIds = new Set(botGuilds?.map(g => g.id) || []);
 
-    // Get poll counts per guild
+    // Get poll counts per guild (paginated past PostgREST's 1,000-row cap)
     const pollCountMap: Record<string, number> = {};
     if (botGuilds && botGuilds.length > 0) {
-        const { data: pollData } = await supabase
-            .from('polls')
-            .select('guild_id')
-            .in('guild_id', botGuilds.map(g => g.id));
+        const targetGuildIds = botGuilds.map(g => g.id);
+        const pageSize = 1000;
+        let offset = 0;
 
-        if (pollData) {
+        while (true) {
+            const { data: pollData, error: pollErr } = await supabase
+                .from('polls')
+                .select('guild_id')
+                .in('guild_id', targetGuildIds)
+                .order('message_id', { ascending: true })
+                .range(offset, offset + pageSize - 1);
+
+            if (pollErr || !pollData || pollData.length === 0) break;
+
             for (const poll of pollData) {
                 pollCountMap[poll.guild_id] = (pollCountMap[poll.guild_id] || 0) + 1;
             }
+
+            if (pollData.length < pageSize) break;
+            offset += pageSize;
         }
     }
 
@@ -163,32 +177,13 @@ async function processGuilds(userGuilds: DiscordGuild[], userId: string): Promis
  * Uses cached data if available and not stale (30 min TTL)
  */
 router.get('/guilds', async (req: Request, res: Response) => {
-    // Support both cookie and header auth
-    const cookieSession = req.cookies?.[COOKIE_NAME];
-    const authHeader = req.headers.authorization;
-    const headerSession = authHeader?.replace('Bearer ', '');
-    const sessionId = cookieSession || headerSession;
-
-    if (!sessionId) {
-        return res.status(401).json({ error: 'Unauthorized' });
-    }
-
     try {
-        // Get session with access token and cache data
-        const { data: session, error: sessionError } = await supabase
-            .from('dashboard_sessions')
-            .select('user_id, access_token, expires_at, cached_guilds, guilds_cached_at')
-            .eq('id', sessionId)
-            .single();
-
-        if (sessionError || !session) {
-            return res.status(401).json({ error: 'Invalid session' });
+        const session = await getValidDashboardSession(req);
+        if (!session) {
+            return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        if (new Date(session.expires_at).getTime() < Date.now()) {
-            return res.status(401).json({ error: 'Session expired' });
-        }
-
+        const sessionId = session.id;
         let userGuilds: DiscordGuild[];
         let lastRefreshed: string;
 
@@ -197,7 +192,7 @@ router.get('/guilds', async (req: Request, res: Response) => {
             ? Date.now() - new Date(session.guilds_cached_at).getTime()
             : Infinity;
 
-        if (session.cached_guilds && cacheAge < CACHE_TTL_MS) {
+        if (session.cached_guilds && session.guilds_cached_at && cacheAge < CACHE_TTL_MS) {
             // Use cached data
             userGuilds = session.cached_guilds as DiscordGuild[];
             lastRefreshed = session.guilds_cached_at;
@@ -243,31 +238,12 @@ router.get('/guilds', async (req: Request, res: Response) => {
  * Rate limited to once per 5 minutes
  */
 router.post('/guilds/refresh', async (req: Request, res: Response) => {
-    // Support both cookie and header auth
-    const cookieSession = req.cookies?.[COOKIE_NAME];
-    const authHeader = req.headers.authorization;
-    const headerSession = authHeader?.replace('Bearer ', '');
-    const sessionId = cookieSession || headerSession;
-
-    if (!sessionId) {
-        return res.status(401).json({ error: 'Unauthorized' });
-    }
-
     try {
-        // Get session with cache data
-        const { data: session, error: sessionError } = await supabase
-            .from('dashboard_sessions')
-            .select('user_id, access_token, expires_at, guilds_cached_at')
-            .eq('id', sessionId)
-            .single();
-
-        if (sessionError || !session) {
-            return res.status(401).json({ error: 'Invalid session' });
+        const session = await getValidDashboardSession(req);
+        if (!session) {
+            return res.status(401).json({ error: 'Unauthorized' });
         }
-
-        if (new Date(session.expires_at).getTime() < Date.now()) {
-            return res.status(401).json({ error: 'Session expired' });
-        }
+        const sessionId = session.id;
 
         // Check rate limit
         if (session.guilds_cached_at) {

@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { getCsrfToken } from '../utils/api';
+import { ensureCsrfTokenClient, getCsrfToken } from '../utils/api';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -30,11 +30,14 @@ export const adminSupabase = createClient(
     {
         auth: { persistSession: false, autoRefreshToken: false },
         global: {
-            fetch: (input, init) => {
+            fetch: async (input, init) => {
                 const headers = new Headers(init?.headers);
+                const method = (init?.method || 'GET').toUpperCase();
                 // supabase-js sends RPCs as POST, and the backend enforces the
                 // double-submit CSRF token on every mutating method.
-                const csrfToken = getCsrfToken();
+                const csrfToken = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)
+                    ? await ensureCsrfTokenClient()
+                    : getCsrfToken();
                 if (csrfToken) headers.set('x-csrf-token', csrfToken);
 
                 return fetch(input, { ...init, headers, credentials: 'include' });

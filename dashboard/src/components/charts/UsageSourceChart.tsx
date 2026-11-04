@@ -1,8 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, Legend } from 'recharts';
+import React, { useEffect, useMemo, useState } from 'react';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, LineChart } from 'recharts';
 import { adminSupabase } from '../../lib/supabase';
-import { motion } from 'framer-motion';
-import { GitCompareArrows } from 'lucide-react';
+import { Panel } from '../ui/primitives';
+import { ChartBody, ChartSummary, DotLegend } from '../admin/adminUi';
+import { fmtDayUTC, lastDaysUTC, countAxis } from '../admin/adminFormat';
+import { axisProps, chart, gridProps, seriesPalette, tooltipProps } from '../../lib/chartTheme';
+import { fmtCount, fmtPct, toNum } from '../../lib/format';
 
 interface UsageSummaryRow {
     day: string;
@@ -12,113 +15,105 @@ interface UsageSummaryRow {
 }
 
 interface ChartRow {
-    date: string;
+    day: string;
+    label: string;
     bot: number;
     dashboard: number;
     bot_users: number;
     dashboard_users: number;
 }
 
+const DAYS = 30;
+const BOT_COLOR = seriesPalette[0];
+const DASH_COLOR = seriesPalette[1];
+
 /**
- * Bot vs dashboard usage per day, from the get_usage_summary RPC
- * (aggregate counts only — no per-user rows reach the client).
+ * Bot vs dashboard actions per UTC day, from the get_usage_summary RPC
+ * (aggregate counts only - no per-user rows reach the client).
  */
-export const UsageSourceChart: React.FC = () => {
-    const [data, setData] = useState<ChartRow[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [empty, setEmpty] = useState(false);
+export const UsageSourceChart: React.FC<{ refreshKey?: number; className?: string; height?: number }> = ({ refreshKey = 0, className = '', height = 220 }) => {
+    const [rows, setRows] = useState<ChartRow[] | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [retry, setRetry] = useState(0);
 
     useEffect(() => {
-        fetchSummary();
-    }, []);
-
-    const fetchSummary = async () => {
-        try {
-            const { data: rows, error } = await adminSupabase.rpc('get_usage_summary', { p_days: 30 });
-            if (error || !rows || rows.length === 0) {
-                setEmpty(true);
-                return;
-            }
-
-            const byDay = new Map<string, ChartRow>();
-            (rows as UsageSummaryRow[]).forEach(r => {
-                const date = new Date(r.day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                const entry = byDay.get(r.day) ?? { date, bot: 0, dashboard: 0, bot_users: 0, dashboard_users: 0 };
-                if (r.source === 'bot') {
-                    entry.bot = Number(r.events);
-                    entry.bot_users = Number(r.unique_users);
-                } else {
-                    entry.dashboard = Number(r.events);
-                    entry.dashboard_users = Number(r.unique_users);
+        let cancelled = false;
+        (async () => {
+            try {
+                const { data, error: rpcError } = await adminSupabase.rpc('get_usage_summary', { p_days: DAYS });
+                if (cancelled) return;
+                if (rpcError || !Array.isArray(data)) {
+                    setError("Couldn't load usage.");
+                    return;
                 }
-                byDay.set(r.day, entry);
-            });
+                const byDay = new Map<string, ChartRow>(
+                    lastDaysUTC(DAYS).map(day => [day, { day, label: fmtDayUTC(day), bot: 0, dashboard: 0, bot_users: 0, dashboard_users: 0 }]),
+                );
+                for (const r of data as UsageSummaryRow[]) {
+                    const entry = byDay.get(String(r.day).slice(0, 10));
+                    if (!entry) continue;
+                    if (r.source === 'dashboard') {
+                        entry.dashboard = toNum(r.events) ?? 0;
+                        entry.dashboard_users = toNum(r.unique_users) ?? 0;
+                    } else {
+                        entry.bot = toNum(r.events) ?? 0;
+                        entry.bot_users = toNum(r.unique_users) ?? 0;
+                    }
+                }
+                setRows([...byDay.values()]);
+                setError(null);
+            } catch (err) {
+                console.error('Error fetching usage summary:', err);
+                if (!cancelled) setError("Couldn't load usage.");
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [refreshKey, retry]);
 
-            setData([...byDay.values()]);
-        } catch (error) {
-            console.error('Error fetching usage summary:', error);
-            setEmpty(true);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    if (loading) return <div className="h-64 animate-pulse bg-slate-800/20 rounded-xl"></div>;
+    const totals = useMemo(() => (rows ?? []).reduce((t, r) => ({ bot: t.bot + r.bot, dashboard: t.dashboard + r.dashboard }), { bot: 0, dashboard: 0 }), [rows]);
+    const all = totals.bot + totals.dashboard;
+    const allZero = all === 0;
+    const loading = rows === null && !error;
 
     return (
-        <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="glass-panel p-6"
+        <Panel
+            title="Usage by surface"
+            meta="(UTC) · 30 days"
+            className={`min-w-0 ${className}`}
+            bodyClassName="px-5 pb-4"
+            actions={<DotLegend items={[{ label: 'Bot', color: BOT_COLOR }, { label: 'Dashboard', color: DASH_COLOR }]} />}
         >
-            <div className="flex items-center gap-2 mb-6">
-                <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400">
-                    <GitCompareArrows className="w-5 h-5" />
-                </div>
-                <div>
-                    <h3 className="text-lg font-bold text-white">Usage by Surface</h3>
-                    <p className="text-slate-400 text-xs">Bot commands vs dashboard actions — last 30 days</p>
-                </div>
-            </div>
-
-            {empty ? (
-                <div className="h-64 flex items-center justify-center text-sm text-slate-500">
-                    No usage data yet — events appear once the usage_events migration is applied and actions occur.
-                </div>
-            ) : (
-                <div className="h-64 w-full" style={{ width: '100%', height: '300px', minWidth: 0 }}>
-                    <ResponsiveContainer width="99%" height="100%">
-                        <AreaChart data={data}>
-                            <defs>
-                                <linearGradient id="colorBot" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3} />
-                                    <stop offset="95%" stopColor="#818cf8" stopOpacity={0} />
-                                </linearGradient>
-                                <linearGradient id="colorDashboard" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#34d399" stopOpacity={0.3} />
-                                    <stop offset="95%" stopColor="#34d399" stopOpacity={0} />
-                                </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                            <XAxis dataKey="date" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                            <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                            <Tooltip
-                                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff' }}
-                                formatter={((value: unknown, name: unknown, item: { payload?: ChartRow }) => {
-                                    const users = name === 'Bot'
-                                        ? item?.payload?.bot_users
-                                        : item?.payload?.dashboard_users;
-                                    return [`${value ?? 0} actions (${users ?? 0} users)`, String(name)];
-                                    // Recharts' Formatter generic is stricter than useful here
-                                }) as never}
-                            />
-                            <Legend wrapperStyle={{ fontSize: 12 }} />
-                            <Area type="monotone" dataKey="bot" name="Bot" stroke="#818cf8" strokeWidth={3} fillOpacity={1} fill="url(#colorBot)" />
-                            <Area type="monotone" dataKey="dashboard" name="Dashboard" stroke="#34d399" strokeWidth={3} fillOpacity={1} fill="url(#colorDashboard)" />
-                        </AreaChart>
-                    </ResponsiveContainer>
-                </div>
-            )}
-        </motion.div>
+            <ChartSummary
+                loading={loading}
+                value={fmtCount(all)}
+                caption={allZero ? 'actions in the last 30 days' : `actions · ${fmtPct(totals.dashboard, all)} from the dashboard`}
+            />
+            <ChartBody
+                height={height}
+                loading={loading}
+                error={error}
+                onRetry={() => { setError(null); setRows(null); setRetry(n => n + 1); }}
+                empty={allZero}
+                emptyText="No bot or dashboard actions in the last 30 days."
+            >
+                <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={rows ?? []} margin={{ top: 8, right: 4, bottom: 0, left: -8 }}>
+                        <CartesianGrid {...gridProps} />
+                        <XAxis dataKey="label" {...axisProps} interval="preserveStartEnd" minTickGap={28} />
+                        <YAxis {...axisProps} width={44} {...countAxis(Math.max(0, ...(rows ?? []).map(r => Math.max(r.bot, r.dashboard))))} />
+                        <Tooltip
+                            {...tooltipProps}
+                            cursor={{ stroke: chart.grid }}
+                            formatter={((value: unknown, name: unknown, item: { payload?: ChartRow }) => {
+                                const users = name === 'Bot' ? item?.payload?.bot_users : item?.payload?.dashboard_users;
+                                return [`${fmtCount(value)} actions · ${fmtCount(users ?? 0)} users`, String(name)];
+                            }) as never}
+                        />
+                        <Line type="linear" dataKey="bot" name="Bot" stroke={BOT_COLOR} strokeWidth={2} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} isAnimationActive={false} />
+                        <Line type="linear" dataKey="dashboard" name="Dashboard" stroke={DASH_COLOR} strokeWidth={2} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} isAnimationActive={false} />
+                    </LineChart>
+                </ResponsiveContainer>
+            </ChartBody>
+        </Panel>
     );
 };

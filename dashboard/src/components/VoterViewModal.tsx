@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2, Users, Copy, Check, ChevronLeft, ChevronRight, User } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Copy, Check, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
 import { Modal } from './ui/Modal';
+import { Avatar, InlineError } from './ui/primitives';
+import { fmtCount, plural } from '../lib/format';
 
 import type { VoterInfo } from '../types';
 
@@ -19,6 +20,9 @@ interface VoterViewModalProps {
     }>;
 }
 
+/** Above this many options the per-tab counts fill in as tabs are opened, instead of all at once. */
+const PREFETCH_COUNT_LIMIT = 12;
+
 export const VoterViewModal: React.FC<VoterViewModalProps> = ({
     isOpen,
     onClose,
@@ -35,18 +39,68 @@ export const VoterViewModal: React.FC<VoterViewModalProps> = ({
     const [copiedMention, setCopiedMention] = useState<string | null>(null);
     const [copiedList, setCopiedList] = useState(false);
     const [expandedUser, setExpandedUser] = useState<string | null>(null);
+    /** Voter count per option index, for the tab labels. */
+    const [counts, setCounts] = useState<Record<number, number>>({});
+    const fetchVotersRef = useRef(fetchVoters);
+
+    useEffect(() => {
+        fetchVotersRef.current = fetchVoters;
+    }, [fetchVoters]);
+
+    const safeSelectedOption = selectedOption < options.length ? selectedOption : 0;
 
     // Pagination
     const [currentPage, setCurrentPage] = useState(0);
     const pageSize = 15;
     const totalPages = Math.ceil(voters.length / pageSize);
 
+    const loadVoters = useCallback(async (optionIndex: number, resetPage: boolean = true) => {
+        // Background refreshes keep the reader where they are; only an explicit
+        // open/option change jumps back to the first page.
+        setLoading(resetPage);
+        setError(null);
+        if (resetPage) setCurrentPage(0);
+        try {
+            const data = await fetchVotersRef.current(optionIndex);
+            setVoters(data.voters);
+            setTotalVoters(data.total_voters);
+            setCounts(c => ({ ...c, [optionIndex]: data.total_voters }));
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Failed to load voters');
+            setVoters([]);
+            setTotalVoters(0);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
     // Initial load and option change
     useEffect(() => {
-        if (isOpen) {
-            loadVoters(selectedOption);
-        }
-    }, [isOpen, selectedOption]);
+        if (!isOpen) return;
+        void (async () => {
+            await loadVoters(safeSelectedOption, true);
+        })();
+    }, [isOpen, pollId, safeSelectedOption, loadVoters]);
+
+    // Fill in the per-tab counts once per open (small polls only).
+    const optionCount = options.length;
+    useEffect(() => {
+        if (!isOpen || optionCount > PREFETCH_COUNT_LIMIT) return;
+        let cancelled = false;
+        void Promise.allSettled(Array.from({ length: optionCount }, (_, i) => fetchVotersRef.current(i))).then(results => {
+            if (cancelled) return;
+            setCounts(prev => {
+                const next = { ...prev };
+                results.forEach((r, i) => {
+                    if (r.status === 'fulfilled') next[i] = r.value.total_voters;
+                });
+                return next;
+            });
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen, pollId, optionCount]);
 
     // Keep the open list fresh. Previously this reacted to a realtime vote feed
     // delivered over the public anon key; voter identity is admin/owner data, so
@@ -55,238 +109,209 @@ export const VoterViewModal: React.FC<VoterViewModalProps> = ({
         if (!isOpen) return;
 
         const interval = setInterval(() => {
-            if (document.visibilityState === 'visible') loadVoters(selectedOption, false);
+            if (document.visibilityState === 'visible') {
+                void loadVoters(safeSelectedOption, false);
+            }
         }, 15000);
 
         return () => clearInterval(interval);
-    }, [isOpen, pollId, selectedOption]);
-
-    const loadVoters = async (optionIndex: number, resetPage: boolean = true) => {
-        // Background refreshes keep the reader where they are; only an explicit
-        // open/option change jumps back to the first page.
-        setLoading(resetPage);
-        setError(null);
-        if (resetPage) setCurrentPage(0);
-        try {
-            const data = await fetchVoters(optionIndex);
-            setVoters(data.voters);
-            setTotalVoters(data.total_voters);
-        } catch (err: any) {
-            setError(err.message || 'Failed to load voters');
-            setVoters([]);
-            setTotalVoters(0);
-        } finally {
-            setLoading(false);
-        }
-    };
+    }, [isOpen, pollId, safeSelectedOption, loadVoters]);
 
     const copyMention = async (userId: string) => {
         const mention = `<@${userId}>`;
-        await navigator.clipboard.writeText(mention);
-        setCopiedMention(userId);
-        setTimeout(() => setCopiedMention(null), 2000);
+        try {
+            await navigator.clipboard.writeText(mention);
+            setCopiedMention(userId);
+            setTimeout(() => setCopiedMention(null), 2000);
+        } catch (err) {
+            console.error('Clipboard copy failed:', err);
+        }
     };
 
     const copyMentionList = async () => {
-        const optionName = options[selectedOption];
+        const optionName = options[safeSelectedOption];
         const mentions = voters.map(v => `<@${v.user_id}>`).join('\n');
         const text = `---\n${optionName} Voters\n${mentions}\n---`;
-        await navigator.clipboard.writeText(text);
-        setCopiedList(true);
-        setTimeout(() => setCopiedList(false), 2000);
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopiedList(true);
+            setTimeout(() => setCopiedList(false), 2000);
+        } catch (err) {
+            console.error('Clipboard copy failed:', err);
+        }
     };
 
     const paginatedVoters = voters.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+    const firstShown = currentPage * pageSize + 1;
+    const lastShown = Math.min(voters.length, (currentPage + 1) * pageSize);
 
     return (
         <Modal
             open={isOpen}
             onClose={onClose}
-            ariaLabel="Voter Breakdown"
+            title="Voters"
+            subtitle={pollTitle}
             width="max-w-2xl"
-            header={
-                <div>
-                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                        <Users className="w-5 h-5 text-violet-400" />
-                        Voter Breakdown
-                    </h2>
-                    <p className="text-sm text-slate-400 mt-1 truncate max-w-md">{pollTitle}</p>
-                </div>
-            }
         >
-                    {/* Option Tabs */}
-                    <div className="flex flex-wrap gap-2 p-4 border-b border-slate-700/50 bg-slate-900/30">
-                        {options.map((option, index) => (
+            {/* Option tabs (Fluent pivot): one per option with its voter count */}
+            <div className="shrink-0 px-4 border-b border-rule overflow-x-auto">
+                <div role="tablist" aria-label="Poll options" className="flex gap-1 min-w-max">
+                    {options.map((option, index) => {
+                        const selected = safeSelectedOption === index;
+                        const count = counts[index];
+                        return (
                             <button
                                 key={index}
+                                type="button"
+                                role="tab"
+                                aria-selected={selected}
                                 onClick={() => setSelectedOption(index)}
-                                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${selectedOption === index
-                                    ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/25'
-                                    : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
+                                title={option}
+                                className={`relative h-10 px-3 inline-flex items-center gap-2 text-sm rounded-t-control transition-colors ${selected ? 'text-ink font-medium' : 'text-muted hover:text-ink hover:bg-[var(--state-hover)]'
                                     }`}
                             >
-                                {option.length > 25 ? option.substring(0, 25) + '...' : option}
+                                <span>{option.length > 25 ? option.substring(0, 25) + '…' : option}</span>
+                                {count !== undefined && (
+                                    <span className={`num text-xs ${selected ? 'text-muted' : 'text-faint'}`}>{fmtCount(count)}</span>
+                                )}
+                                {selected && <span aria-hidden="true" className="absolute left-3 right-3 bottom-0 h-[3px] rounded-full bg-brand" />}
                             </button>
-                        ))}
-                    </div>
+                        );
+                    })}
+                </div>
+            </div>
 
-                    {/* Content */}
-                    <div className="flex-1 overflow-y-auto p-4">
-                        {loading ? (
-                            <div className="flex items-center justify-center py-12">
-                                <Loader2 className="w-8 h-8 text-violet-400 animate-spin" />
-                            </div>
-                        ) : error ? (
-                            <div className="text-center py-12">
-                                <p className="text-red-400">{error}</p>
-                            </div>
-                        ) : voters.length === 0 ? (
-                            <div className="text-center py-12">
-                                <Users className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                                <p className="text-slate-400">No votes for this option yet</p>
-                            </div>
+            {/* Toolbar */}
+            {!loading && !error && voters.length > 0 && (
+                <div className="shrink-0 flex items-center justify-between gap-3 px-6 h-12">
+                    <span className="text-sm text-muted num">{plural(totalVoters, 'voter')}</span>
+                    <button type="button" onClick={copyMentionList} className="btn btn-outline btn-sm" aria-live="polite">
+                        {copiedList ? (
+                            <>
+                                <Check className="w-3.5 h-3.5 text-positive" aria-hidden="true" />
+                                Copied
+                            </>
                         ) : (
                             <>
-                                {/* Stats bar */}
-                                <div className="flex items-center justify-between mb-4">
-                                    <span className="text-sm text-slate-400">
-                                        <span className="text-white font-bold">{totalVoters}</span> voter{totalVoters !== 1 ? 's' : ''}
-                                    </span>
-                                    <button
-                                        onClick={copyMentionList}
-                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${copiedList
-                                            ? 'bg-emerald-500/20 text-emerald-400'
-                                            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                                            }`}
-                                    >
-                                        {copiedList ? (
-                                            <>
-                                                <Check className="w-3.5 h-3.5" />
-                                                Copied!
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Copy className="w-3.5 h-3.5" />
-                                                Copy All Mentions
-                                            </>
-                                        )}
-                                    </button>
-                                </div>
-
-                                {/* Voter list */}
-                                <div className="space-y-1">
-                                    {paginatedVoters.map((voter) => (
-                                        <div
-                                            key={voter.user_id}
-                                            className="group"
-                                        >
-                                            <div
-                                                onClick={() => setExpandedUser(expandedUser === voter.user_id ? null : voter.user_id)}
-                                                className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-800/50 cursor-pointer transition-colors"
-                                            >
-                                                {/* Avatar */}
-                                                {voter.avatar_url ? (
-                                                    <img
-                                                        src={voter.avatar_url}
-                                                        alt=""
-                                                        className="w-8 h-8 rounded-full"
-                                                    />
-                                                ) : (
-                                                    <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center">
-                                                        <User className="w-4 h-4 text-slate-400" />
-                                                    </div>
-                                                )}
-
-                                                {/* Name */}
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-sm font-medium text-white truncate">
-                                                        {voter.nickname || voter.display_name}
-                                                    </p>
-                                                </div>
-
-                                                {/* Quick copy */}
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        copyMention(voter.user_id);
-                                                    }}
-                                                    className={`p-1.5 rounded-md transition-all ${copiedMention === voter.user_id
-                                                        ? 'bg-emerald-500/20 text-emerald-400'
-                                                        : 'opacity-0 group-hover:opacity-100 bg-slate-700 text-slate-400 hover:text-white'
-                                                        }`}
-                                                    title="Copy mention"
-                                                >
-                                                    {copiedMention === voter.user_id ? (
-                                                        <Check className="w-3.5 h-3.5" />
-                                                    ) : (
-                                                        <Copy className="w-3.5 h-3.5" />
-                                                    )}
-                                                </button>
-                                            </div>
-
-                                            {/* Expanded details */}
-                                            <AnimatePresence>
-                                                {expandedUser === voter.user_id && (
-                                                    <motion.div
-                                                        initial={{ height: 0, opacity: 0 }}
-                                                        animate={{ height: 'auto', opacity: 1 }}
-                                                        exit={{ height: 0, opacity: 0 }}
-                                                        className="overflow-hidden"
-                                                    >
-                                                        <div className="ml-11 mb-2 p-3 rounded-lg bg-slate-800/50 border border-slate-700/50 text-xs space-y-1.5">
-                                                            <div className="flex justify-between">
-                                                                <span className="text-slate-500">Username</span>
-                                                                <span className="text-slate-300 font-mono">{voter.username}</span>
-                                                            </div>
-                                                            <div className="flex justify-between">
-                                                                <span className="text-slate-500">Display Name</span>
-                                                                <span className="text-slate-300">{voter.display_name}</span>
-                                                            </div>
-                                                            {voter.nickname && (
-                                                                <div className="flex justify-between">
-                                                                    <span className="text-slate-500">Server Nickname</span>
-                                                                    <span className="text-slate-300">{voter.nickname}</span>
-                                                                </div>
-                                                            )}
-                                                            <div className="flex justify-between items-center pt-1 border-t border-slate-700/50">
-                                                                <span className="text-slate-500">Mention</span>
-                                                                <code className="text-violet-400 bg-violet-500/10 px-2 py-0.5 rounded">
-                                                                    {'<@' + voter.user_id + '>'}
-                                                                </code>
-                                                            </div>
-                                                        </div>
-                                                    </motion.div>
-                                                )}
-                                            </AnimatePresence>
-                                        </div>
-                                    ))}
-                                </div>
-
-                                {/* Pagination */}
-                                {totalPages > 1 && (
-                                    <div className="flex items-center justify-center gap-2 mt-4 pt-4 border-t border-slate-700/50">
-                                        <button
-                                            onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
-                                            disabled={currentPage === 0}
-                                            className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                        >
-                                            <ChevronLeft className="w-4 h-4" />
-                                        </button>
-                                        <span className="text-sm text-slate-400">
-                                            Page <span className="text-white font-medium">{currentPage + 1}</span> of {totalPages}
-                                        </span>
-                                        <button
-                                            onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
-                                            disabled={currentPage >= totalPages - 1}
-                                            className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                        >
-                                            <ChevronRight className="w-4 h-4" />
-                                        </button>
-                                    </div>
-                                )}
+                                <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                                Copy all mentions
                             </>
                         )}
+                    </button>
+                </div>
+            )}
+
+            {/* Content */}
+            <div className="flex-1 min-h-[300px] overflow-y-auto px-3 pb-3" role="tabpanel" aria-label={options[safeSelectedOption]}>
+                {loading ? (
+                    <div role="status" aria-label="Loading voters" className="pt-3 motion-safe:animate-pulse">
+                        {Array.from({ length: 6 }, (_, i) => (
+                            <div key={i} className="h-11 px-3 flex items-center gap-3">
+                                <div className="skeleton w-7 h-7 rounded-full" />
+                                <div className="skeleton h-3.5" style={{ width: 90 + ((i * 37) % 70) }} />
+                                <div className="skeleton h-3 w-16 opacity-60" />
+                            </div>
+                        ))}
                     </div>
+                ) : error ? (
+                    <div className="pt-3">
+                        <InlineError message={`Couldn't load voters. ${error}`} onRetry={() => void loadVoters(safeSelectedOption, true)} className="px-3" />
+                    </div>
+                ) : voters.length === 0 ? (
+                    <div className="mx-3 mt-3 rounded-card border border-dashed border-control px-5 py-10 text-center">
+                        <p className="text-sm font-semibold text-ink">No votes for this option yet</p>
+                        <p className="text-sm text-faint mt-1">People who pick it will appear here.</p>
+                    </div>
+                ) : (
+                    <>
+                        <ul>
+                            {paginatedVoters.map((voter) => {
+                                const name = voter.nickname || voter.display_name;
+                                const expanded = expandedUser === voter.user_id;
+                                return (
+                                    <li key={voter.user_id} className="group">
+                                        <div className="flex items-center gap-1 rounded-control hover:bg-[var(--state-hover)] transition-colors">
+                                            <button
+                                                type="button"
+                                                onClick={() => setExpandedUser(expanded ? null : voter.user_id)}
+                                                aria-expanded={expanded}
+                                                className="flex-1 min-w-0 h-11 pl-3 flex items-center gap-3 text-left rounded-control"
+                                            >
+                                                <Avatar name={name} url={voter.avatar_url} id={voter.user_id} size={28} />
+                                                <span className="min-w-0 flex items-baseline gap-2">
+                                                    <span className="text-sm font-medium text-ink truncate">{name}</span>
+                                                    <span className="text-[13px] text-faint truncate">@{voter.username}</span>
+                                                </span>
+                                                <ChevronDown className={`w-3.5 h-3.5 text-faint shrink-0 ml-auto mr-1 transition-transform ${expanded ? 'rotate-180' : 'sm:opacity-0 sm:group-hover:opacity-100'}`} aria-hidden="true" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => copyMention(voter.user_id)}
+                                                aria-label={`Copy mention for ${name}`}
+                                                title="Copy mention"
+                                                className={`btn btn-ghost btn-sm btn-icon mr-1.5 shrink-0 ${copiedMention === voter.user_id ? '' : 'sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100'}`}
+                                            >
+                                                {copiedMention === voter.user_id
+                                                    ? <Check className="w-3.5 h-3.5 text-positive" />
+                                                    : <Copy className="w-3.5 h-3.5" />}
+                                            </button>
+                                        </div>
+
+                                        {expanded && (
+                                            <dl className="ml-[52px] mr-3 mb-2 mt-0.5 grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 rounded-control bg-raised px-3 py-2.5 text-xs">
+                                                <dt className="text-faint">Username</dt>
+                                                <dd className="text-muted text-right truncate">{voter.username}</dd>
+                                                <dt className="text-faint">Display name</dt>
+                                                <dd className="text-muted text-right truncate">{voter.display_name}</dd>
+                                                {voter.nickname && (
+                                                    <>
+                                                        <dt className="text-faint">Server nickname</dt>
+                                                        <dd className="text-muted text-right truncate">{voter.nickname}</dd>
+                                                    </>
+                                                )}
+                                                <dt className="text-faint">Mention</dt>
+                                                <dd className="text-right"><code className="font-mono text-muted">{'<@' + voter.user_id + '>'}</code></dd>
+                                            </dl>
+                                        )}
+                                    </li>
+                                );
+                            })}
+                        </ul>
+
+                        {/* Pagination */}
+                        {totalPages > 1 && (
+                            <div className="flex items-center justify-between gap-2 mt-2 pt-3 px-3 border-t border-rule">
+                                <span className="text-xs text-faint num">
+                                    {firstShown}–{lastShown} of {fmtCount(voters.length)}
+                                </span>
+                                <div className="flex items-center gap-1">
+                                    <button
+                                        type="button"
+                                        onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                                        disabled={currentPage === 0}
+                                        aria-label="Previous page"
+                                        className="btn btn-ghost btn-sm btn-icon"
+                                    >
+                                        <ChevronLeft className="w-4 h-4" />
+                                    </button>
+                                    <span className="text-xs text-muted num px-1">
+                                        Page {currentPage + 1} of {totalPages}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                                        disabled={currentPage >= totalPages - 1}
+                                        aria-label="Next page"
+                                        className="btn btn-ghost btn-sm btn-icon"
+                                    >
+                                        <ChevronRight className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
+            </div>
         </Modal>
     );
 };

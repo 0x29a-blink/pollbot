@@ -57,4 +57,18 @@ describe('groupVoteRows', () => {
         ]);
         expect(result[0]!.voted_at).toBe('2026-02-01T00:00:00.000Z');
     });
+
+    it('carries ends_at and discord_deleted through, defaulting when absent', () => {
+        const withFields = groupVoteRows([
+            makeRow({
+                poll_id: 'p1',
+                option_index: 0,
+                polls: { ends_at: '2026-03-01T00:00:00.000Z', discord_deleted: true } as MyVoteRow['polls'],
+            }),
+        ]);
+        expect(withFields[0]).toMatchObject({ ends_at: '2026-03-01T00:00:00.000Z', discord_deleted: true });
+
+        const defaults = groupVoteRows([makeRow({ poll_id: 'p2', option_index: 0 })]);
+        expect(defaults[0]).toMatchObject({ ends_at: null, discord_deleted: false });
+    });
 });

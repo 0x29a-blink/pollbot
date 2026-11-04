@@ -11,7 +11,9 @@ I18n.init();
 
 const commands: any[] = [];
 const foldersPath = path.join(__dirname, '../commands');
-const commandFiles = fs.readdirSync(foldersPath).filter(file => file.endsWith('.ts') || file.endsWith('.js'));
+const commandFiles = fs.readdirSync(foldersPath).filter(
+    file => (file.endsWith('.ts') || file.endsWith('.js')) && !file.endsWith('.d.ts') && !file.endsWith('.test.ts')
+);
 
 // Recursive function to apply localizations to command JSON
 function localizeCommand(cmdJson: any, localeKeyPrefix: string) {
@@ -40,7 +42,6 @@ function localizeCommand(cmdJson: any, localeKeyPrefix: string) {
 
 for (const file of commandFiles) {
     const filePath = path.join(foldersPath, file);
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const command = require(filePath).default || require(filePath);
     if ('data' in command && 'execute' in command) {
         const cmdJson = command.data.toJSON();

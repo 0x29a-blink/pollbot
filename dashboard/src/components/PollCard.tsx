@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Calendar, Settings, Info, PieChart, ChevronDown, ChevronUp, ExternalLink, Heart, CheckCircle } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { ChevronDown, ExternalLink } from 'lucide-react';
 import { apiFetch } from '../utils/api';
+import { Avatar, GuildIcon, PollStatusChip, ShareBar } from './ui/primitives';
+import { shortId } from './admin/adminFormat';
+import { fmtCount, fmtDateTime, fmtPct, fmtRelative } from '../lib/format';
 import type { Poll } from '../types';
 
 interface PollSupporters {
@@ -25,18 +27,34 @@ interface PollSupporters {
 interface PollCardProps {
     poll: Poll;
     votes?: Record<number, number>;
-    guild?: { name: string; icon_url: string | null; id: string }; // Optional guild info
-    /** Admin-only: show the bot-list supporter breakdown card on expand. */
+    /** Shown when the list spans servers (the global polls view). */
+    guild?: { name: string; icon_url: string | null; id: string };
+    /** Admin-only: show the bot-list supporter breakdown on expand. */
     showSupporterCard?: boolean;
 }
 
+const SOURCE_LABELS: Record<string, string> = { topgg: 'Top.gg', discordforge: 'DiscordForge' };
+/** Rules between the four supporter figures: 2x2 on phones, one row from sm up. */
+const SUPPORTER_CELL = ['', 'border-l', 'border-t sm:border-t-0 sm:border-l', 'border-l border-t sm:border-t-0'];
+
+/** Resolve a role ID to its display name via role_metadata, falling back to the ID. */
+const roleName = (poll: Poll) => (id: string) => poll.settings?.role_metadata?.[id]?.name ?? id;
+
+/**
+ * One poll in an admin list: a row that expands to the results, the poll's
+ * settings and (on the global view) how its voters relate to the bot lists.
+ */
 export const PollCard: React.FC<PollCardProps> = ({ poll, votes = {}, guild, showSupporterCard = false }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [supporters, setSupporters] = useState<PollSupporters | null>(null);
     const [supportersFailed, setSupportersFailed] = useState(false);
-    const navigate = useNavigate();
+    const [supportersTry, setSupportersTry] = useState(0);
     const options = Array.isArray(poll.options) ? poll.options : [];
-    const totalVotes = Object.values(votes).reduce((sum, count) => sum + count, 0);
+    const totalVotes = Object.values(votes).reduce((sum, count) => sum + (Number(count) || 0), 0);
+    const maxVotes = Math.max(0, ...options.map((_, i) => Number(votes[i]) || 0));
+    const deleted = !!poll.discord_deleted;
+    const messageUrl = `https://discord.com/channels/${poll.guild_id}/${poll.channel_id}/${poll.message_id}`;
+    const weights = poll.settings?.vote_weights ? Object.entries(poll.settings.vote_weights) : [];
 
     // Lazy-load the supporter breakdown the first time the card is expanded.
     useEffect(() => {
@@ -53,211 +71,183 @@ export const PollCard: React.FC<PollCardProps> = ({ poll, votes = {}, guild, sho
             }
         })();
         return () => { cancelled = true; };
-    }, [showSupporterCard, isExpanded, supporters, supportersFailed, poll.message_id]);
+    }, [showSupporterCard, isExpanded, supporters, supportersFailed, poll.message_id, supportersTry]);
+
+    const panelId = `poll-${poll.message_id}-details`;
 
     return (
-        <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            className="glass-panel border-l-4 border-l-indigo-500 overflow-hidden"
-        >
-            {/* Compact / Header View */}
-            <div
-                className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer hover:bg-slate-800/30 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none"
-                onClick={() => setIsExpanded(!isExpanded)}
-                role="button"
-                tabIndex={0}
-                aria-expanded={isExpanded}
-                aria-label={`Toggle details for poll ${poll.title}`}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setIsExpanded(!isExpanded); } }}
-            >
-                <div className="flex-1 min-w-0">
-                    <h3 className="text-lg font-bold text-white mb-1 truncate">{poll.title}</h3>
-                    <div className="flex items-center gap-4 text-sm text-slate-400">
-                        <span className="font-medium text-emerald-400">{totalVotes} Votes</span>
-                        <span className="w-1 h-1 bg-slate-600 rounded-full"></span>
-                        <div className={`px-2 py-0.5 rounded-full text-[10px] uppercase font-bold ${poll.active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
-                            {poll.active ? 'Active' : 'Closed'}
+        <article className="panel overflow-hidden">
+            {/* Summary row: the whole row toggles; the title button carries focus/ARIA */}
+            <div className="flex items-center gap-3 px-4 sm:px-5 py-3 min-h-[64px] row-interactive" onClick={() => setIsExpanded(v => !v)}>
+                <button
+                    type="button"
+                    onClick={e => { e.stopPropagation(); setIsExpanded(v => !v); }}
+                    aria-expanded={isExpanded}
+                    aria-controls={panelId}
+                    className="flex-1 min-w-0 text-left flex items-center gap-3 rounded"
+                >
+                    <ChevronDown className={`w-4 h-4 text-faint shrink-0 transition-transform duration-150 ${isExpanded ? 'rotate-180' : ''}`} aria-hidden="true" />
+                    <div className="min-w-0 flex-1">
+                        <h3 className="text-sm font-semibold text-ink truncate">{poll.title}</h3>
+                        <div className="flex items-center gap-1.5 text-[13px] text-faint min-w-0 mt-1 sm:mt-0.5">
+                            {/* Phone: the status mark moves into this line */}
+                            <span className="sm:hidden shrink-0"><PollStatusChip active={poll.active} deleted={deleted} /></span>
+                            <span className="whitespace-nowrap shrink-0" title={fmtDateTime(poll.created_at)}>{fmtRelative(poll.created_at)}</span>
+                            <span aria-hidden="true" className="hidden sm:inline">·</span>
+                            <span className="whitespace-nowrap hidden sm:inline">by <span className="font-mono text-xs">{shortId(poll.creator_id)}</span></span>
+                            {poll.ends_at && poll.active && !deleted && (
+                                <>
+                                    <span aria-hidden="true" className="hidden lg:inline">·</span>
+                                    <span className="whitespace-nowrap hidden lg:inline">closes {fmtDateTime(poll.ends_at)}</span>
+                                </>
+                            )}
+                            {guild && <span className="md:hidden truncate min-w-0">· {guild.name}</span>}
                         </div>
-                        {guild && (
-                            <>
-                                <span className="w-1 h-1 bg-slate-600 rounded-full hidden md:block"></span>
-                                <div
-                                    className="flex items-center gap-2 hover:text-indigo-400 transition-colors"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        navigate(`/server/${guild.id}`);
-                                    }}
-                                >
-                                    {guild.icon_url ? (
-                                        <img src={guild.icon_url} alt={guild.name} className="w-5 h-5 rounded-md" />
-                                    ) : (
-                                        <div className="w-5 h-5 rounded-md bg-slate-700 flex items-center justify-center text-[10px]">{guild.name.charAt(0)}</div>
-                                    )}
-                                    <span className="hidden md:inline truncate max-w-[150px]">{guild.name}</span>
-                                    <ExternalLink className="w-3 h-3" />
-                                </div>
-                            </>
-                        )}
                     </div>
-                </div>
-                <div className="text-slate-500">
-                    {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                </button>
+                {guild && (
+                    <Link
+                        to={`/server/${guild.id}`}
+                        onClick={e => e.stopPropagation()}
+                        className="hidden md:flex items-center gap-2 w-44 min-w-0 shrink-0 text-[13px] text-muted hover:text-ink"
+                        title={`Open ${guild.name}`}
+                    >
+                        <GuildIcon name={guild.name} iconUrl={guild.icon_url} size={20} radius="6px" />
+                        <span className="truncate">{guild.name}</span>
+                    </Link>
+                )}
+                {/* Fixed slot so the column edges line up down the list */}
+                <span className="hidden sm:flex w-[136px] shrink-0 justify-start">
+                    <PollStatusChip active={poll.active} deleted={deleted} />
+                </span>
+                <div className="w-12 sm:w-16 text-right shrink-0">
+                    <div className="num text-sm text-ink">{fmtCount(totalVotes)}</div>
+                    <div className="text-xs text-faint">{totalVotes === 1 ? 'vote' : 'votes'}</div>
                 </div>
             </div>
 
-            <AnimatePresence>
-                {isExpanded && (
-                    <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        className="border-t border-slate-700/50 bg-slate-900/20"
-                    >
-                        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
-                            {/* Options / Values */}
-                            <div className="space-y-3">
-                                <p className="text-slate-400 text-sm mb-4">{poll.description}</p>
-                                <div className="flex justify-between items-center mb-2">
-                                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Results</h4>
-                                </div>
-
-                                {options.map((opt: any, i: number) => {
-                                    const count = votes[i] || 0;
-                                    const percentage = totalVotes > 0 ? (count / totalVotes) * 100 : 0;
-
+            {isExpanded && (
+                <div id={panelId} className="border-t border-rule">
+                    <div className="grid grid-cols-1 md:grid-cols-5">
+                        {/* Results, then the way back to the message */}
+                        <section className="px-4 sm:px-5 py-4 min-w-0 md:col-span-3 flex flex-col" aria-label="Results">
+                            {poll.description && <p className="text-sm text-muted mb-3 whitespace-pre-line">{poll.description}</p>}
+                            <h4 className="text-[13px] text-faint mb-1">Results</h4>
+                            <ul>
+                                {options.map((opt: string | { text?: string; label?: string }, i: number) => {
+                                    const count = Number(votes[i]) || 0;
+                                    const label = typeof opt === 'string' ? opt : (opt.text || opt.label || `Option ${i + 1}`);
                                     return (
-                                        <div key={i} className="relative">
-                                            <div className="flex justify-between text-sm text-slate-300 mb-1 z-10 relative">
-                                                <span>{typeof opt === 'string' ? opt : (opt.text || opt.label)}</span>
-                                                <span className="font-mono text-indigo-300">{count}</span>
+                                        <li key={i} className="py-1.5">
+                                            <div className="flex items-baseline gap-2 text-sm mb-1">
+                                                <span className="text-ink truncate flex-1">{label}</span>
+                                                <span className="num text-ink">{fmtCount(count)}</span>
+                                                <span className="num text-xs text-faint w-12 text-right">{fmtPct(count, totalVotes)}</span>
                                             </div>
-                                            <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-                                                <div
-                                                    className="h-full bg-indigo-500/50 transition-all duration-500"
-                                                    style={{ width: `${percentage}%` }}
-                                                ></div>
-                                            </div>
-                                        </div>
+                                            <ShareBar value={count} max={maxVotes} tone={count === maxVotes && count > 0 ? 'data' : 'muted'} />
+                                        </li>
                                     );
                                 })}
+                            </ul>
+                            <div className="mt-auto pt-3">
+                                {deleted ? (
+                                    <span className="text-[13px] text-faint">The Discord message was deleted, so there is nothing to open.</span>
+                                ) : (
+                                    <a href={messageUrl} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-sm">
+                                        <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" /> Open in Discord
+                                    </a>
+                                )}
                             </div>
+                        </section>
 
-                            {/* Meta / Settings */}
-                            <div className="bg-slate-900/30 rounded-xl p-4 text-sm h-fit">
-                                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Configuration</h4>
-                                <div className="grid grid-cols-2 gap-y-3 gap-x-6">
-                                    <SettingItem icon={<Calendar className="w-4 h-4" />} label="Created" value={new Date(poll.created_at).toLocaleString()} />
-                                    {/* public/allow_close/allow_exports default to true when absent — use !== false */}
-                                    <SettingItem icon={<PieChart className="w-4 h-4" />} label="Live Results" value={poll.settings?.public !== false ? 'Visible' : 'Hidden until close'} />
-                                    <SettingItem icon={<Info className="w-4 h-4" />} label="Selections" value={`${poll.settings?.min_votes ?? 1}–${poll.settings?.max_votes ?? 1}`} />
-                                    <SettingItem icon={<Settings className="w-4 h-4" />} label="Thread" value={poll.settings?.allow_thread ? 'Yes' : 'No'} />
+                        {/* Settings: compact label-over-value grid (the status mark is in the row above) */}
+                        <section className="px-4 sm:px-5 py-4 md:col-span-2 md:border-l border-t md:border-t-0 border-rule min-w-0" aria-label="Details">
+                            <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                                <Detail label="Created">{fmtDateTime(poll.created_at)}</Detail>
+                                {poll.ends_at
+                                    ? <Detail label={poll.active ? 'Closes' : 'Was set to close'}>{fmtDateTime(poll.ends_at)}</Detail>
+                                    : <Detail label="Closes">Manually</Detail>}
+                                <Detail label="Creator"><span className="font-mono text-[13px]">{poll.creator_id}</span></Detail>
+                                {/* public/allow_close/allow_exports default to true when absent */}
+                                <Detail label="Live results">{poll.settings?.public !== false ? 'Visible' : 'Hidden until close'}</Detail>
+                                <Detail label="Choices per voter">{`${poll.settings?.min_votes ?? 1}–${poll.settings?.max_votes ?? 1}`}</Detail>
+                                <Detail label="Thread">{poll.settings?.allow_thread ? 'Yes' : 'No'}</Detail>
+                                <Detail label="Close button">{poll.settings?.allow_close !== false ? 'Yes' : 'No'}</Detail>
+                                <Detail label="Exports">{poll.settings?.allow_exports !== false ? 'Allowed' : 'Off'}</Detail>
+                                <Detail label="Who can vote" wide>{poll.settings?.allowed_roles?.length ? poll.settings.allowed_roles.map(roleName(poll)).join(', ') : 'Everyone'}</Detail>
+                                {weights.length > 0 && (
+                                    <Detail label="Vote weights" wide>
+                                        <span className="flex flex-wrap gap-1.5">
+                                            {weights.map(([role, weight]) => <span key={role} className="chip">{roleName(poll)(role)} ×{weight}</span>)}
+                                        </span>
+                                    </Detail>
+                                )}
+                            </dl>
+                        </section>
+                    </div>
 
-                                    <SettingItem icon={<Settings className="w-4 h-4" />} label="Close Button" value={poll.settings?.allow_close !== false ? 'Yes' : 'No'} />
-                                    <SettingItem icon={<Settings className="w-4 h-4" />} label="Exports" value={poll.settings?.allow_exports !== false ? 'Allowed' : 'Disabled'} />
-
-                                    <div className="col-span-2 mt-2 pt-2 border-t border-slate-700/50">
-                                        <div className="text-[10px] uppercase opacity-70 mb-1">Allowed Roles</div>
-                                        <div className="text-xs text-white break-words">{poll.settings?.allowed_roles?.length ? poll.settings.allowed_roles.map(roleName(poll)).join(', ') : 'All Users'}</div>
-                                    </div>
-
-                                    {poll.settings?.vote_weights && Object.keys(poll.settings.vote_weights).length > 0 && (
-                                        <div className="col-span-2 mt-2 pt-2 border-t border-slate-700/50">
-                                            <div className="text-[10px] uppercase opacity-70 mb-1">Vote Weights</div>
-                                            <div className="flex flex-wrap gap-2">
-                                                {Object.entries(poll.settings.vote_weights).map(([role, weight]) => (
-                                                    <span key={role} className="bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded text-xs">
-                                                        {roleName(poll)(role)}: {weight}x
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
+                    {/* Bot-list supporters among this poll's voters (global view) */}
+                    {showSupporterCard && (
+                        <section className="px-4 sm:px-5 py-4 border-t border-rule" aria-label="Bot-list supporters">
+                            <h4 className="text-[13px] text-faint mb-2">Bot-list supporters among voters</h4>
+                            {supportersFailed ? (
+                                <div className="flex items-center gap-3 text-sm text-muted">
+                                    <span>Couldn't load supporter data.</span>
+                                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSupportersFailed(false); setSupportersTry(n => n + 1); }}>Retry</button>
                                 </div>
-                            </div>
-                        </div>
-
-                        {/* Bot-list supporter breakdown (admin polls view only) */}
-                        {showSupporterCard && (
-                            <div className="px-6 pb-6">
-                                <div className="bg-slate-900/30 rounded-xl p-4 text-sm">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <div className="p-1.5 bg-rose-500/10 rounded-lg text-rose-400">
-                                            <Heart className="w-4 h-4" />
-                                        </div>
-                                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Bot-List Supporters Among Voters</h4>
-                                    </div>
-
-                                    {supportersFailed ? (
-                                        <p className="text-xs text-slate-500">Couldn't load supporter data.</p>
-                                    ) : !supporters ? (
-                                        <div className="h-10 rounded-lg animate-pulse bg-slate-800/40" />
-                                    ) : (
-                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                                <SupporterStat label="Poll voters" value={supporters.total_voters} />
-                                                <SupporterStat
-                                                    label="Premium now"
-                                                    value={supporters.premium_now}
-                                                    accent="text-emerald-400"
-                                                    icon={<CheckCircle className="w-3 h-3" />}
-                                                />
-                                                <SupporterStat label="Top.gg voters" value={supporters.topgg} accent="text-rose-400" />
-                                                <SupporterStat label="DiscordForge" value={supporters.discordforge} accent="text-indigo-400" />
-                                                <div className="col-span-2 sm:col-span-4 text-[11px] text-slate-500">
-                                                    {supporters.total_voters > 0
-                                                        ? `${Math.round((supporters.supporters / supporters.total_voters) * 100)}% of this poll's voters have ever voted for the bot (${supporters.supporters_30d} in the last 30 days).`
-                                                        : 'No votes on this poll yet.'}
+                            ) : !supporters ? (
+                                <div className="skeleton h-[68px] w-full" />
+                            ) : (
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-4">
+                                    <div>
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 border border-rule rounded-lg">
+                                            {[
+                                                ['Voters', supporters.total_voters],
+                                                ['Premium now', supporters.premium_now],
+                                                ['Top.gg', supporters.topgg],
+                                                ['DiscordForge', supporters.discordforge],
+                                            ].map(([label, value], i) => (
+                                                <div key={String(label)} className={`px-3 py-2 min-w-0 border-rule ${SUPPORTER_CELL[i]}`}>
+                                                    <div className="text-xs text-faint truncate">{label}</div>
+                                                    <div className="num text-lg font-semibold text-ink">{fmtCount(value)}</div>
                                                 </div>
-                                            </div>
-
-                                            <div>
-                                                <div className="text-[10px] uppercase text-slate-500 font-bold mb-2">Top supporters in this poll</div>
-                                                {supporters.top_supporters.length === 0 ? (
-                                                    <p className="text-xs text-slate-500">None of this poll's voters have voted on a bot list.</p>
-                                                ) : (
-                                                    <ul className="space-y-1.5">
-                                                        {supporters.top_supporters.map(s => (
-                                                            <li key={s.user_id} className="flex items-center gap-2 bg-slate-900/40 border border-slate-800 rounded-lg px-2.5 py-1.5">
-                                                                {s.avatar_url
-                                                                    ? <img src={s.avatar_url} alt="" className="w-5 h-5 rounded-full" />
-                                                                    : <div className="w-5 h-5 rounded-full bg-slate-700" />}
-                                                                <span className="text-xs text-slate-200 truncate flex-1">{s.username || s.user_id}</span>
-                                                                <span className="text-[10px] text-slate-500">{s.sources.join(' · ')}</span>
-                                                                <span className="text-xs font-bold text-white">{s.botlist_votes}</span>
-                                                            </li>
-                                                        ))}
-                                                    </ul>
-                                                )}
-                                            </div>
+                                            ))}
                                         </div>
-                                    )}
+                                        <p className="text-xs text-faint mt-2">
+                                            {supporters.total_voters > 0
+                                                ? `${fmtPct(supporters.supporters, supporters.total_voters)} of this poll's voters have voted for PollBot on a bot list (${fmtCount(supporters.supporters_30d)} in the last 30 days).`
+                                                : 'No votes on this poll yet.'}
+                                        </p>
+                                    </div>
+                                    <div className="min-w-0">
+                                        {supporters.top_supporters.length === 0 ? (
+                                            <p className="text-sm text-faint">None of this poll's voters have voted on a bot list.</p>
+                                        ) : (
+                                            <ul>
+                                                {supporters.top_supporters.slice(0, 3).map(s => (
+                                                    <li key={s.user_id} className="h-9 flex items-center gap-2.5 min-w-0">
+                                                        <Avatar name={s.username || '?'} url={s.avatar_url} size={22} id={s.user_id} />
+                                                        <span className="text-sm text-ink truncate flex-1">{s.username || 'Unknown user'}</span>
+                                                        <span className="text-xs text-faint shrink-0">{s.sources.map(x => SOURCE_LABELS[x] ?? x).join(' · ')}</span>
+                                                        <span className="num text-sm text-ink w-10 text-right shrink-0">{fmtCount(s.botlist_votes)}</span>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
-                        )}
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </motion.div>
+                            )}
+                        </section>
+                    )}
+                </div>
+            )}
+        </article>
     );
 };
 
-const SupporterStat = ({ label, value, accent = 'text-white', icon }: { label: string; value: number; accent?: string; icon?: React.ReactNode }) => (
-    <div className="bg-slate-900/40 border border-slate-800 rounded-lg px-3 py-2">
-        <div className="text-[10px] uppercase text-slate-500 font-bold">{label}</div>
-        <div className={`text-lg font-bold ${accent} inline-flex items-center gap-1.5`}>{icon}{value.toLocaleString()}</div>
-    </div>
-);
-
-/** Resolve a role ID to its display name via role_metadata, falling back to the ID. */
-const roleName = (poll: Poll) => (id: string) => poll.settings?.role_metadata?.[id]?.name ?? id;
-
-const SettingItem = ({ icon, label, value }: any) => (
-    <div className="flex items-center gap-2 text-slate-400">
-        <div className="text-indigo-400">{icon}</div>
-        <div className="flex flex-col">
-            <span className="text-[10px] uppercase opacity-70">{label}</span>
-            <span className="text-white font-medium">{value}</span>
-        </div>
+const Detail: React.FC<{ label: string; wide?: boolean; children: React.ReactNode }> = ({ label, wide = false, children }) => (
+    <div className={`min-w-0 ${wide ? 'col-span-2' : ''}`}>
+        <dt className="text-xs text-faint">{label}</dt>
+        <dd className="text-ink mt-0.5 break-words">{children}</dd>
     </div>
 );

@@ -26,3 +26,9 @@ docs/
 # Host-specific deployment artifacts
 pollbot.service
 topgg-description.html
+topgg-description.min.html
+discordforge-banner*
+discordforge-description*
+
+# Design-skill working files (direction sheet, inspector screenshots)
+.taste-skill/

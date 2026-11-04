@@ -1,22 +1,34 @@
 import { Router, Request, Response } from 'express';
 import { supabase } from '../lib/db';
 import { logger } from '../lib/logger';
-import { getVoteCountsForPoll } from '../lib/voteUtils';
+import { aggregateVoteRows, fetchAllPollVotes, getVoteCountsForPoll } from '../lib/voteUtils';
 import { groupVoteRows, MyVoteRow } from './voteGrouping';
 import { trackUsage } from '../lib/usageTracker';
+import { formatCsvCell } from '../lib/guildUtils';
+import { DashboardSessionRecord, getValidDashboardSession, refreshAccessToken } from './dashboardAuth';
 
 const router = Router();
-
-// Cookie name must match dashboardAuth.ts
-const COOKIE_NAME = 'pollbot_session';
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 const BOT_TOKEN = process.env.DISCORD_TOKEN;
 const MANAGE_GUILD = 0x20; // 32
+const SNOWFLAKE_RE = /^\d{17,20}$/;
 const PERMISSION_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const VOTER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes for voter data
 const PREMIUM_HOURS = 13; // Vote valid for 13 hours (per view.ts line 35)
 const TOPGG_VOTE_URL = 'https://top.gg/bot/911731627498041374/vote';
+/** PostgREST's default max rows per request; loops page by this size. */
+const DB_PAGE_SIZE = 1000;
+/** Safety cap for the /votes distinct-poll index scan (100k vote rows). */
+const MY_VOTES_MAX_SCAN_PAGES = 100;
+
+/** Guild-wide poll counts returned as `summary` by GET /api/user/polls/:guildId. */
+interface GuildPollSummary {
+    total: number;
+    active: number;
+    closed: number;
+    channels: { channel_id: string; count: number; open: number }[];
+}
 
 interface DiscordGuild {
     id: string;
@@ -48,20 +60,31 @@ interface CachedMemberInfo {
 const memberCache = new Map<string, CachedMemberInfo>();
 const MEMBER_CACHE_TTL = 30 * 60 * 1000; // 30 minutes for member data (rarely changes)
 
-// Cache for permission verification to avoid hitting Discord API rate limits
-// Key: `${userId}:${guildId}`, Value: { hasPermission: boolean, timestamp: number }
-const permissionCache = new Map<string, { hasPermission: boolean; timestamp: number }>();
+// Cache for guild membership + permission verification to avoid hitting Discord API rate limits
+// Key: `${userId}:${guildId}`, Value: { isMember, hasManageGuild, timestamp }
+interface CachedGuildMembership {
+    isMember: boolean;
+    hasManageGuild: boolean;
+    timestamp: number;
+}
+const permissionCache = new Map<string, CachedGuildMembership>();
 
 // Legacy voter cache (kept for backward compatibility but no longer used for caching)
 const voterCache = new Map<string, CachedVoterData>();
 
 // Cleanup stale cache entries periodically (every 10 minutes)
-setInterval(() => {
+const cacheCleanupTimer = setInterval(() => {
     const now = Date.now();
     // Clean up member cache
     for (const [key, data] of memberCache) {
         if (now - data.timestamp > MEMBER_CACHE_TTL * 2) {
             memberCache.delete(key);
+        }
+    }
+    // Clean up permission cache
+    for (const [key, data] of permissionCache) {
+        if (now - data.timestamp > PERMISSION_CACHE_TTL * 2) {
+            permissionCache.delete(key);
         }
     }
     // Clean up legacy voter cache
@@ -71,6 +94,7 @@ setInterval(() => {
         }
     }
 }, 10 * 60 * 1000);
+cacheCleanupTimer.unref();
 
 /**
  * Get cached member info or null if not cached/expired
@@ -92,41 +116,110 @@ function setCachedMember(guildId: string, userId: string, info: VoterInfo): void
     memberCache.set(key, { info, timestamp: Date.now() });
 }
 
-function getCachedPermission(userId: string, guildId: string): boolean | null {
+function getCachedMembership(userId: string, guildId: string): CachedGuildMembership | null {
     const key = `${userId}:${guildId}`;
     const cached = permissionCache.get(key);
     if (cached && Date.now() - cached.timestamp < PERMISSION_CACHE_TTL) {
-        return cached.hasPermission;
+        return cached;
     }
     return null;
 }
 
-function setCachedPermission(userId: string, guildId: string, hasPermission: boolean): void {
+function setCachedMembership(userId: string, guildId: string, isMember: boolean, hasManageGuild: boolean): void {
     const key = `${userId}:${guildId}`;
-    permissionCache.set(key, { hasPermission, timestamp: Date.now() });
+    permissionCache.set(key, { isMember, hasManageGuild, timestamp: Date.now() });
 }
 
 /**
- * Helper: Get session data from cookie/header
+ * Helper: Get session data from cookie/header (proactively refreshes expiring OAuth tokens)
  */
-async function getSession(req: Request): Promise<{ user_id: string; access_token: string } | null> {
-    const cookieSession = req.cookies?.[COOKIE_NAME];
-    const authHeader = req.headers.authorization;
-    const headerSession = authHeader?.replace('Bearer ', '');
-    const sessionId = cookieSession || headerSession;
+async function getSession(req: Request): Promise<DashboardSessionRecord | null> {
+    return getValidDashboardSession(req);
+}
 
-    if (!sessionId) return null;
+async function getGuildMembershipForSession(
+    session: DashboardSessionRecord,
+    guildId: string
+): Promise<{ ok: true; isMember: boolean; hasManageGuild: boolean } | { ok: false; status: number; error: string }> {
+    const cached = getCachedMembership(session.user_id, guildId);
+    if (cached) {
+        return { ok: true, isMember: cached.isMember, hasManageGuild: cached.hasManageGuild };
+    }
 
-    const { data: session, error } = await supabase
-        .from('dashboard_sessions')
-        .select('user_id, access_token, expires_at')
-        .eq('id', sessionId)
-        .single();
+    let discordResponse = await fetch(`${DISCORD_API_BASE}/users/@me/guilds`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+    });
 
-    if (error || !session) return null;
-    if (new Date(session.expires_at).getTime() < Date.now()) return null;
+    if (discordResponse.status === 401) {
+        const newToken = await refreshAccessToken(session.id);
+        if (newToken) {
+            session.access_token = newToken;
+            discordResponse = await fetch(`${DISCORD_API_BASE}/users/@me/guilds`, {
+                headers: { Authorization: `Bearer ${newToken}` },
+            });
+        }
+    }
 
-    return session;
+    if (!discordResponse.ok) {
+        logger.error(`[UserPolls] Failed to fetch guilds from Discord (status: ${discordResponse.status})`);
+        if (discordResponse.status === 401) {
+            return { ok: false, status: 401, error: 'Discord token expired, please re-login' };
+        }
+        return { ok: false, status: 503, error: 'Discord API temporarily unavailable, please try again' };
+    }
+
+    const userGuilds: DiscordGuild[] = await discordResponse.json();
+    const targetGuild = userGuilds.find(g => g.id === guildId);
+    if (!targetGuild) {
+        setCachedMembership(session.user_id, guildId, false, false);
+        return { ok: true, isMember: false, hasManageGuild: false };
+    }
+
+    const permissions = BigInt(targetGuild.permissions);
+    const hasManageGuild = (permissions & BigInt(MANAGE_GUILD)) !== BigInt(0) || targetGuild.owner;
+    setCachedMembership(session.user_id, guildId, true, hasManageGuild);
+
+    return { ok: true, isMember: true, hasManageGuild };
+}
+
+async function verifyManageGuildForSession(
+    session: DashboardSessionRecord,
+    guildId: string
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+    const membership = await getGuildMembershipForSession(session, guildId);
+    if (!membership.ok) {
+        return membership;
+    }
+    if (!membership.isMember) {
+        return { ok: false, status: 403, error: 'You are not a member of this server' };
+    }
+    if (!membership.hasManageGuild) {
+        return { ok: false, status: 403, error: 'You need Manage Server permission' };
+    }
+    return { ok: true };
+}
+
+/**
+ * Verifies the user may read voter/export data for a poll:
+ * - User MUST currently be a member of `guildId` (blocks kicked/banned ex-creators)
+ * - User must have Manage Server OR be the poll creator
+ */
+async function verifyPollReadAccessForSession(
+    session: DashboardSessionRecord,
+    guildId: string,
+    creatorId: string | null | undefined
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+    const membership = await getGuildMembershipForSession(session, guildId);
+    if (!membership.ok) {
+        return membership;
+    }
+    if (!membership.isMember) {
+        return { ok: false, status: 403, error: 'You are not a member of this server' };
+    }
+    if (!membership.hasManageGuild && session.user_id !== creatorId) {
+        return { ok: false, status: 403, error: 'You need Manage Server permission' };
+    }
+    return { ok: true };
 }
 
 /**
@@ -137,7 +230,7 @@ async function checkPremiumStatus(userId: string): Promise<{ isPremium: boolean;
         .from('users')
         .select('last_vote_at')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
 
     if (!userData?.last_vote_at) {
         return { isPremium: false };
@@ -157,55 +250,47 @@ async function checkPremiumStatus(userId: string): Promise<{ isPremium: boolean;
 }
 
 /**
- * Helper: Fetch voter data with Discord member enrichment
- * Vote data is ALWAYS fetched fresh from the database.
- * Discord member info is cached per-user for 30 minutes to avoid redundant API calls.
- * @param forceRefreshMembers - If true, bypass member cache (refreshes Discord data)
+ * Enriches unique Discord user IDs with guild member profile data (cached for 30 minutes).
  */
-async function fetchVoterData(pollId: string, optionIndex: number, guildId: string, forceRefreshMembers = false): Promise<VoterInfo[]> {
-    // ALWAYS fetch votes fresh from database (this is the source of truth)
-    const { data: votes, error: votesError } = await supabase
-        .from('votes')
-        .select('user_id, created_at')
-        .eq('poll_id', pollId)
-        .eq('option_index', optionIndex);
-
-    if (votesError || !votes || votes.length === 0) {
-        return [];
-    }
-
-    const userIds = votes.map(v => v.user_id);
-    const voters: VoterInfo[] = [];
-
-    // Separate users into cached and uncached
+async function enrichUserIdsWithMemberInfo(
+    userIds: string[],
+    guildId: string,
+    forceRefreshMembers = false
+): Promise<Map<string, VoterInfo>> {
+    const uniqueIds = [...new Set(userIds)];
+    const resultMap = new Map<string, VoterInfo>();
     const uncachedUserIds: string[] = [];
-    const cachedVoters: VoterInfo[] = [];
 
-    for (const userId of userIds) {
+    for (const userId of uniqueIds) {
         if (!forceRefreshMembers) {
             const cached = getCachedMember(guildId, userId);
             if (cached) {
-                cachedVoters.push(cached);
+                resultMap.set(userId, cached);
                 continue;
             }
         }
         uncachedUserIds.push(userId);
     }
 
-    // Add cached users to result
-    voters.push(...cachedVoters);
-
-    // Fetch Discord member data only for uncached users
-    if (BOT_TOKEN && uncachedUserIds.length > 0) {
-        logger.info(`[Voters] Fetching ${uncachedUserIds.length} uncached members (${cachedVoters.length} from cache)`);
+    if (BOT_TOKEN && uncachedUserIds.length > 0 && SNOWFLAKE_RE.test(guildId)) {
+        logger.info(`[Voters] Fetching ${uncachedUserIds.length} uncached members (${resultMap.size} from cache)`);
 
         try {
-            // Fetch members in batches of 100 (Discord API limit)
+            // Fetch members in batches of 100 (Discord API rate-limit friendly)
             for (let i = 0; i < uncachedUserIds.length; i += 100) {
                 const batchIds = uncachedUserIds.slice(i, i + 100);
 
                 // Fetch each member individually (Discord doesn't have batch member fetch via REST)
                 const memberPromises = batchIds.map(async (userId) => {
+                    if (!SNOWFLAKE_RE.test(userId)) {
+                        return {
+                            user_id: userId,
+                            username: 'Unknown',
+                            display_name: 'Unknown',
+                            nickname: null,
+                            avatar_url: null,
+                        };
+                    }
                     try {
                         const memberRes = await fetch(
                             `${DISCORD_API_BASE}/guilds/${guildId}/members/${userId}`,
@@ -262,7 +347,9 @@ async function fetchVoterData(pollId: string, optionIndex: number, guildId: stri
                 });
 
                 const batchResults = await Promise.all(memberPromises);
-                voters.push(...batchResults);
+                for (const info of batchResults) {
+                    resultMap.set(info.user_id, info);
+                }
 
                 // Rate limit protection: small delay between batches
                 if (i + 100 < uncachedUserIds.length) {
@@ -271,43 +358,56 @@ async function fetchVoterData(pollId: string, optionIndex: number, guildId: stri
             }
         } catch (err) {
             logger.error('[Voters] Error fetching member data:', err);
-            // Fall back to just user IDs for uncached users
-            uncachedUserIds.forEach(userId => {
-                voters.push({
-                    user_id: userId,
-                    username: 'Unknown',
-                    display_name: 'Unknown',
-                    nickname: null,
-                    avatar_url: null,
-                });
-            });
         }
-    } else if (!BOT_TOKEN) {
-        // No bot token, just return user IDs for uncached users
-        uncachedUserIds.forEach(userId => {
-            voters.push({
+    }
+
+    for (const userId of uncachedUserIds) {
+        if (!resultMap.has(userId)) {
+            resultMap.set(userId, {
                 user_id: userId,
                 username: 'Unknown',
                 display_name: 'Unknown',
                 nickname: null,
                 avatar_url: null,
             });
-        });
+        }
     }
 
-    return voters;
+    return resultMap;
 }
 
 /**
- * GET /api/user/polls/:guildId
- * Returns all polls in a server (requires Manage Guild permission)
+ * Helper: Fetch voter data with Discord member enrichment
+ * Vote data is ALWAYS fetched fresh from the database (paginated past 1,000 rows).
+ * Discord member info is cached per-user for 30 minutes to avoid redundant API calls.
+ * @param forceRefreshMembers - If true, bypass member cache (refreshes Discord data)
  */
+async function fetchVoterData(pollId: string, optionIndex: number, guildId: string, forceRefreshMembers = false): Promise<VoterInfo[]> {
+    const { data: votes, error: votesError } = await fetchAllPollVotes(pollId, { optionIndex });
+
+    if (votesError || !votes || votes.length === 0) {
+        return [];
+    }
+
+    const userIds = votes.map(v => v.user_id);
+    const enrichedMap = await enrichUserIdsWithMemberInfo(userIds, guildId, forceRefreshMembers);
+
+    return userIds.map(userId => enrichedMap.get(userId) || {
+        user_id: userId,
+        username: 'Unknown',
+        display_name: 'Unknown',
+        nickname: null,
+        avatar_url: null,
+    });
+}
+
 /**
  * GET /api/user/votes
  * All polls the authenticated user has voted in, across servers.
- * Paginated (limit counts vote rows, not polls — multi-select rows group
- * client-side into one entry per poll). No guild permission check needed:
- * users read only their own votes.
+ * Paginated by DISTINCT poll (newest vote first): `total` is the number of
+ * distinct polls voted in, and each page carries every chosen option for the
+ * polls on it, so multi-select votes never split across pages. No guild
+ * permission check needed: users read only their own votes.
  */
 router.get('/votes', async (req: Request, res: Response) => {
     const session = await getSession(req);
@@ -324,25 +424,135 @@ router.get('/votes', async (req: Request, res: Response) => {
     const offset = Math.max(offsetRaw, 0);
 
     try {
-        const { data, error, count } = await supabase
-            .from('votes')
-            .select('poll_id, option_index, weight, created_at, polls!inner(message_id, title, guild_id, channel_id, active, options, guilds!inner(name, icon_url))', { count: 'exact' })
-            .eq('user_id', session.user_id)
-            .order('created_at', { ascending: false })
-            .range(offset, offset + limit - 1);
+        // 1. Distinct poll ids ordered by the user's latest vote on each.
+        //    Only lightweight columns are scanned (idx_votes_user_created),
+        //    paginated past the 1,000-row cap. The inner joins mirror the
+        //    detail query below so `total` only counts polls it can return.
+        const orderedPollIds: string[] = [];
+        const seen = new Set<string>();
+        for (let page = 0; page < MY_VOTES_MAX_SCAN_PAGES; page++) {
+            const from = page * DB_PAGE_SIZE;
+            const { data, error } = await supabase
+                .from('votes')
+                .select('poll_id, created_at, polls!inner(message_id, guilds!inner(id))')
+                .eq('user_id', session.user_id)
+                .order('created_at', { ascending: false })
+                .order('poll_id', { ascending: false })
+                .order('option_index', { ascending: true })
+                .range(from, from + DB_PAGE_SIZE - 1);
 
-        if (error) {
-            logger.error('[UserPolls] Failed to fetch user votes:', error);
-            return res.status(500).json({ error: 'Failed to fetch votes' });
+            if (error) {
+                logger.error('[UserPolls] Failed to fetch user vote index:', error);
+                return res.status(500).json({ error: 'Failed to fetch votes' });
+            }
+
+            const batch = (data ?? []) as { poll_id: string }[];
+            for (const row of batch) {
+                if (!seen.has(row.poll_id)) {
+                    seen.add(row.poll_id);
+                    orderedPollIds.push(row.poll_id);
+                }
+            }
+            if (batch.length < DB_PAGE_SIZE) break;
+            if (page === MY_VOTES_MAX_SCAN_PAGES - 1) {
+                logger.warn(`[UserPolls] Vote index scan for user ${session.user_id} hit the ${MY_VOTES_MAX_SCAN_PAGES * DB_PAGE_SIZE}-row cap; total may be understated`);
+            }
         }
 
-        const votes = groupVoteRows((data ?? []) as unknown as MyVoteRow[]);
-        return res.json({ votes, total: count ?? 0, limit, offset });
+        const total = orderedPollIds.length;
+        const pagePollIds = orderedPollIds.slice(offset, offset + limit);
+        if (pagePollIds.length === 0) {
+            return res.json({ votes: [], total, limit, offset });
+        }
+
+        // 2. Every row the user has for the polls on this page (up to 100
+        //    multi-select polls can exceed 1,000 rows, so paginate).
+        const rows: MyVoteRow[] = [];
+        for (let from = 0; ; from += DB_PAGE_SIZE) {
+            const { data, error } = await supabase
+                .from('votes')
+                .select('poll_id, option_index, weight, created_at, polls!inner(message_id, title, guild_id, channel_id, active, ends_at, discord_deleted, options, guilds!inner(name, icon_url))')
+                .eq('user_id', session.user_id)
+                .in('poll_id', pagePollIds)
+                .order('created_at', { ascending: false })
+                .order('poll_id', { ascending: false })
+                .order('option_index', { ascending: true })
+                .range(from, from + DB_PAGE_SIZE - 1);
+
+            if (error) {
+                logger.error('[UserPolls] Failed to fetch user votes:', error);
+                return res.status(500).json({ error: 'Failed to fetch votes' });
+            }
+
+            const batch = (data ?? []) as unknown as MyVoteRow[];
+            rows.push(...batch);
+            if (batch.length < DB_PAGE_SIZE) break;
+        }
+
+        // 3. One entry per poll, in distinct-poll page order.
+        const grouped = groupVoteRows(rows);
+        const byPoll = new Map(grouped.map(v => [v.poll_id, v]));
+        const votes = pagePollIds
+            .map(id => byPoll.get(id))
+            .filter((v): v is NonNullable<typeof v> => v !== undefined);
+
+        return res.json({ votes, total, limit, offset });
     } catch (err) {
         logger.error('[UserPolls] Unexpected error fetching user votes:', err);
         return res.status(500).json({ error: 'Failed to fetch votes' });
     }
 });
+
+/**
+ * Guild-wide poll summary for the dashboard header/channel filter: totals and
+ * per-channel counts over ALL polls in the guild (ignores search/status/channel
+ * filters). Pages through `(channel_id, active)` past PostgREST's 1,000-row
+ * cap so guilds with thousands of polls are counted correctly.
+ * Returns null on query failure (callers must not show zeros as data).
+ */
+async function fetchGuildPollSummary(guildId: string): Promise<GuildPollSummary | null> {
+    let total = 0;
+    let active = 0;
+    const channels = new Map<string, GuildPollSummary['channels'][number]>();
+
+    for (let from = 0; ; from += DB_PAGE_SIZE) {
+        const { data, error } = await supabase
+            .from('polls')
+            .select('channel_id, active')
+            .eq('guild_id', guildId)
+            .order('message_id', { ascending: true })
+            .range(from, from + DB_PAGE_SIZE - 1);
+
+        if (error) {
+            logger.error(`[UserPolls] Failed to build poll summary for guild ${guildId}:`, error);
+            return null;
+        }
+
+        const batch = (data ?? []) as { channel_id: string; active: boolean }[];
+        for (const row of batch) {
+            total++;
+            if (row.active) active++;
+            let entry = channels.get(row.channel_id);
+            if (!entry) {
+                entry = { channel_id: row.channel_id, count: 0, open: 0 };
+                channels.set(row.channel_id, entry);
+            }
+            entry.count++;
+            if (row.active) entry.open++;
+        }
+
+        if (batch.length < DB_PAGE_SIZE) break;
+    }
+
+    return {
+        total,
+        active,
+        closed: total - active,
+        channels: [...channels.values()].sort((a, b) =>
+            b.count - a.count || a.channel_id.localeCompare(b.channel_id)
+        ),
+    };
+}
 
 /**
  * GET /api/user/guilds/:guildId/analytics
@@ -352,8 +562,8 @@ router.get('/votes', async (req: Request, res: Response) => {
  */
 router.get('/guilds/:guildId/analytics', async (req: Request, res: Response) => {
     const guildId = req.params.guildId as string;
-    if (!guildId) {
-        return res.status(400).json({ error: 'Guild ID is required' });
+    if (!guildId || !SNOWFLAKE_RE.test(guildId)) {
+        return res.status(400).json({ error: 'Valid guild ID is required' });
     }
 
     const session = await getSession(req);
@@ -375,33 +585,10 @@ router.get('/guilds/:guildId/analytics', async (req: Request, res: Response) => 
             });
         }
 
-        // Manage Server permission check (cached, then Discord)
-        const cachedPerm = getCachedPermission(session.user_id, guildId);
-        if (cachedPerm === false) {
-            return res.status(403).json({ error: 'You need Manage Server permission' });
-        }
-        if (cachedPerm === null) {
-            const discordResponse = await fetch(`${DISCORD_API_BASE}/users/@me/guilds`, {
-                headers: { Authorization: `Bearer ${session.access_token}` },
-            });
-            if (!discordResponse.ok) {
-                if (discordResponse.status === 401) {
-                    return res.status(401).json({ error: 'Discord token expired, please re-login' });
-                }
-                return res.status(503).json({ error: 'Discord API temporarily unavailable, please try again' });
-            }
-            const userGuilds: DiscordGuild[] = await discordResponse.json();
-            const targetGuild = userGuilds.find(g => g.id === guildId);
-            if (!targetGuild) {
-                setCachedPermission(session.user_id, guildId, false);
-                return res.status(403).json({ error: 'You are not a member of this server' });
-            }
-            const permissions = BigInt(targetGuild.permissions);
-            const hasManageGuild = (permissions & BigInt(MANAGE_GUILD)) !== BigInt(0) || targetGuild.owner;
-            setCachedPermission(session.user_id, guildId, hasManageGuild);
-            if (!hasManageGuild) {
-                return res.status(403).json({ error: 'You need Manage Server permission' });
-            }
+        // Manage Server permission check (cached, then Discord with token auto-refresh)
+        const perm = await verifyManageGuildForSession(session, guildId);
+        if (!perm.ok) {
+            return res.status(perm.status).json({ error: perm.error });
         }
 
         // Fetch the three aggregates in parallel (service-role client)
@@ -417,48 +604,20 @@ router.get('/guilds/:guildId/analytics', async (req: Request, res: Response) => 
         }
 
         // Enrich top voters with Discord usernames via the shared member cache
-        const topVoters = await Promise.all(
-            ((topRes.data ?? []) as { user_id: string; votes: number | string }[]).map(async (row) => {
-                let info = getCachedMember(guildId, row.user_id);
-                if (!info && BOT_TOKEN) {
-                    try {
-                        const memberRes = await fetch(
-                            `${DISCORD_API_BASE}/guilds/${guildId}/members/${row.user_id}`,
-                            { headers: { Authorization: `Bot ${BOT_TOKEN}` } }
-                        );
-                        if (memberRes.ok) {
-                            const member = await memberRes.json();
-                            info = {
-                                user_id: row.user_id,
-                                username: member.user?.username || 'Unknown',
-                                display_name: member.user?.global_name || member.user?.username || 'Unknown',
-                                nickname: member.nick || null,
-                                avatar_url: member.user?.avatar
-                                    ? `https://cdn.discordapp.com/avatars/${row.user_id}/${member.user.avatar}.png`
-                                    : null,
-                            };
-                        } else {
-                            info = {
-                                user_id: row.user_id,
-                                username: memberRes.status === 404 ? 'Left Server' : 'Unknown',
-                                display_name: memberRes.status === 404 ? 'Left Server' : 'Unknown',
-                                nickname: null,
-                                avatar_url: null,
-                            };
-                        }
-                        setCachedMember(guildId, row.user_id, info);
-                    } catch {
-                        info = null;
-                    }
-                }
-                return {
-                    user_id: row.user_id,
-                    username: info?.display_name ?? null,
-                    avatar_url: info?.avatar_url ?? null,
-                    votes: Number(row.votes),
-                };
-            })
+        const topVoterRows = (topRes.data ?? []) as { user_id: string; votes: number | string }[];
+        const enrichedTopMap = await enrichUserIdsWithMemberInfo(
+            topVoterRows.map(r => r.user_id),
+            guildId
         );
+        const topVoters = topVoterRows.map((row) => {
+            const info = enrichedTopMap.get(row.user_id);
+            return {
+                user_id: row.user_id,
+                username: info?.display_name ?? null,
+                avatar_url: info?.avatar_url ?? null,
+                votes: Number(row.votes),
+            };
+        });
 
         return res.json({
             days,
@@ -472,106 +631,61 @@ router.get('/guilds/:guildId/analytics', async (req: Request, res: Response) => 
     }
 });
 
+/**
+ * GET /api/user/polls/:guildId
+ * Returns all polls in a server (requires Manage Guild permission)
+ */
 router.get('/polls/:guildId', async (req: Request, res: Response) => {
     const guildId = req.params.guildId as string;
-    // Support both cookie and header auth
-    const cookieSession = req.cookies?.[COOKIE_NAME];
-    const authHeader = req.headers.authorization;
-    const headerSession = authHeader?.replace('Bearer ', '');
-    const sessionId = cookieSession || headerSession;
 
-    if (!guildId) {
-        return res.status(400).json({ error: 'Guild ID is required' });
-    }
-
-    if (!sessionId) {
-        return res.status(401).json({ error: 'Unauthorized' });
+    if (!guildId || !SNOWFLAKE_RE.test(guildId)) {
+        return res.status(400).json({ error: 'Valid guild ID is required' });
     }
 
     try {
-        // Get session with access token
-        const { data: session, error: sessionError } = await supabase
-            .from('dashboard_sessions')
-            .select('user_id, access_token, expires_at')
-            .eq('id', sessionId)
-            .single();
-
-        if (sessionError || !session) {
-            return res.status(401).json({ error: 'Invalid session' });
+        const session = await getSession(req);
+        if (!session) {
+            return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        if (new Date(session.expires_at).getTime() < Date.now()) {
-            return res.status(401).json({ error: 'Session expired' });
+        const perm = await verifyManageGuildForSession(session, guildId);
+        if (!perm.ok) {
+            return res.status(perm.status).json({ error: perm.error });
         }
 
-        // Check cached permission first to avoid Discord API rate limits
-        const cachedPermission = getCachedPermission(session.user_id, guildId);
-
-        if (cachedPermission === false) {
-            return res.status(403).json({ error: 'You need Manage Server permission' });
-        }
-
-        // If not cached or cache says true, verify with Discord (but only if not cached)
-        if (cachedPermission === null) {
-            const discordResponse = await fetch(`${DISCORD_API_BASE}/users/@me/guilds`, {
-                headers: {
-                    Authorization: `Bearer ${session.access_token}`,
-                },
-            });
-
-            if (!discordResponse.ok) {
-                // On Discord API failure, don't show error if we have existing data
-                // Just log and return 503 (Service Unavailable) which frontend can handle gracefully
-                logger.error(`[UserPolls] Failed to fetch guilds from Discord (status: ${discordResponse.status})`);
-                if (discordResponse.status === 401) {
-                    return res.status(401).json({ error: 'Discord token expired, please re-login' });
-                }
-                // Return 503 instead of 502 to indicate temporary unavailability
-                return res.status(503).json({ error: 'Discord API temporarily unavailable, please try again' });
-            }
-
-            const userGuilds: DiscordGuild[] = await discordResponse.json();
-
-            // Find the specific guild and check permissions
-            const targetGuild = userGuilds.find(g => g.id === guildId);
-            if (!targetGuild) {
-                setCachedPermission(session.user_id, guildId, false);
-                return res.status(403).json({ error: 'You are not a member of this server' });
-            }
-
-            const permissions = BigInt(targetGuild.permissions);
-            const hasManageGuild = (permissions & BigInt(MANAGE_GUILD)) !== BigInt(0) || targetGuild.owner;
-
-            // Cache the result
-            setCachedPermission(session.user_id, guildId, hasManageGuild);
-
-            if (!hasManageGuild) {
-                return res.status(403).json({ error: 'You need Manage Server permission' });
-            }
-        }
-
-        // Verify bot is in this guild
+        // Verify bot is actively in this guild
         const { data: botGuild } = await supabase
             .from('guilds')
             .select('id, name, icon_url, member_count')
             .eq('id', guildId)
-            .single();
+            .is('left_at', null)
+            .maybeSingle();
 
         if (!botGuild) {
             return res.status(404).json({ error: 'Bot is not in this server' });
         }
 
         // Parse query parameters for filtering/pagination
-        const search = (req.query.search as string || '').trim().toLowerCase();
+        const search = ((req.query.search as string) || '').trim();
         const status = req.query.status as string; // 'active' | 'closed' | undefined
-        const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
-        const offset = parseInt(req.query.offset as string) || 0;
+        const channelRaw = typeof req.query.channel === 'string' ? req.query.channel.trim() : '';
+        if (channelRaw && !SNOWFLAKE_RE.test(channelRaw)) {
+            return res.status(400).json({ error: 'channel must be a valid channel ID' });
+        }
+        const channel = channelRaw || null;
+        const limit = Math.min(Math.max(parseInt(req.query.limit as string, 10) || 50, 1), 100);
+        const offset = Math.max(parseInt(req.query.offset as string, 10) || 0, 0);
 
-        // Build query with filters
+        // Build query with filters (count: 'exact' → total after filters)
         let query = supabase
             .from('polls')
-            .select('*')
+            .select('*', { count: 'exact' })
             .eq('guild_id', guildId);
+
+        if (search) {
+            const escapedSearch = search.replace(/[\\%_]/g, '\\$&');
+            query = query.ilike('title', `%${escapedSearch}%`);
+        }
 
         // Apply status filter
         if (status === 'active') {
@@ -580,29 +694,51 @@ router.get('/polls/:guildId', async (req: Request, res: Response) => {
             query = query.eq('active', false);
         }
 
+        if (channel) {
+            query = query.eq('channel_id', channel);
+        }
+
         // Apply pagination and ordering
         query = query
             .order('created_at', { ascending: false })
+            .order('message_id', { ascending: false })
             .range(offset, offset + limit - 1);
 
-        const { data: polls, error: pollsError, count } = await query;
+        // Guild-wide summary (ignores search/status/channel filters) runs in
+        // parallel with the page query.
+        const [pageResult, summary] = await Promise.all([query, fetchGuildPollSummary(guildId)]);
+        const { data: polls, error: pollsError, count } = pageResult;
 
         if (pollsError) {
             logger.error(`[UserPolls] Failed to fetch polls:`, pollsError);
             return res.status(500).json({ error: 'Failed to fetch polls' });
         }
 
-        // Get vote counts for each poll using centralized utility
+        // Get vote counts for each poll using centralized utility. A failed
+        // count query yields nulls + counts_error so the dashboard can render a
+        // dash instead of a misleading zero.
         const pollsWithVotes = await Promise.all((polls || []).map(async (poll) => {
-            const { voteCounts, totalVotes } = await getVoteCountsForPoll(
+            const { voteCounts, totalVotes, uniqueVoters, error: countsError } = await getVoteCountsForPoll(
                 poll.message_id,
                 poll.options as string[]
             );
+
+            if (countsError) {
+                return {
+                    ...poll,
+                    vote_counts: null,
+                    total_votes: null,
+                    unique_voters: null,
+                    counts_error: true,
+                };
+            }
 
             return {
                 ...poll,
                 vote_counts: voteCounts,
                 total_votes: totalVotes,
+                unique_voters: uniqueVoters,
+                counts_error: false,
             };
         }));
 
@@ -616,6 +752,10 @@ router.get('/polls/:guildId', async (req: Request, res: Response) => {
                 member_count: botGuild.member_count,
             },
             polls: pollsWithVotes,
+            total: count ?? pollsWithVotes.length,
+            limit,
+            offset,
+            summary,
         });
     } catch (error) {
         logger.error('[UserPolls] Error:', error);
@@ -634,11 +774,11 @@ router.get('/polls/:guildId', async (req: Request, res: Response) => {
  */
 router.get('/polls/:pollId/voters', async (req: Request, res: Response) => {
     const pollId = req.params.pollId as string;
-    const optionIndex = parseInt(req.query.option as string);
+    const optionIndex = parseInt(req.query.option as string, 10);
     const forceRefresh = req.query.refresh === 'true';
 
-    if (!pollId) {
-        return res.status(400).json({ error: 'Poll ID is required' });
+    if (!pollId || !SNOWFLAKE_RE.test(pollId)) {
+        return res.status(400).json({ error: 'Valid poll ID is required' });
     }
 
     if (isNaN(optionIndex) || optionIndex < 0) {
@@ -666,7 +806,7 @@ router.get('/polls/:pollId/voters', async (req: Request, res: Response) => {
             .from('polls')
             .select('guild_id, options, settings, creator_id')
             .eq('message_id', pollId)
-            .single();
+            .maybeSingle();
 
         if (pollError || !poll) {
             return res.status(404).json({ error: 'Poll not found' });
@@ -677,40 +817,14 @@ router.get('/polls/:pollId/voters', async (req: Request, res: Response) => {
             return res.status(400).json({ error: 'Invalid option index' });
         }
 
-        // Check permission on the guild (poll creator always has access)
-        const isCreator = poll.creator_id === session.user_id;
-        if (!isCreator) {
-            const cachedPerm = getCachedPermission(session.user_id, poll.guild_id as string);
-            if (cachedPerm === false) {
-                return res.status(403).json({ error: 'You need Manage Server permission' });
-            }
-
-            // If no cached permission, verify with Discord API
-            if (cachedPerm === null) {
-                const discordResponse = await fetch(`${DISCORD_API_BASE}/users/@me/guilds`, {
-                    headers: { Authorization: `Bearer ${session.access_token}` },
-                });
-
-                if (!discordResponse.ok) {
-                    return res.status(503).json({ error: 'Discord API temporarily unavailable' });
-                }
-
-                const userGuilds: DiscordGuild[] = await discordResponse.json();
-                const targetGuild = userGuilds.find(g => g.id === poll.guild_id);
-
-                if (!targetGuild) {
-                    setCachedPermission(session.user_id, poll.guild_id as string, false);
-                    return res.status(403).json({ error: 'You are not a member of this server' });
-                }
-
-                const permissions = BigInt(targetGuild.permissions);
-                const hasManageGuild = (permissions & BigInt(MANAGE_GUILD)) !== BigInt(0) || targetGuild.owner;
-                setCachedPermission(session.user_id, poll.guild_id as string, hasManageGuild);
-
-                if (!hasManageGuild) {
-                    return res.status(403).json({ error: 'You need Manage Server permission' });
-                }
-            }
+        // Verify user is a current member of the guild and either has Manage Server or created the poll
+        const perm = await verifyPollReadAccessForSession(
+            session,
+            poll.guild_id as string,
+            poll.creator_id as string | null
+        );
+        if (!perm.ok) {
+            return res.status(perm.status).json({ error: perm.error });
         }
 
         // Fetch voters with enrichment
@@ -739,8 +853,8 @@ router.get('/polls/:pollId/export', async (req: Request, res: Response) => {
     const pollId = req.params.pollId as string;
     const forceRefresh = req.query.refresh === 'true';
 
-    if (!pollId) {
-        return res.status(400).json({ error: 'Poll ID is required' });
+    if (!pollId || !SNOWFLAKE_RE.test(pollId)) {
+        return res.status(400).json({ error: 'Valid poll ID is required' });
     }
 
     const session = await getSession(req);
@@ -754,53 +868,24 @@ router.get('/polls/:pollId/export', async (req: Request, res: Response) => {
             .from('polls')
             .select('guild_id, options, title, settings, creator_id')
             .eq('message_id', pollId)
-            .single();
+            .maybeSingle();
 
         if (pollError || !poll) {
             return res.status(404).json({ error: 'Poll not found' });
         }
 
-        // Check permission on the guild (poll creator always has access)
-        const isCreator = poll.creator_id === session.user_id;
-        if (!isCreator) {
-            const cachedPerm = getCachedPermission(session.user_id, poll.guild_id as string);
-            if (cachedPerm === false) {
-                return res.status(403).json({ error: 'You need Manage Server permission' });
-            }
-
-            // If no cached permission, verify with Discord API
-            if (cachedPerm === null) {
-                const discordResponse = await fetch(`${DISCORD_API_BASE}/users/@me/guilds`, {
-                    headers: { Authorization: `Bearer ${session.access_token}` },
-                });
-
-                if (!discordResponse.ok) {
-                    return res.status(503).json({ error: 'Discord API temporarily unavailable' });
-                }
-
-                const userGuilds: DiscordGuild[] = await discordResponse.json();
-                const targetGuild = userGuilds.find(g => g.id === poll.guild_id);
-
-                if (!targetGuild) {
-                    setCachedPermission(session.user_id, poll.guild_id as string, false);
-                    return res.status(403).json({ error: 'You are not a member of this server' });
-                }
-
-                const permissions = BigInt(targetGuild.permissions);
-                const hasManageGuild = (permissions & BigInt(MANAGE_GUILD)) !== BigInt(0) || targetGuild.owner;
-                setCachedPermission(session.user_id, poll.guild_id as string, hasManageGuild);
-
-                if (!hasManageGuild) {
-                    return res.status(403).json({ error: 'You need Manage Server permission' });
-                }
-            }
+        // Verify user is a current member of the guild and either has Manage Server or created the poll
+        const perm = await verifyPollReadAccessForSession(
+            session,
+            poll.guild_id as string,
+            poll.creator_id as string | null
+        );
+        if (!perm.ok) {
+            return res.status(perm.status).json({ error: perm.error });
         }
 
-        // Get all vote data
-        const { data: votes, error: votesError } = await supabase
-            .from('votes')
-            .select('user_id, option_index, created_at')
-            .eq('poll_id', pollId);
+        // Get all vote data (paginated past PostgREST 1,000-row cap)
+        const { data: votes, error: votesError } = await fetchAllPollVotes(pollId);
 
         if (votesError) {
             return res.status(500).json({ error: 'Failed to fetch votes' });
@@ -811,45 +896,42 @@ router.get('/polls/:pollId/export', async (req: Request, res: Response) => {
                 csv: 'No votes found for this poll.',
                 filename: `poll_${pollId}_export.csv`,
                 total_votes: 0,
+                unique_voters: 0,
+                weighted_total: 0,
             });
         }
 
-        // Enrich with voter data (use cached data if available)
+        // Enrich unique voters once via the shared member cache
         const options = poll.options as string[];
-        const voterDataMap = new Map<string, VoterInfo>();
+        const aggregation = aggregateVoteRows(votes, options.length);
+        const voterDataMap = await enrichUserIdsWithMemberInfo(
+            votes.map(v => v.user_id),
+            poll.guild_id as string,
+            forceRefresh
+        );
 
-        // Get unique option indices that have votes
-        const optionIndices = [...new Set(votes.map(v => v.option_index).filter((i): i is number => i !== null && i !== undefined))];
-
-        for (const optIndex of optionIndices) {
-            const guildId = poll.guild_id as string;
-            const voters = await fetchVoterData(pollId, optIndex, guildId, forceRefresh);
-            voters.forEach(v => voterDataMap.set(v.user_id, v));
-        }
-
-        // Build CSV
-        const headers = ['User ID', 'Username', 'Display Name', 'Nickname', 'Option Index', 'Option Label', 'Timestamp (ISO)'];
+        // Build CSV (formula-injection safe)
+        const headers = ['User ID', 'Username', 'Display Name', 'Nickname', 'Option Index', 'Option Label', 'Weight', 'Timestamp (ISO)'];
         const rows = votes.map(vote => {
             const voterInfo = voterDataMap.get(vote.user_id);
             const username = voterInfo?.username || 'Unknown';
             const displayName = voterInfo?.display_name || 'Unknown';
             const nickname = voterInfo?.nickname || 'N/A';
-            const optionLabel = options[vote.option_index] || 'Unknown Option';
-
-            // Escape double quotes for CSV
-            const safe = (str: string | null | undefined) => {
-                if (!str) return '';
-                return `"${str.replace(/"/g, '""')}"`;
-            };
+            const optIdx = vote.option_index ?? -1;
+            const optionLabel = (optIdx >= 0 && optIdx < options.length)
+                ? options[optIdx]
+                : 'Unknown Option';
+            const weight = vote.weight || 1; // same default as aggregateVoteRows
 
             return [
-                safe(vote.user_id),
-                safe(username),
-                safe(displayName),
-                safe(nickname),
-                vote.option_index,
-                safe(optionLabel),
-                safe(vote.created_at),
+                formatCsvCell(vote.user_id),
+                formatCsvCell(username),
+                formatCsvCell(displayName),
+                formatCsvCell(nickname),
+                optIdx,
+                formatCsvCell(optionLabel),
+                weight,
+                formatCsvCell(vote.created_at),
             ].join(',');
         });
 
@@ -861,7 +943,10 @@ router.get('/polls/:pollId/export', async (req: Request, res: Response) => {
         return res.json({
             csv,
             filename: `poll_${pollId}_export.csv`,
+            // Vote rows (one per chosen option); kept for compatibility.
             total_votes: votes.length,
+            unique_voters: aggregation.uniqueVoters,
+            weighted_total: aggregation.totalWeight,
         });
     } catch (error) {
         logger.error('[Export] Error:', error);
@@ -928,4 +1013,3 @@ router.post('/premium/refresh', async (req: Request, res: Response) => {
 });
 
 export const userPollsRouter = router;
-

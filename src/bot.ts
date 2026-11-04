@@ -1,4 +1,7 @@
-import { Client, Collection, GatewayIntentBits, Options, Partials, REST, Routes } from 'discord.js';
+// Copyright (c) 2026 Simple Solutions.
+// Licensed under the MIT License. See LICENSE in the project root for details.
+
+import { Client, Collection, GatewayIntentBits, Options, Partials } from 'discord.js';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -12,7 +15,7 @@ process.on('uncaughtException', (error) => {
     logger.error('[Global] Uncaught Exception:', error);
 });
 
-process.on('unhandledRejection', (reason: any, promise) => {
+process.on('unhandledRejection', (reason: any) => {
     logger.error('[Global] Unhandled Rejection:', reason);
 });
 
@@ -72,13 +75,14 @@ if (!fs.existsSync(foldersPath)) {
     fs.mkdirSync(foldersPath);
 }
 
-const commandFiles = fs.readdirSync(foldersPath).filter(file => (file.endsWith('.ts') || file.endsWith('.js')) && !file.endsWith('.d.ts'));
+const commandFiles = fs.readdirSync(foldersPath).filter(
+    file => (file.endsWith('.ts') || file.endsWith('.js')) && !file.endsWith('.d.ts') && !file.endsWith('.test.ts')
+);
 
 // Load Commands
 for (const file of commandFiles) {
     const filePath = path.join(foldersPath, file);
     // Dynamic import
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const command = require(filePath).default || require(filePath);
 
     if ('data' in command && 'execute' in command) {
@@ -92,7 +96,9 @@ for (const file of commandFiles) {
 // Load Events
 const eventsPath = path.join(__dirname, 'events');
 if (fs.existsSync(eventsPath)) {
-    const eventFiles = fs.readdirSync(eventsPath).filter(file => (file.endsWith('.ts') || file.endsWith('.js')) && !file.endsWith('.d.ts'));
+    const eventFiles = fs.readdirSync(eventsPath).filter(
+        file => (file.endsWith('.ts') || file.endsWith('.js')) && !file.endsWith('.d.ts') && !file.endsWith('.test.ts')
+    );
     for (const file of eventFiles) {
         const filePath = path.join(eventsPath, file);
         const event = require(filePath).default || require(filePath);
@@ -113,15 +119,16 @@ if (!token) {
     process.exit(1);
 }
 
-client.login(token).then(() => {
-    // Initialize Guild Sync Service
-    const { GuildSyncService } = require('./services/GuildSyncService');
-    new GuildSyncService(client);
-    // Initialize Poll Scheduler (auto-close)
-    const { PollSchedulerService } = require('./services/PollSchedulerService');
-    new PollSchedulerService(client);
-}).catch(err => {
+// Register shard-level background services BEFORE client.login() so their
+// Events.ClientReady listeners are attached before Discord emits ClientReady.
+import { GuildSyncService } from './services/GuildSyncService';
+import { PollSchedulerService } from './services/PollSchedulerService';
+new GuildSyncService(client);
+new PollSchedulerService(client);
+
+client.login(token).catch(err => {
     logger.error("Failed to login:", err);
+    process.exit(1);
 });
 
 export default client;

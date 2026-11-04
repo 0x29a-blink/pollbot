@@ -6,11 +6,17 @@ interface FilterButtonProps {
     children: React.ReactNode;
 }
 
-/** Segmented filter pill used across list views. */
+/**
+ * One segment of an M3 segmented control. Put several inside a
+ * `.segmented` container; `aria-pressed` carries the selected state.
+ */
 export const FilterButton: React.FC<FilterButtonProps> = ({ active, onClick, children }) => (
     <button
+        type="button"
+        aria-pressed={active}
         onClick={onClick}
-        className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${active ? 'bg-primary-strong text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+        className={`inline-flex items-center gap-1.5 h-[26px] px-3 rounded-control text-[13px] font-medium whitespace-nowrap transition-colors ${active ? 'bg-[#3a3a3a] text-ink' : 'text-muted hover:text-ink hover:bg-[var(--state-hover)]'
+            }`}
     >
         {children}
     </button>

@@ -1,6 +1,10 @@
+// Copyright (c) 2026 Simple Solutions.
+// Licensed under the MIT License. See LICENSE in the project root for details.
+
 import { ShardingManager } from 'discord.js';
 import { AutoPoster } from 'topgg-autoposter';
 import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
 import { logger } from './lib/logger';
 import { checkDbConnectionWithRetry } from './lib/db';
@@ -43,41 +47,91 @@ function startServices() {
     const extension = isTsNode ? 'ts' : 'js';
     const botFile = path.join(__dirname, `bot.${extension}`);
     const renderServiceFile = path.join(__dirname, 'services', `renderService.${extension}`);
-
-    // 2. Spawn Render Service
-    logger.info('[Manager] Spawning Render Service...');
-
-    const renderService: ChildProcess = fork(renderServiceFile, [], {
-        execArgv: isTsNode ? ['-r', 'ts-node/register'] : []
-    });
-
-    renderService.on('spawn', () => {
-        logger.info('[Manager] Render Service process spawned.');
-    });
-
-    renderService.on('error', (err) => {
-        logger.error('[Manager] Render Service failed:', err);
-    });
-
-    // 2.5 Spawn Dashboard Service (Serves Frontend + Proxy)
-    logger.info('[Manager] Spawning Dashboard Service...');
     const dashboardServiceFile = path.join(__dirname, 'services', `DashboardService.${extension}`);
-    const dashboardService: ChildProcess = fork(dashboardServiceFile, [], {
-        execArgv: isTsNode ? ['-r', 'ts-node/register'] : [],
-        stdio: 'inherit' // Ensure stdout/stderr is visible
-    });
 
-    dashboardService.on('spawn', () => {
-        logger.info('[Manager] Dashboard Service process spawned.');
-    });
+    let shuttingDown = false;
 
-    dashboardService.on('error', (err) => {
-        logger.error('[Manager] Dashboard Service failed to spawn:', err);
-    });
+    const spawnSupervisedService = (
+        label: string,
+        filePath: string,
+        inheritStdio = false
+    ): { stop: () => void } => {
+        let child: ChildProcess | null = null;
+        let restartTimer: NodeJS.Timeout | null = null;
+        let attempt = 0;
 
-    dashboardService.on('close', (code, signal) => {
-        logger.error(`[Manager] Dashboard Service exited with code ${code} and signal ${signal}`);
-    });
+        const launch = () => {
+            if (shuttingDown) return;
+            const startedAt = Date.now();
+            logger.info(`[Manager] Spawning ${label}...`);
+            const proc = fork(filePath, [], {
+                execArgv: isTsNode ? ['-r', 'ts-node/register'] : [],
+                ...(inheritStdio ? { stdio: 'inherit' as const } : {}),
+            });
+            child = proc;
+
+            proc.on('spawn', () => {
+                logger.info(`[Manager] ${label} process spawned.`);
+            });
+
+            proc.on('error', (err) => {
+                logger.error(`[Manager] ${label} failed:`, err);
+            });
+
+            proc.on('close', (code, signal) => {
+                if (child === proc) {
+                    child = null;
+                }
+                if (shuttingDown) return;
+                if (Date.now() - startedAt >= 60_000) {
+                    attempt = 0;
+                }
+                attempt++;
+                const delayMs = Math.min(2000 * 2 ** (attempt - 1), 30_000);
+                logger.error(`[Manager] ${label} exited (code=${code}, signal=${signal}). Respawning in ${delayMs / 1000}s...`);
+                restartTimer = setTimeout(() => {
+                    restartTimer = null;
+                    launch();
+                }, delayMs);
+                if (typeof restartTimer.unref === 'function') {
+                    restartTimer.unref();
+                }
+            });
+        };
+
+        launch();
+
+        return {
+            stop: () => {
+                if (restartTimer) {
+                    clearTimeout(restartTimer);
+                    restartTimer = null;
+                }
+                if (child) {
+                    child.kill();
+                    child = null;
+                }
+            },
+        };
+    };
+
+    // 2. Spawn & Supervise Render Service and (optionally) Dashboard Service
+    const renderSupervisor = spawnSupervisedService('Render Service', renderServiceFile, false);
+
+    const dashboardDir = path.join(__dirname, '..', 'dashboard');
+    const enableDashboardEnv = process.env.ENABLE_DASHBOARD;
+    const shouldStartDashboard = enableDashboardEnv === 'false'
+        ? false
+        : enableDashboardEnv === 'true' || fs.existsSync(dashboardDir);
+
+    let dashboardSupervisor: { stop: () => void } | null = null;
+    if (shouldStartDashboard) {
+        dashboardSupervisor = spawnSupervisedService('Dashboard Service', dashboardServiceFile, true);
+    } else if (enableDashboardEnv === 'false') {
+        logger.info('[Manager] Dashboard Service disabled via ENABLE_DASHBOARD=false.');
+    } else {
+        logger.info('[Manager] dashboard/ directory not present — running in bot-only mode (Dashboard Service skipped).');
+    }
 
     // 3. Spawn Shards (Delayed to allow Render Service to warm up)
     // Ideally we wait for a signal, but a short delay is usually sufficient/simpler for now.
@@ -147,19 +201,17 @@ function startServices() {
     }, 2000); // Wait 2s for Render Service
 
     // Handle Shutdown
-    process.on('SIGINT', () => {
-        logger.info('[Manager] SIGINT received. Killing Services...');
-        renderService.kill();
-        dashboardService.kill();
+    const handleShutdown = (signal: string) => {
+        if (shuttingDown) return;
+        shuttingDown = true;
+        logger.info(`[Manager] ${signal} received. Killing Services...`);
+        renderSupervisor.stop();
+        dashboardSupervisor?.stop();
         process.exit(0);
-    });
+    };
 
-    process.on('SIGTERM', () => {
-        logger.info('[Manager] SIGTERM received. Killing Services...');
-        renderService.kill();
-        dashboardService.kill();
-        process.exit(0);
-    });
+    process.on('SIGINT', () => handleShutdown('SIGINT'));
+    process.on('SIGTERM', () => handleShutdown('SIGTERM'));
 } // End of startServices function
 
 // Spawn shards with retries. The manager fetches the recommended shard count from

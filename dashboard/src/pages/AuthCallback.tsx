@@ -1,40 +1,42 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Loader2, CheckCircle, XCircle } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { CheckCircle2, AlertCircle } from 'lucide-react';
+
+function getOAuthErrorMessage(error: string): string {
+    switch (error) {
+        case 'oauth_denied':
+            return 'You denied access to your Discord account.';
+        case 'invalid_state':
+            return 'Security check failed. Please try again.';
+        case 'no_code':
+            return 'No authorization code received.';
+        case 'token_exchange_failed':
+            return 'Failed to complete authentication with Discord.';
+        case 'user_fetch_failed':
+            return 'Failed to retrieve your Discord profile.';
+        default:
+            return 'An unexpected error occurred.';
+    }
+}
 
 export const AuthCallback: React.FC = () => {
     const [searchParams] = useSearchParams();
-    const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing');
-    const [errorMessage, setErrorMessage] = useState('');
+    const oauthError = useMemo(() => {
+        const err = searchParams.get('error');
+        return err ? getOAuthErrorMessage(err) : null;
+    }, [searchParams]);
+
+    const [verifyState, setVerifyState] = useState<'processing' | 'success' | 'error'>('processing');
+    const [verifyError, setVerifyError] = useState('');
     const navigate = useNavigate();
 
     useEffect(() => {
-        const error = searchParams.get('error');
-
-        if (error) {
-            setStatus('error');
-            switch (error) {
-                case 'oauth_denied':
-                    setErrorMessage('You denied access to your Discord account.');
-                    break;
-                case 'invalid_state':
-                    setErrorMessage('Security check failed. Please try again.');
-                    break;
-                case 'no_code':
-                    setErrorMessage('No authorization code received.');
-                    break;
-                case 'token_exchange_failed':
-                    setErrorMessage('Failed to complete authentication with Discord.');
-                    break;
-                case 'user_fetch_failed':
-                    setErrorMessage('Failed to retrieve your Discord profile.');
-                    break;
-                default:
-                    setErrorMessage('An unexpected error occurred.');
-            }
+        if (oauthError) {
             return;
         }
+
+        let redirectTimer: ReturnType<typeof setTimeout> | null = null;
+        let cancelled = false;
 
         // With httpOnly cookies, we don't get a session token in URL
         // The cookie is already set by the backend, just verify the session works
@@ -44,65 +46,70 @@ export const AuthCallback: React.FC = () => {
                     credentials: 'include', // Send cookies
                 });
 
+                if (cancelled) return;
+
                 if (res.ok) {
-                    setStatus('success');
+                    setVerifyState('success');
                     // Redirect to dashboard after a brief delay
-                    setTimeout(() => {
+                    redirectTimer = setTimeout(() => {
                         navigate('/dashboard', { replace: true });
                     }, 1500);
                 } else {
-                    setStatus('error');
-                    setErrorMessage('Session verification failed. Please try again.');
+                    setVerifyState('error');
+                    setVerifyError('Session verification failed. Please try again.');
                 }
-            } catch (err) {
-                setStatus('error');
-                setErrorMessage('Network error. Please try again.');
+            } catch {
+                if (!cancelled) {
+                    setVerifyState('error');
+                    setVerifyError('Network error. Please try again.');
+                }
             }
         };
 
-        verifySession();
-    }, [searchParams, navigate]);
+        void verifySession();
+        return () => {
+            cancelled = true;
+            if (redirectTimer) clearTimeout(redirectTimer);
+        };
+    }, [oauthError, navigate]);
+
+    const status = oauthError ? 'error' : verifyState;
+    const errorMessage = oauthError || verifyError;
 
     return (
-        <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
-            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-indigo-900/20 via-slate-900/50 to-slate-950 -z-10" />
-
-            <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.5 }}
-                className="glass-panel p-8 w-full max-w-md mx-4 text-center"
-            >
+        <div className="min-h-screen bg-ground flex items-center justify-center px-4 py-12">
+            <main className="w-full max-w-[380px] panel px-6 sm:px-8 py-8" aria-live="polite">
                 {status === 'processing' && (
-                    <>
-                        <Loader2 className="w-16 h-16 text-indigo-400 animate-spin mx-auto mb-4" />
-                        <h1 className="text-2xl font-bold text-white">Signing you in...</h1>
-                        <p className="text-gray-400 mt-2">Please wait while we complete authentication.</p>
-                    </>
+                    <div role="status">
+                        <div className="w-6 h-6 border-2 border-brand border-t-transparent rounded-full animate-spin" aria-hidden="true" />
+                        <h1 className="font-[family-name:var(--font-display)] text-xl leading-7 font-semibold text-ink mt-5">Signing you in…</h1>
+                        <p className="text-sm text-muted mt-1">Checking your Discord session.</p>
+                    </div>
                 )}
 
                 {status === 'success' && (
-                    <>
-                        <CheckCircle className="w-16 h-16 text-emerald-400 mx-auto mb-4" />
-                        <h1 className="text-2xl font-bold text-white">Welcome!</h1>
-                        <p className="text-gray-400 mt-2">Redirecting to dashboard...</p>
-                    </>
+                    <div>
+                        <CheckCircle2 className="w-6 h-6 text-positive" aria-hidden="true" />
+                        <h1 className="font-[family-name:var(--font-display)] text-xl leading-7 font-semibold text-ink mt-5">Signed in</h1>
+                        <p className="text-sm text-muted mt-1">Taking you to your dashboard…</p>
+                    </div>
                 )}
 
                 {status === 'error' && (
-                    <>
-                        <XCircle className="w-16 h-16 text-red-400 mx-auto mb-4" />
-                        <h1 className="text-2xl font-bold text-white">Authentication Failed</h1>
-                        <p className="text-red-400 mt-2">{errorMessage}</p>
+                    <div role="alert">
+                        <AlertCircle className="w-6 h-6 text-negative" aria-hidden="true" />
+                        <h1 className="font-[family-name:var(--font-display)] text-xl leading-7 font-semibold text-ink mt-5">Couldn&apos;t sign you in</h1>
+                        <p className="text-sm text-muted mt-1">{errorMessage}</p>
                         <button
+                            type="button"
                             onClick={() => navigate('/login')}
-                            className="mt-6 btn-primary"
+                            className="btn btn-primary mt-6"
                         >
-                            Try Again
+                            Try again
                         </button>
-                    </>
+                    </div>
                 )}
-            </motion.div>
+            </main>
         </div>
     );
 };

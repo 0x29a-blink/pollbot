@@ -9,21 +9,38 @@ dotenv.config();
 
 I18n.init();
 
-const PORT = process.env.RENDER_SERVICE_PORT ? parseInt(process.env.RENDER_SERVICE_PORT) : 3000;
+const HOST = process.env.RENDER_SERVICE_HOST || '127.0.0.1';
+const PORT = process.env.RENDER_SERVICE_PORT ? parseInt(process.env.RENDER_SERVICE_PORT, 10) : 3000;
+const MAX_BODY_BYTES = 2 * 1024 * 1024; // 2 MB cap
 
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) => {
     if (req.method === 'POST' && req.url === '/render') {
-        let body = '';
-        req.on('data', chunk => {
-            body += chunk.toString();
+        const chunks: Buffer[] = [];
+        let totalBytes = 0;
+        let aborted = false;
+
+        req.on('data', (chunk: Buffer) => {
+            if (aborted) return;
+            totalBytes += chunk.length;
+            if (totalBytes > MAX_BODY_BYTES) {
+                aborted = true;
+                res.writeHead(413, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Payload too large' }));
+                req.destroy();
+                return;
+            }
+            chunks.push(chunk);
         });
 
         req.on('end', async () => {
+            if (aborted) return;
+            const body = Buffer.concat(chunks).toString('utf8');
+
             // 1. Parse Data
             let data;
             try {
                 data = JSON.parse(body);
-            } catch (e) {
+            } catch {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: 'Invalid JSON' }));
                 return;
@@ -57,8 +74,10 @@ const server = http.createServer(async (req, res) => {
 
             } catch (err: any) {
                 logger.error('[RenderService] Error:', err);
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: err.message }));
+                if (!res.headersSent) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Render failed' }));
+                }
             }
         });
     } else {
@@ -67,14 +86,20 @@ const server = http.createServer(async (req, res) => {
     }
 });
 
-server.listen(PORT, () => {
-    logger.info(`[RenderService] Listening on port ${PORT}`);
+server.listen(PORT, HOST, () => {
+    logger.info(`[RenderService] Listening on http://${HOST}:${PORT}`);
 });
 
 // Handle Shutdown
-process.on('SIGTERM', async () => {
-    logger.info('[RenderService] SIGTERM received. Shutting down...');
+let shuttingDown = false;
+const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info(`[RenderService] ${signal} received. Shutting down...`);
     await browserPool.destroy();
     server.close();
     process.exit(0);
-});
+};
+
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));

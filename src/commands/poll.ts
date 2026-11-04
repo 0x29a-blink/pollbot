@@ -1,10 +1,10 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, PermissionsBitField, GuildMember, AttachmentBuilder, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, MessageFlags, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionsBitField, AttachmentBuilder, MessageFlags } from 'discord.js';
 import { supabase } from '../lib/db';
 import { Renderer } from '../lib/renderer';
 import { logger } from '../lib/logger';
 import { PollManager } from '../lib/pollManager';
 import { I18n } from '../lib/i18n';
-import { upsertGuildRow, guildToRow } from '../lib/guildUtils';
+import { upsertGuildRow, guildToRow, memberHasManageGuild, memberHasRoleName } from '../lib/guildUtils';
 import { endsAtFromDuration } from '../lib/durationUtils';
 
 export default {
@@ -72,11 +72,9 @@ export default {
             return interaction.reply({ content: I18n.t('messages.common.guild_only', interaction.locale), flags: MessageFlags.Ephemeral });
         }
 
-        // 1. Permission Check
-        const member = interaction.member as GuildMember;
-        // Check for 'Poll Creator' role or 'Manage Guild' permission
-        const hasRole = member.roles.cache.some(r => r.name === 'Poll Creator');
-        const hasPermission = member.permissions.has(PermissionsBitField.Flags.ManageGuild);
+        // 1. Permission Check (safe when member is evicted from GuildMemberManager cache)
+        const hasRole = memberHasRoleName(interaction.guild, interaction.member, 'Poll Creator');
+        const hasPermission = memberHasManageGuild(interaction.member);
 
         if (!hasRole && !hasPermission) {
             return interaction.reply({
@@ -85,7 +83,7 @@ export default {
             });
         }
 
-        // 2. Input Parsing & Validation
+        // 2. Input Parsing & Synchronous Validation (run BEFORE DB queries so deferReply never misses Discord's 3s deadline)
         const title = interaction.options.getString('title', true);
         const descriptionRaw = interaction.options.getString('description') || '';
         const itemsRaw = interaction.options.getString('items', true);
@@ -101,29 +99,10 @@ export default {
         const allowExports = interaction.options.getBoolean('allow_exports') ?? true;
         const duration = interaction.options.getString('duration');
         const endsAt = duration ? endsAtFromDuration(duration) : null;
+        const userWantsButtons = interaction.options.getBoolean('close_button');
 
         const allowedRoles = targetRole ? [targetRole.id] : [];
         const voteWeights = {}; // Vote weights now managed via dashboard at pollbot.win
-
-        // Fetch Guild Settings
-        let serverAllowsButtons = true;
-        let serverLocale = 'en'; // Default to English if not set or not in guild
-
-        if (interaction.inGuild()) {
-            const { data: guildSettings } = await supabase
-                .from('guild_settings')
-                .select('allow_poll_buttons, locale')
-                .eq('guild_id', interaction.guildId)
-                .single();
-            if (guildSettings) {
-                serverAllowsButtons = guildSettings.allow_poll_buttons;
-                if (guildSettings.locale) serverLocale = guildSettings.locale;
-            }
-        }
-
-        const userWantsButtons = interaction.options.getBoolean('close_button');
-        // If server disables, force false. If server allows, use user choice (default true).
-        const allowClose = serverAllowsButtons ? (userWantsButtons ?? true) : false;
 
         // Title Limit
         if (title.length > 256) {
@@ -215,6 +194,23 @@ export default {
         await interaction.deferReply();
 
         try {
+            // Fetch Guild Settings after deferring so network latency never causes Unknown Interaction
+            let serverAllowsButtons = true;
+            let serverLocale = 'en';
+
+            const { data: guildSettings } = await supabase
+                .from('guild_settings')
+                .select('allow_poll_buttons, locale')
+                .eq('guild_id', interaction.guildId)
+                .maybeSingle();
+            if (guildSettings) {
+                serverAllowsButtons = guildSettings.allow_poll_buttons;
+                if (guildSettings.locale) serverLocale = guildSettings.locale;
+            }
+
+            // If server disables, force false. If server allows, use user choice (default true).
+            const allowClose = serverAllowsButtons ? (userWantsButtons ?? true) : false;
+
             // 3. Render Poll Image (Playwright)
             const resolvedTitle = await PollManager.resolveMentions(title, interaction.guild);
             const resolvedDescription = await PollManager.resolveMentions(description, interaction.guild);
@@ -230,52 +226,18 @@ export default {
 
             const attachment = new AttachmentBuilder(imageBuffer, { name: 'poll.png' });
 
-            // 4. Create Components
-            const components: ActionRowBuilder<any>[] = [];
-
-            // Row 1: Select Menu
-            const selectMenu = new StringSelectMenuBuilder()
-                .setCustomId('poll_vote')
-                .setPlaceholder(I18n.t('messages.manager.select_placeholder', serverLocale)) // Use Server Locale
-                .setMinValues(minVotes)
-                .setMaxValues(maxVotes)
-                .addOptions(
-                    items.map((item, index) =>
-                        new StringSelectMenuOptionBuilder()
-                            .setLabel(item.substring(0, 100))
-                            .setValue(index.toString())
-                            .setDescription(I18n.t('messages.manager.vote_option_desc', serverLocale, { index: index + 1 })) // Use Server Locale
-                    )
-                );
-
-            components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu));
-
-            // Row 2: Close Button (if enabled) & View Details Button
-            const row2 = new ActionRowBuilder<ButtonBuilder>();
-
-            if (allowClose) {
-                const closeButton = new ButtonBuilder()
-                    .setCustomId('poll_close')
-                    .setLabel(I18n.t('messages.manager.close_button', serverLocale)) // Use Server Locale
-                    .setStyle(ButtonStyle.Danger)
-                    .setEmoji('🔒');
-                row2.addComponents(closeButton);
-            }
-
-            // View Details Button (Always added if buttons allowed, or maybe just always?)
-            // User requested: "If the user has buttons enabled for polls it will add a 'View Details' button"
-            if (serverAllowsButtons) {
-                const viewButton = new ButtonBuilder()
-                    .setCustomId('view_details') // Static ID, we get ID from message context
-                    .setLabel(I18n.t('messages.manager.view_details_button', serverLocale))
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji('📊');
-                row2.addComponents(viewButton);
-            }
-
-            if (row2.components.length > 0) {
-                components.push(row2);
-            }
+            // 4. Create Components via centralized helper
+            const components = PollManager.buildPollComponents({
+                options: items,
+                settings: {
+                    min_votes: minVotes,
+                    max_votes: maxVotes,
+                    allow_close: allowClose,
+                },
+                active: true,
+                serverAllowsButtons,
+                serverLocale,
+            });
 
             // Send Message
             const message = await interaction.editReply({

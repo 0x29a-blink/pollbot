@@ -6,18 +6,49 @@
 const CSRF_COOKIE_NAME = 'csrf_token';
 const CSRF_HEADER_NAME = 'x-csrf-token';
 
+let inflightCsrfFetch: Promise<string | null> | null = null;
+
 /**
  * Get CSRF token from cookie
  */
 export function getCsrfToken(): string | null {
     const cookies = document.cookie.split(';');
     for (const cookie of cookies) {
-        const [name, value] = cookie.trim().split('=');
+        const trimmed = cookie.trim();
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx === -1) continue;
+        const name = trimmed.slice(0, eqIdx);
+        const value = trimmed.slice(eqIdx + 1);
         if (name === CSRF_COOKIE_NAME) {
             return value;
         }
     }
     return null;
+}
+
+/**
+ * Ensures a CSRF token cookie is present, fetching `/api/auth/csrf` once if missing.
+ */
+export async function ensureCsrfTokenClient(): Promise<string | null> {
+    const existing = getCsrfToken();
+    if (existing) {
+        return existing;
+    }
+
+    if (!inflightCsrfFetch) {
+        inflightCsrfFetch = fetch('/api/auth/csrf', { credentials: 'include' })
+            .then(async (res) => {
+                if (!res.ok) return getCsrfToken();
+                const data = (await res.json().catch(() => null)) as { csrfToken?: string } | null;
+                return data?.csrfToken || getCsrfToken();
+            })
+            .catch(() => getCsrfToken())
+            .finally(() => {
+                inflightCsrfFetch = null;
+            });
+    }
+
+    return inflightCsrfFetch;
 }
 
 /**
@@ -33,7 +64,7 @@ export async function apiFetch(
     // Add CSRF token for mutation requests
     const method = (options.method || 'GET').toUpperCase();
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
-        const csrfToken = getCsrfToken();
+        const csrfToken = await ensureCsrfTokenClient();
         if (csrfToken) {
             headers.set(CSRF_HEADER_NAME, csrfToken);
         }

@@ -141,6 +141,7 @@
     "messages": {
         "common": {
             "error": "Ocurrió un error.",
+            "generic_error": "Ocurrió un error inesperado. Por favor intenta de nuevo.",
             "guild_only": "Este comando solo se puede usar en un servidor.",
             "no_permission": "Necesitas el permiso \"Gestionar Servidor\" para usar este comando.",
             "none": "Ninguno",
@@ -171,6 +172,7 @@
             "orphaned": "Esta encuesta ya no es válida.",
             "db_missing": "Esta encuesta ya no existe en la base de datos.",
             "perms_missing_bot": "Me faltan permisos para actualizar la imagen de la encuesta.",
+            "thread_fail": "Encuesta creada, pero falló al crear el hilo debido a falta de permisos.",
             "missing_bot_perms": "No puedo crear una encuesta en este canal porque me faltan los siguientes permisos: **{{permissions}}**\n\nPor favor pide a un administrador del servidor que me otorgue estos permisos en este canal."
         },
         "export": {
@@ -257,7 +259,7 @@
         "export_btn": "Exportar Lista",
         "export_restricted": "Las exportaciones y vistas detalladas están deshabilitadas para esta encuesta (o es privada). Solo el Creador de la Encuesta o Gestores de Encuestas pueden verlas.",
         "export_fail": "Falló la exportación de la lista.",
-        "export_content": "Votantes para la Opción: {option}\n\nID de Usuario | Nombre de Usuario | Nombre en Pantalla | Apodo\n--------------------------------------------------\n",
+        "export_content": "Votantes para la Opción: {{option}}\n\nID de Usuario | Nombre de Usuario | Nombre en Pantalla | Apodo\n--------------------------------------------------\n",
         "winner_upper": "GANADOR",
         "nav_first": "Primero",
         "nav_last": "Último",

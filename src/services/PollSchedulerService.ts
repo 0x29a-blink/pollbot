@@ -19,11 +19,19 @@ export class PollSchedulerService {
 
     constructor(client: Client) {
         this.client = client;
-        this.client.once(Events.ClientReady, () => {
+        const start = () => {
             const timer = setInterval(() => this.tick(), TICK_MS);
             timer.unref();
+            const initialTimer = setTimeout(() => this.tick(), 5_000);
+            initialTimer.unref();
             logger.info('[PollScheduler] Started (60s tick).');
-        });
+        };
+
+        if (this.client.isReady()) {
+            start();
+        } else {
+            this.client.once(Events.ClientReady, start);
+        }
     }
 
     private async tick() {
@@ -36,6 +44,7 @@ export class PollSchedulerService {
                 .lte('ends_at', new Date().toISOString())
                 .eq('active', true)
                 .not('ends_at', 'is', null)
+                .order('ends_at', { ascending: true })
                 .limit(BATCH_LIMIT);
             if (error || !due) {
                 if (error) logger.error('[PollScheduler] Query failed:', error);

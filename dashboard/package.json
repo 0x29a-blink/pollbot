@@ -2,6 +2,7 @@
   "name": "simple-poll-bot-dashboard",
   "private": true,
   "version": "0.0.0",
+  "license": "PolyForm-Shield-1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -26,7 +27,6 @@
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.11.0",
     "recharts": "^3.6.0",
-    "serve": "^14.2.4",
     "tailwindcss": "^4.1.18",
     "typescript": "~5.9.3",
     "vite": "^7.2.4"
@@ -37,6 +37,10 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "serve": "^14.2.4",
     "typescript-eslint": "^8.46.4"
+  },
+  "overrides": {
+    "compression": "^1.8.2"
   }
 }

@@ -1,47 +1,54 @@
-import React from 'react';
-import { HelpCircle } from 'lucide-react';
+import React, { useId } from 'react';
 
 interface ToggleProps {
     label: string;
+    /** Helper sentence shown under the label (and announced with the switch). */
     tooltip?: string;
     checked: boolean;
     onChange: (value: boolean) => void;
+    disabled?: boolean;
 }
 
 /**
- * Shared setting toggle (merged from the drifted CreatePollModal/EditPollModal
- * copies). Keyboard-operable switch with an optional hover tooltip.
+ * Fluent toggle switch row: label (and helper line) on the left, a 40x20
+ * switch on the right. On = PollBot blue with a white knob; off = outline
+ * with a grey knob. The label is clickable and the switch is keyboard
+ * operable (Space / Enter).
  */
-export const Toggle: React.FC<ToggleProps> = ({ label, tooltip, checked, onChange }) => (
-    <div className="relative group">
-        <button
-            type="button"
-            role="switch"
-            aria-checked={checked}
-            onClick={() => onChange(!checked)}
-            className="w-full flex items-center justify-between p-2.5 rounded-lg bg-slate-800/50 cursor-pointer hover:bg-slate-700/50 transition-colors border border-slate-700/50 text-left"
-        >
-            <div className="flex items-center gap-1.5">
-                <span className="text-sm text-slate-300">{label}</span>
+export const Toggle: React.FC<ToggleProps> = ({ label, tooltip, checked, onChange, disabled = false }) => {
+    const id = useId();
+    const helpId = `${id}-help`;
+    return (
+        <div className="flex items-start justify-between gap-4 py-3">
+            <div className="min-w-0">
+                <label htmlFor={id} className={`block text-sm text-ink ${disabled ? 'opacity-55' : 'cursor-pointer'}`}>
+                    {label}
+                </label>
                 {tooltip && (
-                    <HelpCircle className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-400" />
+                    <p id={helpId} className="text-xs text-faint mt-0.5">
+                        {tooltip}
+                    </p>
                 )}
             </div>
-            <div
-                className="w-10 h-6 rounded-full transition-colors flex items-center px-1 shrink-0"
-                style={{ backgroundColor: checked ? 'var(--color-primary-strong)' : '#475569' }}
+            <button
+                id={id}
+                type="button"
+                role="switch"
+                aria-checked={checked}
+                aria-describedby={tooltip ? helpId : undefined}
+                disabled={disabled}
+                onClick={() => onChange(!checked)}
+                className={`group relative shrink-0 mt-px w-10 h-5 rounded-full border transition-colors duration-150 disabled:opacity-55 disabled:cursor-not-allowed ${checked
+                    ? 'bg-brand border-brand hover:bg-brand-hover hover:border-brand-hover'
+                    : 'bg-transparent border-faint hover:bg-[var(--state-hover)]'
+                    }`}
             >
-                <div
-                    className="w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
-                    style={{ marginLeft: checked ? '16px' : '0px' }}
+                <span
+                    aria-hidden="true"
+                    className={`absolute top-1/2 -translate-y-1/2 rounded-full transition-all duration-150 ease-[cubic-bezier(0,0,0,1)] w-3 h-3 group-hover:w-3.5 group-hover:h-3.5 ${checked ? 'right-[3px] bg-white' : 'left-[3px] bg-muted'
+                        }`}
                 />
-            </div>
-        </button>
-        {tooltip && (
-            <div className="absolute left-0 right-0 bottom-full mb-2 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-300 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 shadow-xl">
-                {tooltip}
-                <div className="absolute left-4 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-slate-700" />
-            </div>
-        )}
-    </div>
-);
+            </button>
+        </div>
+    );
+};

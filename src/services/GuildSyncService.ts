@@ -5,6 +5,8 @@ import { shardIdForGuild } from '../lib/shardUtils';
 import { supabase } from '../lib/db';
 
 const PERIODIC_SYNC_MS = 60 * 60 * 1000; // hourly
+const RECONCILE_PAGE_SIZE = 1000; // PostgREST max rows per response
+const RECONCILE_UPDATE_CHUNK = 200; // ids per UPDATE ... WHERE id IN (...)
 
 export class GuildSyncService {
     private client: Client;
@@ -15,7 +17,7 @@ export class GuildSyncService {
     }
 
     private init() {
-        this.client.on(Events.ClientReady, () => {
+        const onReady = () => {
             logger.info('[GuildSync] Client ready, syncing all guilds...');
             this.syncAllGuilds().then(() => this.reconcileLeftGuilds());
 
@@ -26,7 +28,13 @@ export class GuildSyncService {
                 this.syncAllGuilds().then(() => this.reconcileLeftGuilds());
             }, PERIODIC_SYNC_MS);
             timer.unref();
-        });
+        };
+
+        if (this.client.isReady()) {
+            onReady();
+        } else {
+            this.client.once(Events.ClientReady, onReady);
+        }
 
         this.client.on(Events.GuildCreate, (guild) => {
             logger.info(`[GuildSync] Joined new guild: ${guild.name} (${guild.id})`);
@@ -68,17 +76,32 @@ export class GuildSyncService {
      * over rows and never mark guilds that simply live on another shard.
      */
     private async reconcileLeftGuilds() {
+        if (process.env.DEV_ONLY_MODE === 'true') {
+            return;
+        }
+
         const shard = this.client.shard;
         const shardIds = shard?.ids ?? [0];
         const shardCount = shard?.count ?? 1;
 
-        const { data: rows, error } = await supabase
-            .from('guilds')
-            .select('id')
-            .is('left_at', null);
-        if (error || !rows) {
-            logger.error('[GuildSync] Reconcile query failed:', error);
-            return;
+        // Page through every not-yet-left guild (PostgREST caps a single
+        // response at 1,000 rows; there are far more guilds than that).
+        // Deterministic id ordering keeps pages stable; rows marked left by
+        // this pass are only written after the full scan completes.
+        const rows: { id: string }[] = [];
+        for (let from = 0; ; from += RECONCILE_PAGE_SIZE) {
+            const { data, error } = await supabase
+                .from('guilds')
+                .select('id')
+                .is('left_at', null)
+                .order('id', { ascending: true })
+                .range(from, from + RECONCILE_PAGE_SIZE - 1);
+            if (error || !data) {
+                logger.error('[GuildSync] Reconcile query failed:', error);
+                return;
+            }
+            rows.push(...(data as { id: string }[]));
+            if (data.length < RECONCILE_PAGE_SIZE) break;
         }
 
         const stale = rows.filter(r =>
@@ -87,14 +110,24 @@ export class GuildSyncService {
         );
         if (stale.length === 0) return;
 
-        const { error: updErr } = await supabase
-            .from('guilds')
-            .update({ left_at: new Date().toISOString() })
-            .in('id', stale.map(r => r.id));
-        if (updErr) {
-            logger.error('[GuildSync] Failed to mark left guilds:', updErr);
-        } else {
-            logger.info(`[GuildSync] Marked ${stale.length} guild(s) as left during reconcile.`);
+        // Chunk the update so a large backlog doesn't overflow the URL
+        // (.in() is encoded into the query string).
+        const leftAt = new Date().toISOString();
+        let marked = 0;
+        for (let i = 0; i < stale.length; i += RECONCILE_UPDATE_CHUNK) {
+            const ids = stale.slice(i, i + RECONCILE_UPDATE_CHUNK).map(r => r.id);
+            const { error: updErr } = await supabase
+                .from('guilds')
+                .update({ left_at: leftAt })
+                .in('id', ids);
+            if (updErr) {
+                logger.error('[GuildSync] Failed to mark left guilds:', updErr);
+            } else {
+                marked += ids.length;
+            }
+        }
+        if (marked > 0) {
+            logger.info(`[GuildSync] Marked ${marked} guild(s) as left during reconcile.`);
         }
     }
 

@@ -1,15 +1,17 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-    XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
-    AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+    XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+    LineChart, Line, BarChart, Bar,
 } from 'recharts';
-import {
-    ArrowLeft, Search, CheckCircle, XCircle, Clock, Users, Heart, Flame,
-    Trophy, Globe, CalendarDays, Megaphone, Activity, RefreshCw,
-} from 'lucide-react';
 import { apiFetch } from '../utils/api';
-import { FilterButton } from '../components/ui/FilterButton';
+import { AppShell } from '../components/shell/AppShell';
+import { AdminSidebar } from '../components/shell/Sidebars';
+import { Avatar, Dash, InlineError, Kpi, KpiStrip, PageHeader, Panel, SearchField, ShareBar } from '../components/ui/primitives';
+import { ChartBody, DotLegend, Segmented } from '../components/admin/adminUi';
+import { fmtDayUTC, hourLabel, countAxis } from '../components/admin/adminFormat';
+import { axisProps, chart, gridProps, seriesPalette, tooltipProps } from '../lib/chartTheme';
+import { fmtCount, fmtDateTime, fmtPct, fmtRelative, toNum } from '../lib/format';
 
 // ---------------------------------------------------------------------------
 // Types mirroring the /api/admin/vote-analytics and /api/admin/voters payloads
@@ -54,24 +56,25 @@ interface DirectoryRow {
 
 type SourceFilter = 'all' | 'topgg' | 'discordforge';
 type SortMode = 'votes' | 'streak' | 'weighted' | 'recent';
+type Days = 7 | 30 | 90 | 365;
 
 const SOURCE_LABELS: Record<string, string> = { topgg: 'Top.gg', discordforge: 'DiscordForge' };
-const SOURCE_COLORS: Record<string, string> = { topgg: '#fb7185', discordforge: '#818cf8' };
+const SOURCE_COLORS: Record<string, string> = { topgg: seriesPalette[0], discordforge: seriesPalette[1] };
 const WEEKDAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const PAGE_SIZE = 25;
+const PLOT_H = 200;
+const LIST_ROWS = 8;
 
-const TOOLTIP_STYLE = { backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff' } as const;
-
-const fmtDay = (day: string) =>
-    new Date(day).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+const sourcesText = (sources: string[] | null | undefined) => (sources ?? []).map(s => SOURCE_LABELS[s] ?? s).join(' · ');
 
 // ---------------------------------------------------------------------------
 
+/** Bot-list voting (Top.gg, DiscordForge): trends, who votes, premium status. */
 export const VotersView: React.FC = () => {
     const navigate = useNavigate();
 
     // Shared filters
-    const [days, setDays] = useState<7 | 30 | 90 | 365>(30);
+    const [days, setDays] = useState<Days>(30);
     const [source, setSource] = useState<SourceFilter>('all');
 
     // Analytics bundle
@@ -80,15 +83,19 @@ export const VotersView: React.FC = () => {
     const [recentVotes, setRecentVotes] = useState<RecentVote[]>([]);
     const [analyticsLoading, setAnalyticsLoading] = useState(true);
     const [analyticsFailed, setAnalyticsFailed] = useState(false);
+    const [analyticsTry, setAnalyticsTry] = useState(0);
 
     // Voter directory
     const [rows, setRows] = useState<DirectoryRow[]>([]);
-    const [total, setTotal] = useState(0);
+    const [total, setTotal] = useState<number | null>(null);
     const [offset, setOffset] = useState(0);
     const [sort, setSort] = useState<SortMode>('votes');
     const [searchInput, setSearchInput] = useState('');
     const [search, setSearch] = useState('');
     const [dirLoading, setDirLoading] = useState(true);
+    const [dirFailed, setDirFailed] = useState(false);
+    const [dirTry, setDirTry] = useState(0);
+    const [nowMs, setNowMs] = useState(() => Date.now());
 
     useEffect(() => {
         const t = setTimeout(() => setSearch(searchInput.trim()), 300);
@@ -118,9 +125,9 @@ export const VotersView: React.FC = () => {
             }
         })();
         return () => { cancelled = true; };
-    }, [days, source]);
+    }, [days, source, analyticsTry]);
 
-    // Directory fetch
+    // Directory fetch (append = load more)
     const fetchDirectory = async (newOffset: number, append: boolean) => {
         setDirLoading(true);
         try {
@@ -128,411 +135,424 @@ export const VotersView: React.FC = () => {
             if (source !== 'all') params.set('source', source);
             if (search) params.set('search', search);
             const res = await apiFetch(`/api/admin/voters?${params}`);
-            if (res.ok) {
-                const data = await res.json();
-                setTotal(data.total ?? 0);
-                setRows(prev => (append ? [...prev, ...(data.rows ?? [])] : (data.rows ?? [])));
-                setOffset(newOffset);
-            }
+            if (!res.ok) { setDirFailed(true); return; }
+            const data = await res.json();
+            setNowMs(Date.now());
+            setTotal(toNum(data.total) ?? 0);
+            setRows(prev => (append ? [...prev, ...(data.rows ?? [])] : (data.rows ?? [])));
+            setOffset(newOffset);
+            setDirFailed(false);
         } catch (err) {
             console.error('Error fetching voter directory:', err);
+            setDirFailed(true);
         } finally {
             setDirLoading(false);
         }
     };
 
     useEffect(() => {
-        fetchDirectory(0, false);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [days, source, sort, search]);
+        let cancelled = false;
+        (async () => {
+            setDirLoading(true);
+            try {
+                const params = new URLSearchParams({ days: String(days), sort, limit: String(PAGE_SIZE), offset: '0' });
+                if (source !== 'all') params.set('source', source);
+                if (search) params.set('search', search);
+                const res = await apiFetch(`/api/admin/voters?${params}`);
+                if (cancelled) return;
+                if (!res.ok) { setDirFailed(true); return; }
+                const data = await res.json();
+                if (cancelled) return;
+                setNowMs(Date.now());
+                setTotal(toNum(data.total) ?? 0);
+                setRows(data.rows ?? []);
+                setOffset(0);
+                setDirFailed(false);
+            } catch (err) {
+                console.error('Error fetching voter directory:', err);
+                if (!cancelled) setDirFailed(true);
+            } finally {
+                if (!cancelled) setDirLoading(false);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [days, source, sort, search, dirTry]);
 
     // Derived chart data --------------------------------------------------
 
-    const historyByDay = React.useMemo(() => {
-        const byDay = new Map<string, { date: string; topgg: number; discordforge: number }>();
+    const visibleSources = source === 'all' ? ['topgg', 'discordforge'] as const : [source] as const;
+
+    const historyByDay = useMemo(() => {
+        const byDay = new Map<string, { day: string; label: string; topgg: number; discordforge: number }>();
         for (const r of analytics?.history ?? []) {
-            const entry = byDay.get(r.day) ?? { date: fmtDay(r.day), topgg: 0, discordforge: 0 };
-            entry[r.source] = Number(r.votes);
-            byDay.set(r.day, entry);
+            const key = String(r.day).slice(0, 10);
+            const entry = byDay.get(key) ?? { day: key, label: fmtDayUTC(key), topgg: 0, discordforge: 0 };
+            if (r.source === 'topgg' || r.source === 'discordforge') entry[r.source] = Number(r.votes);
+            byDay.set(key, entry);
         }
-        return [...byDay.values()];
+        return [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day));
     }, [analytics]);
 
     const newReturning = (analytics?.new_returning ?? []).map(r => ({
-        date: fmtDay(r.day), new: Number(r.new_voters), returning: Number(r.returning_voters),
+        label: fmtDayUTC(String(r.day)), new: Number(r.new_voters), returning: Number(r.returning_voters),
     }));
+    const hourly = (analytics?.hours ?? []).map(h => ({ label: hourLabel(Number(h.hour)), votes: Number(h.votes) }));
+    const weekdays = (analytics?.weekdays ?? []).map(w => ({ label: WEEKDAY_NAMES[w.dow - 1] ?? String(w.dow), votes: Number(w.votes) }));
 
-    const hourly = (analytics?.hours ?? []).map(h => ({ hour: `${h.hour}:00`, votes: Number(h.votes) }));
-    const weekdays = (analytics?.weekdays ?? []).map(w => ({ day: WEEKDAY_NAMES[w.dow - 1] ?? String(w.dow), votes: Number(w.votes) }));
-
-    const overlapData = analytics?.overlap ? [
-        { name: 'Top.gg only', value: Number(analytics.overlap.topgg_only), color: SOURCE_COLORS.topgg },
-        { name: 'DiscordForge only', value: Number(analytics.overlap.discordforge_only), color: SOURCE_COLORS.discordforge },
-        { name: 'Both lists', value: Number(analytics.overlap.both), color: '#34d399' },
-    ].filter(d => d.value > 0) : [];
+    const ov = analytics?.overlap;
+    const overlapRows = ov ? [
+        { name: 'Top.gg only', value: Number(ov.topgg_only) },
+        { name: 'DiscordForge only', value: Number(ov.discordforge_only) },
+        { name: 'Both lists', value: Number(ov.both) },
+    ] : [];
+    const overlapTotal = overlapRows.reduce((s, r) => s + r.value, 0);
+    const overlapMax = overlapRows.reduce((m, r) => Math.max(m, r.value), 0);
 
     const windowVotes = historyByDay.reduce((a, d) => a + d.topgg + d.discordforge, 0);
-    const windowVoters = analytics?.overlap
-        ? Number(analytics.overlap.topgg_only) + Number(analytics.overlap.discordforge_only) + Number(analytics.overlap.both)
-        : 0;
+    // The overlap block ignores the source filter on purpose, so derive the
+    // unique voters for the selected list from it: that list's own voters plus
+    // the ones on both lists.
+    const windowVoters = ov
+        ? source === 'topgg' ? Number(ov.topgg_only) + Number(ov.both)
+            : source === 'discordforge' ? Number(ov.discordforge_only) + Number(ov.both)
+                : overlapTotal
+        : null;
     const weekendShare = analytics?.weekend && Number(analytics.weekend.total_votes) > 0
-        ? Math.round((Number(analytics.weekend.weekend_votes) / Number(analytics.weekend.total_votes)) * 100)
-        : 0;
+        ? fmtPct(Number(analytics.weekend.weekend_votes), Number(analytics.weekend.total_votes))
+        : null;
+
+    const histZero = windowVotes === 0;
+    const nrZero = newReturning.every(r => r.new + r.returning === 0);
+    const hourZero = hourly.every(r => r.votes === 0);
+    const wdZero = weekdays.every(r => r.votes === 0);
+    const firstLoad = analyticsLoading && !analytics;
+    const retryAnalytics = () => { setAnalyticsFailed(false); setAnalyticsTry(n => n + 1); };
+    const chartError = analyticsFailed ? "Couldn't load voter analytics." : null;
+    const sourceLabel = source === 'all' ? 'Top.gg and DiscordForge' : SOURCE_LABELS[source];
+    const periodLabel = days === 365 ? 'the last year' : `the last ${days} days`;
 
     // ----------------------------------------------------------------------
 
     return (
-        <div className="min-h-screen pb-20 p-8">
-            <div className="container-wide animate-fade-in">
-                <button
-                    onClick={() => navigate('/dashboard')}
-                    className="flex items-center gap-2 text-slate-400 hover:text-white mb-6 transition-colors"
-                >
-                    <ArrowLeft className="w-4 h-4" />
-                    Back to Dashboard
-                </button>
+        <AppShell sidebar={<AdminSidebar />} mobileTitle="Voters">
+            <PageHeader title="Voters" subtitle={`Bot-list votes on ${sourceLabel} in ${periodLabel}`} />
 
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8">
-                    <div>
-                        <h1 className="text-3xl font-bold text-white mb-2">Voter Analytics</h1>
-                        <p className="text-slate-400">Bot-list voting across Top.gg &amp; DiscordForge — trends, voters, and premium status</p>
-                    </div>
+            {/* Page-level scope: period, then list */}
+            <div className="flex items-center gap-3 mb-4 overflow-x-auto [scrollbar-width:none] -mx-4 px-4 sm:mx-0 sm:px-0">
+                <Segmented
+                    label="Period"
+                    value={days}
+                    onChange={setDays}
+                    options={[{ value: 7, label: '7d' }, { value: 30, label: '30d' }, { value: 90, label: '90d' }, { value: 365, label: '1y' }]}
+                />
+                <Segmented
+                    label="List"
+                    value={source}
+                    onChange={setSource}
+                    options={[{ value: 'all', label: 'All lists' }, { value: 'topgg', label: 'Top.gg' }, { value: 'discordforge', label: 'DiscordForge' }]}
+                />
+            </div>
 
-                    <div className="flex flex-wrap gap-3">
-                        <div className="flex bg-slate-900/50 p-1 rounded-lg border border-slate-700">
-                            <FilterButton active={days === 7} onClick={() => setDays(7)}>7D</FilterButton>
-                            <FilterButton active={days === 30} onClick={() => setDays(30)}>30D</FilterButton>
-                            <FilterButton active={days === 90} onClick={() => setDays(90)}>90D</FilterButton>
-                            <FilterButton active={days === 365} onClick={() => setDays(365)}>1Y</FilterButton>
-                        </div>
-                        <div className="flex bg-slate-900/50 p-1 rounded-lg border border-slate-700">
-                            <FilterButton active={source === 'all'} onClick={() => setSource('all')}>All Lists</FilterButton>
-                            <FilterButton active={source === 'topgg'} onClick={() => setSource('topgg')}>Top.gg</FilterButton>
-                            <FilterButton active={source === 'discordforge'} onClick={() => setSource('discordforge')}>DiscordForge</FilterButton>
-                        </div>
-                    </div>
+            {analyticsFailed && !analytics ? (
+                <div className="panel">
+                    <InlineError message="Couldn't load voter analytics. Are migrations 25–27 applied?" onRetry={retryAnalytics} />
                 </div>
+            ) : (
+                <KpiStrip>
+                    <Kpi tone="brand" label="Votes" loading={firstLoad} value={fmtCount(windowVotes)} caption={periodLabel} />
+                    <Kpi tone="cyan" label="Unique voters" loading={firstLoad} value={windowVoters == null ? <span className="text-sm font-normal text-faint">Not available</span> : fmtCount(windowVoters)} caption={source === 'all' ? 'on either list' : `on ${SOURCE_LABELS[source]}`} />
+                    <Kpi tone="positive" label="Voting on both lists" loading={firstLoad} value={fmtCount(ov?.both ?? 0)} caption={overlapTotal ? `${fmtPct(Number(ov?.both ?? 0), overlapTotal)} of all voters` : periodLabel} />
+                    <Kpi tone="warning" label="Weekend share" loading={firstLoad} value={weekendShare ?? <span className="text-sm font-normal text-faint">No votes</span>} caption="Top.gg counts weekend votes twice" />
+                </KpiStrip>
+            )}
 
-                {analyticsFailed ? (
-                    <div className="glass-panel p-8 text-center text-sm text-slate-500 mb-8">
-                        Couldn't load voter analytics — are migrations 25–27 applied and are you signed in as an admin?
-                    </div>
-                ) : analyticsLoading && !analytics ? (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                        {[...Array(4)].map((_, i) => <div key={i} className="h-24 animate-pulse bg-slate-800/20 rounded-xl" />)}
-                    </div>
-                ) : (
-                    <>
-                        {/* Stat cards */}
-                        <section className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                            <StatCard icon={<Heart className="w-5 h-5" />} tint="rose" label={`Votes (${days}d)`} value={windowVotes.toLocaleString()} />
-                            <StatCard icon={<Users className="w-5 h-5" />} tint="indigo" label={`Unique voters (${days}d)`} value={windowVoters.toLocaleString()} />
-                            <StatCard icon={<Globe className="w-5 h-5" />} tint="emerald" label="Voting on both lists" value={(analytics?.overlap?.both ?? 0).toLocaleString()} />
-                            <StatCard icon={<CalendarDays className="w-5 h-5" />} tint="amber" label="Weekend vote share" value={`${weekendShare}%`} sub="Top.gg weekends count 2x" />
-                        </section>
+            {/* Row 1: votes over time + new vs returning */}
+            <section className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4" aria-label="Trends">
+                <Panel
+                    title="Votes per day"
+                    meta="(UTC)"
+                    className="min-w-0"
+                    bodyClassName="px-5 pb-4"
+                    actions={visibleSources.length > 1 ? <DotLegend items={visibleSources.map(s => ({ label: SOURCE_LABELS[s], color: SOURCE_COLORS[s] }))} /> : undefined}
+                >
+                    <ChartBody height={PLOT_H} loading={firstLoad} error={chartError} onRetry={retryAnalytics} empty={histZero} emptyText={`No votes in ${periodLabel}.`}>
+                        <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={historyByDay} margin={{ top: 8, right: 4, bottom: 0, left: -8 }}>
+                                <CartesianGrid {...gridProps} />
+                                <XAxis dataKey="label" {...axisProps} interval="preserveStartEnd" minTickGap={28} />
+                                <YAxis {...axisProps} width={44} {...countAxis(Math.max(0, ...historyByDay.map(r => Math.max(source === 'discordforge' ? 0 : r.topgg, source === 'topgg' ? 0 : r.discordforge))))} />
+                                <Tooltip {...tooltipProps} cursor={{ stroke: chart.grid }} formatter={((v: unknown, n: unknown) => [fmtCount(v), String(n)]) as never} />
+                                {visibleSources.map(s => (
+                                    <Line key={s} type="linear" dataKey={s} name={SOURCE_LABELS[s]} stroke={source === 'all' ? SOURCE_COLORS[s] : chart.data} strokeWidth={2} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} isAnimationActive={false} />
+                                ))}
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </ChartBody>
+                </Panel>
 
-                        {/* Row 1: votes over time + new vs returning */}
-                        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                            <ChartPanel title="Votes Over Time" subtitle={`Per list, last ${days} days`} icon={<Heart className="w-5 h-5" />} tint="rose">
-                                <ResponsiveContainer width="99%" height={240}>
-                                    <AreaChart data={historyByDay}>
-                                        <defs>
-                                            <linearGradient id="gTopgg" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="5%" stopColor={SOURCE_COLORS.topgg} stopOpacity={0.3} />
-                                                <stop offset="95%" stopColor={SOURCE_COLORS.topgg} stopOpacity={0} />
-                                            </linearGradient>
-                                            <linearGradient id="gForge" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="5%" stopColor={SOURCE_COLORS.discordforge} stopOpacity={0.3} />
-                                                <stop offset="95%" stopColor={SOURCE_COLORS.discordforge} stopOpacity={0} />
-                                            </linearGradient>
-                                        </defs>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                                        <XAxis dataKey="date" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
-                                        <YAxis stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
-                                        <Tooltip contentStyle={TOOLTIP_STYLE} />
-                                        <Legend wrapperStyle={{ fontSize: 12 }} />
-                                        <Area type="monotone" dataKey="topgg" name="Top.gg" stackId="v" stroke={SOURCE_COLORS.topgg} strokeWidth={2} fill="url(#gTopgg)" />
-                                        <Area type="monotone" dataKey="discordforge" name="DiscordForge" stackId="v" stroke={SOURCE_COLORS.discordforge} strokeWidth={2} fill="url(#gForge)" />
-                                    </AreaChart>
-                                </ResponsiveContainer>
-                            </ChartPanel>
+                <Panel
+                    title="New and returning voters"
+                    meta="(UTC)"
+                    className="min-w-0"
+                    bodyClassName="px-5 pb-4"
+                    actions={<DotLegend items={[{ label: 'New', color: seriesPalette[0] }, { label: 'Returning', color: seriesPalette[1] }]} />}
+                >
+                    <ChartBody height={PLOT_H} loading={firstLoad} error={chartError} onRetry={retryAnalytics} empty={nrZero} emptyText={`No voters in ${periodLabel}.`}>
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={newReturning} margin={{ top: 8, right: 4, bottom: 0, left: -8 }}>
+                                <CartesianGrid {...gridProps} />
+                                <XAxis dataKey="label" {...axisProps} interval="preserveStartEnd" minTickGap={28} />
+                                <YAxis {...axisProps} width={44} {...countAxis(Math.max(0, ...newReturning.map(r => r.new + r.returning)))} />
+                                <Tooltip {...tooltipProps} formatter={((v: unknown, n: unknown) => [fmtCount(v), String(n)]) as never} />
+                                {/* 1px surface-coloured stroke = the seam between stacked segments */}
+                                <Bar dataKey="new" name="New" stackId="nr" fill={seriesPalette[0]} stroke="#2e3139" strokeWidth={1} isAnimationActive={false} />
+                                <Bar dataKey="returning" name="Returning" stackId="nr" fill={seriesPalette[1]} stroke="#2e3139" strokeWidth={1} radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </ChartBody>
+                </Panel>
+            </section>
 
-                            <ChartPanel title="New vs Returning Voters" subtitle="First-ever vote vs repeat voters, per day" icon={<Users className="w-5 h-5" />} tint="emerald">
-                                <ResponsiveContainer width="99%" height={240}>
-                                    <BarChart data={newReturning}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                                        <XAxis dataKey="date" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
-                                        <YAxis stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
-                                        <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(148,163,184,0.06)' }} />
-                                        <Legend wrapperStyle={{ fontSize: 12 }} />
-                                        <Bar dataKey="new" name="New voters" stackId="nr" fill="#34d399" radius={[0, 0, 0, 0]} />
-                                        <Bar dataKey="returning" name="Returning" stackId="nr" fill="#818cf8" radius={[3, 3, 0, 0]} />
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            </ChartPanel>
-                        </section>
+            {/* Row 2: hourly + weekday + where votes come from */}
+            <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4" aria-label="Patterns">
+                <Panel title="Votes by hour" meta="(UTC)" className="min-w-0" bodyClassName="px-5 pb-4">
+                    <ChartBody height={PLOT_H} loading={firstLoad} error={chartError} onRetry={retryAnalytics} empty={hourZero} emptyText="No votes in this period.">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={hourly} margin={{ top: 8, right: 4, bottom: 0, left: -8 }} barCategoryGap={1}>
+                                <CartesianGrid {...gridProps} />
+                                <XAxis dataKey="label" {...axisProps} ticks={['00:00', '06:00', '12:00', '18:00']} />
+                                <YAxis {...axisProps} width={44} {...countAxis(Math.max(0, ...hourly.map(r => r.votes)))} />
+                                <Tooltip {...tooltipProps} formatter={((v: unknown) => [fmtCount(v), 'Votes']) as never} />
+                                <Bar dataKey="votes" fill={chart.data} radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </ChartBody>
+                </Panel>
 
-                        {/* Row 2: hourly + weekday + overlap */}
-                        <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                            <ChartPanel title="Votes by Hour" subtitle="UTC, all days in range" icon={<Clock className="w-5 h-5" />} tint="indigo">
-                                <ResponsiveContainer width="99%" height={200}>
-                                    <BarChart data={hourly}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                                        <XAxis dataKey="hour" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} interval={3} />
-                                        <YAxis stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} allowDecimals={false} />
-                                        <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(148,163,184,0.06)' }} />
-                                        <Bar dataKey="votes" name="Votes" fill="#818cf8" radius={[3, 3, 0, 0]} />
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            </ChartPanel>
+                <Panel title="Votes by weekday" meta="(UTC)" className="min-w-0" bodyClassName="px-5 pb-4">
+                    <ChartBody height={PLOT_H} loading={firstLoad} error={chartError} onRetry={retryAnalytics} empty={wdZero} emptyText="No votes in this period.">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={weekdays} margin={{ top: 8, right: 4, bottom: 0, left: -8 }}>
+                                <CartesianGrid {...gridProps} />
+                                <XAxis dataKey="label" {...axisProps} />
+                                <YAxis {...axisProps} width={44} {...countAxis(Math.max(0, ...weekdays.map(r => r.votes)))} />
+                                <Tooltip {...tooltipProps} formatter={((v: unknown) => [fmtCount(v), 'Votes']) as never} />
+                                <Bar dataKey="votes" fill={chart.data} radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </ChartBody>
+                </Panel>
 
-                            <ChartPanel title="Votes by Weekday" subtitle="Weekend votes count double on Top.gg" icon={<CalendarDays className="w-5 h-5" />} tint="amber">
-                                <ResponsiveContainer width="99%" height={200}>
-                                    <BarChart data={weekdays}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                                        <XAxis dataKey="day" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
-                                        <YAxis stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} allowDecimals={false} />
-                                        <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(148,163,184,0.06)' }} />
-                                        <Bar dataKey="votes" name="Votes" fill="#fbbf24" radius={[3, 3, 0, 0]} />
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            </ChartPanel>
-
-                            <ChartPanel title="Platform Overlap" subtitle={`Where voters vote, last ${days} days`} icon={<Globe className="w-5 h-5" />} tint="emerald">
-                                {overlapData.length === 0 ? (
-                                    <EmptyNote>No votes recorded in this window.</EmptyNote>
-                                ) : (
-                                    <div className="flex items-center gap-4">
-                                        <ResponsiveContainer width="60%" height={200}>
-                                            <PieChart>
-                                                <Pie data={overlapData} dataKey="value" nameKey="name" innerRadius={45} outerRadius={75} paddingAngle={3} stroke="none">
-                                                    {overlapData.map(d => <Cell key={d.name} fill={d.color} />)}
-                                                </Pie>
-                                                <Tooltip contentStyle={TOOLTIP_STYLE} />
-                                            </PieChart>
-                                        </ResponsiveContainer>
-                                        <div className="space-y-2 text-xs">
-                                            {overlapData.map(d => (
-                                                <div key={d.name} className="flex items-center gap-2">
-                                                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: d.color }} />
-                                                    <span className="text-slate-300">{d.name}</span>
-                                                    <span className="text-white font-bold ml-auto">{d.value.toLocaleString()}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </ChartPanel>
-                        </section>
-
-                        {/* Row 3: top voters + campaigns + live feed */}
-                        <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
-                            <ChartPanel title="Top Voters" subtitle={`Most bot-list votes, last ${days} days`} icon={<Trophy className="w-5 h-5" />} tint="amber">
-                                {topVoters.length === 0 ? (
-                                    <EmptyNote>No votes recorded yet.</EmptyNote>
-                                ) : (
-                                    <ul className="space-y-2">
-                                        {topVoters.slice(0, 8).map((v, i) => (
-                                            <li key={v.user_id} className="flex items-center gap-3 bg-slate-900/40 border border-slate-800 rounded-lg px-3 py-2">
-                                                <span className="text-xs font-bold text-slate-500 w-4">{i + 1}</span>
-                                                <Avatar url={v.avatar_url} />
-                                                <div className="min-w-0 flex-1">
-                                                    <p className="text-sm text-slate-200 truncate">{v.username || v.user_id}</p>
-                                                    <p className="text-[10px] text-slate-500">{v.sources.map(s => SOURCE_LABELS[s] ?? s).join(' · ')}</p>
-                                                </div>
-                                                <span className="text-sm font-bold text-white">{Number(v.votes).toLocaleString()}</span>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                )}
-                            </ChartPanel>
-
-                            <ChartPanel title="Vote Campaigns" subtitle="From ?source= params on Top.gg vote links" icon={<Megaphone className="w-5 h-5" />} tint="indigo">
+                <Panel title="Where voters vote" meta={periodLabel} className="min-w-0" bodyClassName="px-5 pb-4">
+                    <div style={{ height: PLOT_H }} className="flex flex-col">
+                        {chartError && !analytics ? (
+                            <div className="h-full flex items-center"><InlineError message={chartError} onRetry={retryAnalytics} className="w-full" /></div>
+                        ) : firstLoad ? (
+                            <div className="skeleton w-full h-full" />
+                        ) : (
+                            <>
+                                <ul>
+                                    {overlapRows.map(r => (
+                                        <li key={r.name} className="h-10 flex flex-col justify-center gap-1.5">
+                                            <div className="flex items-baseline gap-2 text-sm">
+                                                <span className="text-ink flex-1 truncate">{r.name}</span>
+                                                <span className="num text-ink">{fmtCount(r.value)}</span>
+                                                <span className="num text-xs text-faint w-12 text-right">{fmtPct(r.value, overlapTotal)}</span>
+                                            </div>
+                                            <ShareBar value={r.value} max={overlapMax} />
+                                        </li>
+                                    ))}
+                                </ul>
+                                <h3 className="text-[13px] text-faint mt-3 mb-1">Campaign links</h3>
                                 {(analytics?.campaigns ?? []).length === 0 ? (
-                                    <EmptyNote>No campaign-tagged votes in this window.</EmptyNote>
+                                    <p className="text-sm text-faint">No votes came from a tagged link.</p>
                                 ) : (
-                                    <ul className="space-y-2">
-                                        {(analytics?.campaigns ?? []).map(c => (
-                                            <li key={c.campaign} className="flex items-center justify-between bg-slate-900/40 border border-slate-800 rounded-lg px-3 py-2">
-                                                <span className="text-sm text-slate-300 font-mono truncate">{c.campaign}</span>
-                                                <span className="text-sm font-bold text-white">{Number(c.votes).toLocaleString()}</span>
+                                    <ul className="min-h-0 overflow-hidden">
+                                        {(analytics?.campaigns ?? []).slice(0, 2).map(c => (
+                                            <li key={c.campaign} className="h-7 flex items-center gap-2 text-sm">
+                                                <span className="font-mono text-[13px] text-muted truncate flex-1">{c.campaign}</span>
+                                                <span className="num text-ink">{fmtCount(c.votes)}</span>
                                             </li>
                                         ))}
                                     </ul>
                                 )}
-                            </ChartPanel>
+                            </>
+                        )}
+                    </div>
+                </Panel>
+            </section>
 
-                            <ChartPanel title="Latest Votes" subtitle="Most recent bot-list vote events" icon={<Activity className="w-5 h-5" />} tint="rose">
-                                {recentVotes.length === 0 ? (
-                                    <EmptyNote>Nothing yet — votes appear here in real time.</EmptyNote>
-                                ) : (
-                                    <ul className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                                        {recentVotes.map(v => (
-                                            <li key={v.id} className="flex items-center gap-3 bg-slate-900/40 border border-slate-800 rounded-lg px-3 py-2">
-                                                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: SOURCE_COLORS[v.source] ?? '#64748b' }} />
-                                                <div className="min-w-0 flex-1">
-                                                    <p className="text-sm text-slate-200 truncate">
-                                                        {v.username || v.user_id}
-                                                        {v.is_test && <span className="ml-2 text-[10px] font-bold text-amber-400">TEST</span>}
-                                                        {v.weight > 1 && <span className="ml-2 text-[10px] font-bold text-emerald-400">{v.weight}x</span>}
-                                                    </p>
-                                                    <p className="text-[10px] text-slate-500">
-                                                        {SOURCE_LABELS[v.source] ?? v.source} · {new Date(v.created_at).toLocaleString()}
-                                                    </p>
-                                                </div>
-                                                {v.total_votes != null && (
-                                                    <span className="text-[10px] text-slate-500 shrink-0">{v.total_votes} total</span>
-                                                )}
-                                            </li>
-                                        ))}
-                                    </ul>
-                                )}
-                            </ChartPanel>
-                        </section>
-                    </>
-                )}
+            {/* Row 3: top voters + live feed, capped to the same length */}
+            <section className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4" aria-label="People">
+                <Panel title="Top voters" meta={periodLabel} className="min-w-0" bodyClassName="pb-2">
+                    <PeopleList
+                        loading={firstLoad}
+                        error={chartError && !analytics ? chartError : null}
+                        onRetry={retryAnalytics}
+                        empty="No bot-list votes in this period."
+                        rows={topVoters.slice(0, LIST_ROWS).map((v, i) => ({
+                            key: v.user_id,
+                            lead: <span className="num text-[13px] text-faint w-5 shrink-0">{i + 1}.</span>,
+                            avatar: <Avatar name={v.username || '?'} url={v.avatar_url} size={28} id={v.user_id} />,
+                            title: v.username || 'Unknown user',
+                            sub: sourcesText(v.sources),
+                            value: fmtCount(v.votes),
+                        }))}
+                    />
+                </Panel>
+                <Panel title="Latest votes" meta="all lists · newest first" className="min-w-0" bodyClassName="pb-2">
+                    <PeopleList
+                        loading={firstLoad}
+                        error={chartError && !analytics ? chartError : null}
+                        onRetry={retryAnalytics}
+                        empty="No votes yet. They appear here as they arrive."
+                        rows={recentVotes.slice(0, LIST_ROWS).map(v => ({
+                            key: String(v.id),
+                            avatar: <Avatar name={v.username || '?'} url={null} size={28} id={v.user_id} />,
+                            title: (
+                                <>
+                                    {v.username || 'Unknown user'}
+                                    {v.is_test && <span className="chip chip-warning h-5 ml-2 text-[11px]">Test</span>}
+                                </>
+                            ),
+                            sub: `${SOURCE_LABELS[v.source] ?? v.source}${v.weight > 1 ? ` · counts ×${v.weight}` : ''}${v.total_votes != null ? ` · ${fmtCount(v.total_votes)} total` : ''}`,
+                            value: <span className="text-[13px] text-faint" title={fmtDateTime(v.created_at)}>{fmtRelative(v.created_at, nowMs)}</span>,
+                        }))}
+                    />
+                </Panel>
+            </section>
 
-                {/* Voter directory */}
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+            {/* Voter directory */}
+            <section className="mt-8" aria-label="Voter directory">
+                <div className="flex flex-wrap items-end justify-between gap-3 mb-3">
                     <div>
-                        <h2 className="text-2xl font-bold text-white">Voter Directory</h2>
-                        <p className="text-slate-400 text-sm">
-                            {total.toLocaleString()} voter{total === 1 ? '' : 's'} in the last {days} days — streaks, list activity &amp; premium status
+                        <h2 className="text-xl font-semibold text-ink">Directory</h2>
+                        <p className="text-sm text-muted">
+                            {total == null ? 'Everyone who voted in this period' : `${fmtCount(total)} ${total === 1 ? 'voter' : 'voters'} in ${periodLabel}`}
                         </p>
                     </div>
-
-                    <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                        <div className="relative flex-1">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                            <input
-                                type="text"
-                                placeholder="Search user ID or username…"
-                                value={searchInput}
-                                onChange={(e) => setSearchInput(e.target.value)}
-                                className="w-full md:w-64 bg-slate-900/50 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                            />
-                        </div>
-                        <div className="flex bg-slate-900/50 p-1 rounded-lg border border-slate-700">
-                            <FilterButton active={sort === 'votes'} onClick={() => setSort('votes')}>Most votes</FilterButton>
-                            <FilterButton active={sort === 'streak'} onClick={() => setSort('streak')}>Streak</FilterButton>
-                            <FilterButton active={sort === 'recent'} onClick={() => setSort('recent')}>Recent</FilterButton>
-                        </div>
+                    <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+                        <SearchField value={searchInput} onChange={setSearchInput} placeholder="Search name or user ID" className="w-full sm:w-64" />
+                        <Segmented
+                            label="Sort"
+                            value={sort}
+                            onChange={setSort}
+                            options={[{ value: 'votes', label: 'Most votes' }, { value: 'weighted', label: 'Weighted' }, { value: 'streak', label: 'Streak' }, { value: 'recent', label: 'Recent' }]}
+                        />
                     </div>
                 </div>
 
-                <div className="glass-panel overflow-x-auto">
-                    <table className="w-full text-left text-sm text-slate-400">
-                        <thead className="bg-slate-900/50 text-xs uppercase font-bold text-slate-500">
-                            <tr>
-                                <th className="p-4">Voter</th>
-                                <th className="p-4">Lists</th>
-                                <th className="p-4">Votes ({days}d)</th>
-                                <th className="p-4">Streak</th>
-                                <th className="p-4">DiscordForge W/T</th>
-                                <th className="p-4">Last Vote</th>
-                                <th className="p-4">Premium</th>
-                                <th className="p-4 text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800">
-                            {dirLoading && rows.length === 0 ? (
-                                [...Array(5)].map((_, i) => (
-                                    <tr key={i}>
-                                        <td colSpan={8} className="p-3"><div className="h-8 rounded-lg animate-pulse bg-slate-800/40" /></td>
+                <div className="panel">
+                    {dirFailed && rows.length === 0 ? (
+                        <InlineError message="Couldn't load the voter directory." onRetry={() => setDirTry(n => n + 1)} />
+                    ) : !dirLoading && rows.length === 0 ? (
+                        <div className="px-5 py-10 text-center">
+                            <p className="text-sm font-semibold text-ink">No voters found</p>
+                            <p className="text-sm text-faint mt-1">No bot-list votes match these filters.</p>
+                        </div>
+                    ) : (
+                        <>
+                            <table className={`data-table hidden md:table ${dirLoading && rows.length ? 'opacity-60' : ''}`}>
+                                <thead>
+                                    <tr>
+                                        <th className="sticky top-0 bg-surface rounded-tl-lg pl-5 w-[30%]">Voter</th>
+                                        <th className="sticky top-0 bg-surface">Lists</th>
+                                        <th className="sticky top-0 bg-surface num">Votes</th>
+                                        <th className="sticky top-0 bg-surface num">Streak</th>
+                                        <th className="sticky top-0 bg-surface num" title="DiscordForge weekly / total votes">Forge week / total</th>
+                                        <th className="sticky top-0 bg-surface num">Last vote</th>
+                                        <th className="sticky top-0 bg-surface">Premium</th>
+                                        <th className="sticky top-0 bg-surface rounded-tr-lg pr-5"><span className="sr-only">Actions</span></th>
                                     </tr>
-                                ))
-                            ) : rows.length === 0 ? (
-                                <tr>
-                                    <td colSpan={8} className="p-8">
-                                        <div className="text-center">
-                                            <Users className="w-6 h-6 text-slate-600 mx-auto mb-2" />
-                                            <div className="text-white font-semibold text-sm">No voters found</div>
-                                            <div className="text-xs text-slate-500 mt-1">No bot-list votes match the current filters.</div>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ) : (
-                                rows.map(v => (
-                                    <tr key={v.user_id} className="hover:bg-slate-800/30 transition-colors">
-                                        <td className="p-4">
-                                            <div className="flex items-center gap-3">
-                                                <Avatar url={v.avatar_url} />
-                                                <div className="min-w-0">
-                                                    <div className="text-white font-medium truncate max-w-[180px]">{v.username || 'Unknown'}</div>
-                                                    <div className="font-mono text-[11px] text-slate-500">{v.user_id}</div>
-                                                </div>
+                                </thead>
+                                <tbody>
+                                    {dirLoading && rows.length === 0
+                                        ? Array.from({ length: 6 }, (_, i) => (
+                                            <tr key={i}>
+                                                <td className="pl-5"><div className="flex items-center gap-3"><div className="skeleton w-7 h-7 rounded-full" /><div className="skeleton h-3.5 w-32" /></div></td>
+                                                <td><div className="skeleton h-3.5 w-20" /></td>
+                                                {Array.from({ length: 4 }, (__, j) => <td key={j} className="num"><div className="skeleton h-3.5 w-10 ml-auto" /></td>)}
+                                                <td><div className="skeleton h-5 w-16 rounded-full" /></td>
+                                                <td className="pr-5" />
+                                            </tr>
+                                        ))
+                                        : rows.map(v => (
+                                            <tr key={v.user_id}>
+                                                <td className="pl-5 max-w-0">
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                        <Avatar name={v.username || '?'} url={v.avatar_url} size={28} id={v.user_id} />
+                                                        <div className="min-w-0">
+                                                            <div className="text-ink truncate">{v.username || 'Unknown user'}</div>
+                                                            <div className="font-mono text-xs text-faint truncate">{v.user_id}</div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="whitespace-nowrap">{sourcesText(v.sources)}</td>
+                                                <td className="num">
+                                                    <div className="text-ink">{fmtCount(v.votes)}</div>
+                                                    {Number(v.weighted_votes) > Number(v.votes) && <div className="text-xs text-faint" title="Weekend votes count double on Top.gg">{fmtCount(v.weighted_votes)} weighted</div>}
+                                                </td>
+                                                <td className="num">{Number(v.streak_days) > 1 ? `${fmtCount(v.streak_days)} days` : <Dash title="No streak" />}</td>
+                                                <td className="num">{v.df_total_votes != null ? `${fmtCount(v.df_weekly_votes ?? 0)} / ${fmtCount(v.df_total_votes)}` : <Dash />}</td>
+                                                <td className="num whitespace-nowrap" title={fmtDateTime(v.last_botlist_vote_at)}>{fmtRelative(v.last_botlist_vote_at, nowMs)}</td>
+                                                <td><PremiumChip lastVote={v.premium_last_vote_at} nowMs={nowMs} /></td>
+                                                <td className="pr-5 text-right">
+                                                    <button type="button" onClick={() => navigate(`/polls?user_id=${v.user_id}`)} className="btn btn-ghost btn-sm whitespace-nowrap">
+                                                        Polls created
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                </tbody>
+                            </table>
+
+                            {/* Phone/tablet: two-line rows */}
+                            <ul className={`md:hidden ${dirLoading && rows.length ? 'opacity-60' : ''}`}>
+                                {(dirLoading && rows.length === 0 ? [] : rows).map(v => (
+                                    <li key={v.user_id} className="px-4 py-3 flex items-center gap-3 border-t border-rule first:border-t-0">
+                                        <Avatar name={v.username || '?'} url={v.avatar_url} size={32} id={v.user_id} />
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm text-ink truncate flex-1">{v.username || 'Unknown user'}</span>
+                                                <span className="num text-sm text-ink">{fmtCount(v.votes)}</span>
                                             </div>
-                                        </td>
-                                        <td className="p-4">
-                                            <div className="flex gap-1.5">
-                                                {v.sources.map(s => (
-                                                    <span
-                                                        key={s}
-                                                        className="px-2 py-0.5 rounded-full text-[10px] font-bold"
-                                                        style={{ backgroundColor: `${SOURCE_COLORS[s] ?? '#64748b'}20`, color: SOURCE_COLORS[s] ?? '#94a3b8' }}
-                                                    >
-                                                        {SOURCE_LABELS[s] ?? s}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        </td>
-                                        <td className="p-4">
-                                            <span className="text-white font-bold">{v.votes}</span>
-                                            {v.weighted_votes > v.votes && (
-                                                <span className="text-[10px] text-emerald-400 ml-1.5" title="Weighted (weekend votes count double)">({v.weighted_votes}w)</span>
-                                            )}
-                                        </td>
-                                        <td className="p-4">
-                                            {v.streak_days > 1 ? (
-                                                <span className="inline-flex items-center gap-1 text-amber-400 font-bold">
-                                                    <Flame className="w-3.5 h-3.5" /> {v.streak_days}d
+                                            <div className="flex items-center gap-2 mt-0.5">
+                                                <span className="text-[13px] text-faint truncate flex-1">
+                                                    {sourcesText(v.sources)} · {fmtRelative(v.last_botlist_vote_at, nowMs)}{Number(v.streak_days) > 1 ? ` · ${v.streak_days}-day streak` : ''}
                                                 </span>
-                                            ) : (
-                                                <span className="text-slate-600">—</span>
-                                            )}
-                                        </td>
-                                        <td className="p-4">
-                                            {v.df_total_votes != null ? (
-                                                <span className="font-mono text-xs">{v.df_weekly_votes ?? 0} / {v.df_total_votes}</span>
-                                            ) : (
-                                                <span className="text-slate-600">—</span>
-                                            )}
-                                        </td>
-                                        <td className="p-4">
-                                            <div className="flex items-center gap-2 text-xs">
-                                                <Clock className="w-3 h-3" />
-                                                {new Date(v.last_botlist_vote_at).toLocaleString()}
+                                                <PremiumChip lastVote={v.premium_last_vote_at} nowMs={nowMs} />
                                             </div>
-                                        </td>
-                                        <td className="p-4"><PremiumBadge lastVote={v.premium_last_vote_at} /></td>
-                                        <td className="p-4 text-right">
-                                            <button
-                                                onClick={() => navigate(`/polls?user_id=${v.user_id}`)}
-                                                className="text-indigo-400 hover:text-indigo-300 text-xs font-bold"
-                                            >
-                                                VIEW POLLS
+                                            <button type="button" onClick={() => navigate(`/polls?user_id=${v.user_id}`)} className="text-[13px] text-brand-text mt-1 min-h-[28px]">
+                                                Polls created
                                             </button>
-                                        </td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
+                                        </div>
+                                    </li>
+                                ))}
+                                {dirLoading && rows.length === 0 && Array.from({ length: 5 }, (_, i) => (
+                                    <li key={i} className="px-4 py-3 flex items-center gap-3 border-t border-rule first:border-t-0">
+                                        <div className="skeleton w-8 h-8 rounded-full" />
+                                        <div className="flex-1 space-y-2"><div className="skeleton h-3.5 w-1/2" /><div className="skeleton h-3 w-2/3" /></div>
+                                    </li>
+                                ))}
+                            </ul>
 
-                {!dirLoading && rows.length < total && (
-                    <div className="mt-6 text-center">
-                        <button
-                            onClick={() => fetchDirectory(offset + PAGE_SIZE, true)}
-                            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition-colors shadow-lg shadow-indigo-500/20 inline-flex items-center gap-2"
-                        >
-                            <RefreshCw className="w-4 h-4" />
-                            Load {Math.min(PAGE_SIZE, total - rows.length)} More
-                        </button>
-                    </div>
-                )}
-            </div>
-        </div>
+                            <div className="flex items-center justify-between gap-3 px-5 h-14 border-t border-rule">
+                                <span className="num text-[13px] text-faint">
+                                    {total == null ? '\u00a0' : `Showing ${fmtCount(rows.length)} of ${fmtCount(total)}`}
+                                </span>
+                                {dirFailed && rows.length > 0 ? (
+                                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => void fetchDirectory(offset + PAGE_SIZE, true)}>Retry</button>
+                                ) : !dirLoading && total != null && rows.length < total ? (
+                                    <button type="button" onClick={() => void fetchDirectory(offset + PAGE_SIZE, true)} className="btn btn-outline btn-sm">
+                                        Load {fmtCount(Math.min(PAGE_SIZE, total - rows.length))} more
+                                    </button>
+                                ) : null}
+                            </div>
+                        </>
+                    )}
+                </div>
+            </section>
+        </AppShell>
     );
 };
 
@@ -540,73 +560,57 @@ export const VotersView: React.FC = () => {
 // Small presentational helpers
 // ---------------------------------------------------------------------------
 
-const TINTS: Record<string, string> = {
-    rose: 'bg-rose-500/10 text-rose-400',
-    indigo: 'bg-indigo-500/10 text-indigo-400',
-    emerald: 'bg-emerald-500/10 text-emerald-400',
-    amber: 'bg-amber-500/10 text-amber-400',
-};
+interface PersonRow {
+    key: string;
+    lead?: React.ReactNode;
+    avatar: React.ReactNode;
+    title: React.ReactNode;
+    sub: React.ReactNode;
+    value: React.ReactNode;
+}
 
-const StatCard = ({ icon, tint, label, value, sub }: { icon: React.ReactNode; tint: string; label: string; value: string; sub?: string }) => (
-    <div className="glass-panel p-4 flex items-center gap-3">
-        <div className={`p-2.5 rounded-lg ${TINTS[tint]}`}>{icon}</div>
-        <div className="min-w-0">
-            <p className="text-xs text-slate-400 font-bold truncate">{label}</p>
-            <p className="text-xl font-bold text-white">{value}</p>
-            {sub && <p className="text-[10px] text-slate-500">{sub}</p>}
-        </div>
-    </div>
-);
-
-const ChartPanel = ({ title, subtitle, icon, tint, children }: { title: string; subtitle: string; icon: React.ReactNode; tint: string; children: React.ReactNode }) => (
-    <div className="glass-panel p-6" style={{ minWidth: 0 }}>
-        <div className="flex items-center gap-2 mb-4">
-            <div className={`p-2 rounded-lg ${TINTS[tint]}`}>{icon}</div>
-            <div>
-                <h3 className="text-base font-bold text-white">{title}</h3>
-                <p className="text-slate-400 text-xs">{subtitle}</p>
-            </div>
-        </div>
-        {children}
-    </div>
-);
-
-const EmptyNote = ({ children }: { children: React.ReactNode }) => (
-    <div className="h-40 flex items-center justify-center text-sm text-slate-500">{children}</div>
-);
-
-const Avatar = ({ url }: { url: string | null }) => (
-    url
-        ? <img src={url} alt="" className="w-7 h-7 rounded-full shrink-0" />
-        : <div className="w-7 h-7 rounded-full bg-slate-700 shrink-0" />
-);
-
-const PremiumBadge = ({ lastVote }: { lastVote: string | null }) => {
-    if (!lastVote) {
+/** A fixed-length list of people (LIST_ROWS rows) so paired cards end level. */
+const PeopleList: React.FC<{ rows: PersonRow[]; loading: boolean; error: string | null; onRetry: () => void; empty: string }> = ({ rows, loading, error, onRetry, empty }) => {
+    const h = LIST_ROWS * 52;
+    if (error) return <div className="flex items-center" style={{ height: h }}><InlineError message={error} onRetry={onRetry} className="w-full" /></div>;
+    if (loading) {
         return (
-            <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold bg-slate-700/40 text-slate-500">
-                <XCircle className="w-3 h-3" /> NEVER
-            </div>
+            <ul aria-busy="true">
+                {Array.from({ length: LIST_ROWS }, (_, i) => (
+                    <li key={i} className="h-[52px] px-5 flex items-center gap-3"><div className="skeleton w-7 h-7 rounded-full" /><div className="flex-1 space-y-1.5"><div className="skeleton h-3.5 w-2/5" /><div className="skeleton h-3 w-1/4" /></div></li>
+                ))}
+            </ul>
         );
     }
-    const diffHours = (Date.now() - new Date(lastVote).getTime()) / 36e5;
-    if (diffHours < 12) {
+    if (rows.length === 0) {
         return (
-            <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400">
-                <CheckCircle className="w-3 h-3" /> PREMIUM
-            </div>
-        );
-    }
-    if (diffHours < 13) {
-        return (
-            <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400">
-                <Clock className="w-3 h-3" /> GRACE
+            <div className="px-5" style={{ height: h }}>
+                <div className="h-full flex items-center justify-center text-sm text-faint border border-dashed border-line rounded-lg px-6 text-center">{empty}</div>
             </div>
         );
     }
     return (
-        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400">
-            <XCircle className="w-3 h-3" /> EXPIRED
-        </div>
+        <ol>
+            {rows.map(r => (
+                <li key={r.key} className="h-[52px] px-5 flex items-center gap-3 min-w-0">
+                    {r.lead}
+                    {r.avatar}
+                    <div className="min-w-0 flex-1">
+                        <div className="text-sm text-ink truncate flex items-center">{r.title}</div>
+                        <div className="text-xs text-faint truncate">{r.sub}</div>
+                    </div>
+                    <span className="num text-sm text-ink shrink-0 text-right">{r.value}</span>
+                </li>
+            ))}
+        </ol>
     );
+};
+
+/** Premium status from the last vote: active < 12 h, grace < 13 h, then expired. */
+const PremiumChip: React.FC<{ lastVote: string | null; nowMs: number }> = ({ lastVote, nowMs }) => {
+    if (!lastVote) return <span className="chip">Never</span>;
+    const diffHours = (nowMs - new Date(lastVote).getTime()) / 36e5;
+    if (diffHours < 12) return <span className="chip chip-positive chip-dot">Premium</span>;
+    if (diffHours < 13) return <span className="chip chip-warning chip-dot">Grace</span>;
+    return <span className="chip">Expired</span>;
 };

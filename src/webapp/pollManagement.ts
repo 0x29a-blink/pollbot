@@ -1,25 +1,22 @@
 import { Router, Request, Response } from 'express';
 import { supabase } from '../lib/db';
 import { logger } from '../lib/logger';
-import { upsertGuildRow } from '../lib/guildUtils';
-import { aggregateVotes } from '../lib/voteUtils';
+import { canMemberPostPollInChannel, upsertGuildRow } from '../lib/guildUtils';
+import { aggregateVotes, fetchAllPollVotes, getVoteCountsForPoll } from '../lib/voteUtils';
+import { cancelPendingRender } from '../lib/renderQueue';
+import { PollManager } from '../lib/pollManager';
 import { validateCreatePoll, validateUpdatePollSettings } from './validation';
 import { trackUsage } from '../lib/usageTracker';
 import { getShardingManager } from '../webhook';
+import { shardIdForGuild } from '../lib/shardUtils';
+import { getSessionIdFromRequest, getValidDashboardSession, refreshAccessToken } from './dashboardAuth';
 
 const router = Router();
-
-// Cookie name must match dashboardAuth.ts
-const COOKIE_NAME = 'pollbot_session';
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 const BOT_TOKEN = process.env.DISCORD_TOKEN;
 const MANAGE_GUILD = 0x20; // 32
-
-// Permission flags for channel access
-const SEND_MESSAGES = 0x800n; // 2048
-const ATTACH_FILES = 0x8000n; // 32768
-const VIEW_CHANNEL = 0x400n; // 1024
+const SNOWFLAKE_RE = /^\d{17,20}$/;
 
 // Cache TTL: 30 minutes for guild-specific data
 const GUILD_DATA_CACHE_TTL = 30 * 60 * 1000;
@@ -64,8 +61,8 @@ function checkRateLimit(
     return { allowed: true };
 }
 
-// Cleanup stale rate limit entries periodically
-setInterval(() => {
+// Cleanup stale rate limit and cache entries periodically
+const rateCleanupTimer = setInterval(() => {
     const now = Date.now();
     for (const [key, rate] of pollCreateRates) {
         if (now - rate.windowStart > POLL_CREATE_WINDOW * 2) {
@@ -77,7 +74,18 @@ setInterval(() => {
             pollMutationRates.delete(key);
         }
     }
+    for (const [key, entry] of mutationPermissionCache) {
+        if (now - entry.timestamp > MUTATION_PERMISSION_TTL * 2) {
+            mutationPermissionCache.delete(key);
+        }
+    }
+    for (const [key, entry] of guildDataCache) {
+        if (now - entry.timestamp > GUILD_DATA_CACHE_TTL * 2) {
+            guildDataCache.delete(key);
+        }
+    }
 }, 60000);
+rateCleanupTimer.unref();
 
 interface CachedGuildData {
     channels: CachedChannel[];
@@ -164,12 +172,17 @@ async function fetchGuildData(guildId: string): Promise<CachedGuildData | null> 
 
         const roles: DiscordRole[] = await rolesRes.json();
 
-        // Get bot's member info to determine permissions
+        // Get bot's member info and guild owner_id to determine channel permissions accurately
         const tokenParts = BOT_TOKEN!.split('.');
         const botId = Buffer.from(tokenParts[0] || '', 'base64').toString();
-        const memberRes = await fetch(`${DISCORD_API_BASE}/guilds/${guildId}/members/${botId}`, {
-            headers: { Authorization: `Bot ${BOT_TOKEN}` },
-        });
+        const [memberRes, guildRes] = await Promise.all([
+            fetch(`${DISCORD_API_BASE}/guilds/${guildId}/members/${botId}`, {
+                headers: { Authorization: `Bot ${BOT_TOKEN}` },
+            }),
+            fetch(`${DISCORD_API_BASE}/guilds/${guildId}`, {
+                headers: { Authorization: `Bot ${BOT_TOKEN}` },
+            }),
+        ]);
 
         let botRoleIds: string[] = [];
         if (memberRes.ok) {
@@ -177,11 +190,24 @@ async function fetchGuildData(guildId: string): Promise<CachedGuildData | null> 
             botRoleIds = member.roles || [];
         }
 
-        // Calculate bot permissions per channel
+        let guildOwnerId: string | undefined;
+        if (guildRes.ok) {
+            const guildObj = await guildRes.json();
+            guildOwnerId = guildObj.owner_id;
+        }
+
+        // Calculate bot permissions per channel using Discord's full overwrite hierarchy
         const processedChannels: CachedChannel[] = channels
             .filter(ch => ch.type === 0 || ch.type === 5) // Text channels and announcement channels
             .map(ch => {
-                const canPost = canBotPostInChannel(ch, roles, botRoleIds, guildId);
+                const canPost = canMemberPostPollInChannel({
+                    guildId,
+                    memberId: botId,
+                    isGuildOwner: Boolean(guildOwnerId && guildOwnerId === botId),
+                    roles,
+                    memberRoleIds: botRoleIds,
+                    overwrites: ch.permission_overwrites,
+                });
                 return {
                     id: ch.id,
                     name: ch.name,
@@ -224,56 +250,6 @@ async function fetchGuildData(guildId: string): Promise<CachedGuildData | null> 
 }
 
 /**
- * Helper: Check if bot can post in a channel
- */
-function canBotPostInChannel(
-    channel: DiscordChannel,
-    roles: DiscordRole[],
-    botRoleIds: string[],
-    guildId: string
-): boolean {
-    // Start with base permissions from roles
-    let allow = 0n;
-    let deny = 0n;
-
-    // Get @everyone role permissions (guildId is the @everyone role id)
-    const everyoneRole = roles.find(r => r.id === guildId);
-    if (everyoneRole) {
-        allow |= BigInt(everyoneRole.permissions);
-    }
-
-    // Add bot's role permissions
-    for (const roleId of botRoleIds) {
-        const role = roles.find(r => r.id === roleId);
-        if (role) {
-            allow |= BigInt(role.permissions);
-        }
-    }
-
-    // Apply channel permission overwrites
-    if (channel.permission_overwrites) {
-        // First apply role overwrites
-        for (const overwrite of channel.permission_overwrites) {
-            if (overwrite.type === 0) { // Role overwrite
-                if (overwrite.id === guildId || botRoleIds.includes(overwrite.id)) {
-                    deny |= BigInt(overwrite.deny);
-                    allow |= BigInt(overwrite.allow);
-                }
-            }
-        }
-        // Then apply member-specific overwrites (would need bot member id)
-    }
-
-    // Check required permissions
-    const finalPerms = (allow & ~deny);
-    const hasViewChannel = (finalPerms & VIEW_CHANNEL) !== 0n;
-    const hasSendMessages = (finalPerms & SEND_MESSAGES) !== 0n;
-    const hasAttachFiles = (finalPerms & ATTACH_FILES) !== 0n;
-
-    return hasViewChannel && hasSendMessages && hasAttachFiles;
-}
-
-/**
  * Helper: Get cached guild data or fetch if stale
  */
 async function getGuildData(guildId: string, forceRefresh = false): Promise<CachedGuildData | null> {
@@ -301,19 +277,10 @@ const MUTATION_PERMISSION_TTL = 5 * 60 * 1000; // 5 minutes
  * falls back to that snapshot so a Discord outage does not lock legitimate users
  * out of managing their polls.
  */
-async function verifyUserPermission(sessionId: string, guildId: string): Promise<{ valid: boolean; userId?: string; error?: string; status?: number }> {
-    const { data: session, error: sessionError } = await supabase
-        .from('dashboard_sessions')
-        .select('user_id, access_token, expires_at, cached_guilds')
-        .eq('id', sessionId)
-        .single();
-
-    if (sessionError || !session) {
-        return { valid: false, error: 'Invalid session', status: 401 };
-    }
-
-    if (new Date(session.expires_at).getTime() < Date.now()) {
-        return { valid: false, error: 'Session expired', status: 401 };
+async function verifyUserPermission(req: Request, guildId: string): Promise<{ valid: boolean; userId?: string; error?: string; status?: number }> {
+    const session = await getValidDashboardSession(req);
+    if (!session) {
+        return { valid: false, error: 'Unauthorized', status: 401 };
     }
 
     const denied = { valid: false as const, error: 'You need Manage Server permission', status: 403 };
@@ -323,11 +290,21 @@ async function verifyUserPermission(sessionId: string, guildId: string): Promise
         return cached.allowed ? { valid: true, userId: session.user_id } : denied;
     }
 
-    // Live-verify against Discord using the session's access token.
+    // Live-verify against Discord using the session's access token (auto-refreshing on 401).
     try {
-        const resp = await fetch(`${DISCORD_API_BASE}/users/@me/guilds`, {
+        let resp = await fetch(`${DISCORD_API_BASE}/users/@me/guilds`, {
             headers: { Authorization: `Bearer ${session.access_token}` },
         });
+
+        if (resp.status === 401) {
+            const refreshed = await refreshAccessToken(session.id);
+            if (refreshed) {
+                session.access_token = refreshed;
+                resp = await fetch(`${DISCORD_API_BASE}/users/@me/guilds`, {
+                    headers: { Authorization: `Bearer ${refreshed}` },
+                });
+            }
+        }
 
         if (resp.ok) {
             const userGuilds = await resp.json() as Array<{ id: string; permissions: string; owner?: boolean }>;
@@ -368,17 +345,16 @@ async function verifyUserPermission(sessionId: string, guildId: string): Promise
  */
 router.get('/guilds/:id/channels', async (req: Request, res: Response) => {
     const guildId = req.params.id as string;
-    // Support both cookie and header auth
-    const cookieSession = req.cookies?.[COOKIE_NAME];
-    const authHeader = req.headers.authorization;
-    const headerSession = authHeader?.replace('Bearer ', '');
-    const sessionId = cookieSession || headerSession;
+    const sessionId = getSessionIdFromRequest(req);
 
-    if (!sessionId || !guildId) {
+    if (!sessionId) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
+    if (!guildId || !SNOWFLAKE_RE.test(guildId)) {
+        return res.status(400).json({ error: 'Valid guild ID is required' });
+    }
 
-    const permCheck = await verifyUserPermission(sessionId, guildId);
+    const permCheck = await verifyUserPermission(req, guildId);
     if (!permCheck.valid) {
         return res.status(permCheck.status || 403).json({ error: permCheck.error });
     }
@@ -400,17 +376,16 @@ router.get('/guilds/:id/channels', async (req: Request, res: Response) => {
  */
 router.get('/guilds/:id/roles', async (req: Request, res: Response) => {
     const guildId = req.params.id as string;
-    // Support both cookie and header auth
-    const cookieSession = req.cookies?.[COOKIE_NAME];
-    const authHeader = req.headers.authorization;
-    const headerSession = authHeader?.replace('Bearer ', '');
-    const sessionId = cookieSession || headerSession;
+    const sessionId = getSessionIdFromRequest(req);
 
-    if (!sessionId || !guildId) {
+    if (!sessionId) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
+    if (!guildId || !SNOWFLAKE_RE.test(guildId)) {
+        return res.status(400).json({ error: 'Valid guild ID is required' });
+    }
 
-    const permCheck = await verifyUserPermission(sessionId, guildId);
+    const permCheck = await verifyUserPermission(req, guildId);
     if (!permCheck.valid) {
         return res.status(permCheck.status || 403).json({ error: permCheck.error });
     }
@@ -432,17 +407,16 @@ router.get('/guilds/:id/roles', async (req: Request, res: Response) => {
  */
 router.post('/guilds/:id/refresh', async (req: Request, res: Response) => {
     const guildId = req.params.id as string;
-    // Support both cookie and header auth
-    const cookieSession = req.cookies?.[COOKIE_NAME];
-    const authHeader = req.headers.authorization;
-    const headerSession = authHeader?.replace('Bearer ', '');
-    const sessionId = cookieSession || headerSession;
+    const sessionId = getSessionIdFromRequest(req);
 
-    if (!sessionId || !guildId) {
+    if (!sessionId) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
+    if (!guildId || !SNOWFLAKE_RE.test(guildId)) {
+        return res.status(400).json({ error: 'Valid guild ID is required' });
+    }
 
-    const permCheck = await verifyUserPermission(sessionId, guildId);
+    const permCheck = await verifyUserPermission(req, guildId);
     if (!permCheck.valid) {
         return res.status(permCheck.status || 403).json({ error: permCheck.error });
     }
@@ -501,16 +475,173 @@ interface CreatePollRequest {
 }
 
 /**
+ * Helper: Load server-level button & locale settings for a guild.
+ */
+async function getGuildPollSettings(guildId: string): Promise<{
+    serverAllowsButtons: boolean;
+    serverLocale: string;
+    globalWeights: Record<string, number>;
+}> {
+    const { data: guildSettings } = await supabase
+        .from('guild_settings')
+        .select('allow_poll_buttons, locale, vote_weights')
+        .eq('guild_id', guildId)
+        .maybeSingle();
+
+    return {
+        serverAllowsButtons: guildSettings?.allow_poll_buttons ?? true,
+        serverLocale: guildSettings?.locale || 'en',
+        globalWeights: (guildSettings?.vote_weights as Record<string, number>) || {},
+    };
+}
+
+/**
+ * Helper: Resolve Discord mentions (<@id>, <@&id>, <#id>) on the shard owning `guildId`.
+ */
+async function resolveMentionsOnShard(
+    guildId: string,
+    title: string,
+    description: string,
+    options: string[]
+): Promise<{ title: string; description: string; options: string[] }> {
+    const manager = getShardingManager();
+    if (!manager) {
+        return { title, description, options };
+    }
+
+    try {
+        const results = await manager.broadcastEval(
+            async (client, context) => {
+                const guild = client.guilds.cache.get(context.guildId);
+                if (!guild) return null;
+
+                const allTexts = [context.title, context.description, ...context.options];
+                const combined = allTexts.join('\n');
+                if (!combined) {
+                    return { title: context.title, description: context.description, options: context.options };
+                }
+
+                const replacements = new Map<string, string>();
+
+                for (const match of combined.matchAll(/<@!?(\d+)>/g)) {
+                    const fullMatch = match[0];
+                    const id = match[1];
+                    if (!fullMatch || !id || replacements.has(fullMatch)) continue;
+                    const member = await guild.members.fetch(id).catch(() => null);
+                    if (member) {
+                        replacements.set(fullMatch, `@${member.displayName}`);
+                    } else {
+                        const user = await guild.client.users.fetch(id).catch(() => null);
+                        if (user) replacements.set(fullMatch, `@${user.username}`);
+                    }
+                }
+
+                for (const match of combined.matchAll(/<@&(\d+)>/g)) {
+                    const fullMatch = match[0];
+                    const id = match[1];
+                    if (!fullMatch || !id || replacements.has(fullMatch)) continue;
+                    const role = await guild.roles.fetch(id).catch(() => null);
+                    if (role) replacements.set(fullMatch, `@${role.name}`);
+                }
+
+                for (const match of combined.matchAll(/<#(\d+)>/g)) {
+                    const fullMatch = match[0];
+                    const id = match[1];
+                    if (!fullMatch || !id || replacements.has(fullMatch)) continue;
+                    const channel = await guild.channels.fetch(id).catch(() => null);
+                    if (channel && 'name' in channel && channel.name) {
+                        replacements.set(fullMatch, `#${channel.name}`);
+                    }
+                }
+
+                const applyReplacements = (str: string): string => {
+                    if (!str) return str;
+                    let out = str;
+                    for (const [key, val] of replacements) {
+                        out = out.split(key).join(val);
+                    }
+                    return out;
+                };
+
+                return {
+                    title: applyReplacements(context.title),
+                    description: applyReplacements(context.description),
+                    options: context.options.map(applyReplacements),
+                };
+            },
+            { context: { guildId, title, description, options } }
+        );
+        const match = results.find(r => r !== null);
+        return match || { title, description, options };
+    } catch (err) {
+        logger.warn(`[PollManagement] Failed to resolve mentions on shard for guild ${guildId}:`, err);
+        return { title, description, options };
+    }
+}
+
+const CREATOR_LOOKUP_TIMEOUT_MS = 3000;
+
+/**
+ * Helper: Resolve the creator name shown on the rendered poll image the same
+ * way the bot does (src/lib/pollManager.ts: `client.users.fetch(id).tag`),
+ * evaluated on the shard that owns `guildId` (cache hit there is likeliest).
+ * Falls back to the `users` table (dashboard logins only), then 'Unknown'.
+ * Fail-safe: bounded by a timeout and never throws.
+ */
+async function resolveCreatorName(creatorId: string | null | undefined, guildId: string): Promise<string> {
+    if (!creatorId || !SNOWFLAKE_RE.test(creatorId)) return 'Unknown';
+
+    const manager = getShardingManager();
+    if (manager && manager.shards.size > 0) {
+        try {
+            const totalShards = typeof manager.totalShards === 'number' ? manager.totalShards : manager.shards.size;
+            const owningShard = shardIdForGuild(guildId, totalShards);
+            const shard = manager.shards.has(owningShard) ? owningShard : manager.shards.keys().next().value;
+
+            let timer: NodeJS.Timeout | undefined;
+            const timeout = new Promise<null>(resolve => {
+                timer = setTimeout(() => resolve(null), CREATOR_LOOKUP_TIMEOUT_MS);
+                timer.unref();
+            });
+            const lookup = manager.broadcastEval(
+                async (client, context) => {
+                    const user = await client.users.fetch(context.creatorId).catch(() => null);
+                    return user ? user.tag : null;
+                },
+                { context: { creatorId }, shard: shard as number }
+            ).catch((err: unknown) => {
+                logger.warn(`[PollManagement] Creator lookup failed for ${creatorId}:`, err);
+                return null;
+            });
+
+            const tag = await Promise.race([lookup, timeout]);
+            if (timer) clearTimeout(timer);
+            if (typeof tag === 'string' && tag) return tag;
+        } catch (err) {
+            logger.warn(`[PollManagement] Creator lookup failed for ${creatorId}:`, err);
+        }
+    }
+
+    try {
+        const { data: userData } = await supabase
+            .from('users')
+            .select('username')
+            .eq('id', creatorId)
+            .maybeSingle();
+        if (userData?.username) return userData.username;
+    } catch (err) {
+        logger.warn(`[PollManagement] users-table creator lookup failed for ${creatorId}:`, err);
+    }
+
+    return 'Unknown';
+}
+
+/**
  * POST /api/user/polls
  * Create a new poll - renders image, posts to Discord, saves to database
  */
 router.post('/polls', async (req: Request, res: Response) => {
-    // Support both cookie and header auth
-    const cookieSession = req.cookies?.[COOKIE_NAME];
-    const authHeader = req.headers.authorization;
-    const headerSession = authHeader?.replace('Bearer ', '');
-    const sessionId = cookieSession || headerSession;
-
+    const sessionId = getSessionIdFromRequest(req);
     if (!sessionId) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
@@ -523,7 +654,7 @@ router.post('/polls', async (req: Request, res: Response) => {
     }
     const body = validation.data as CreatePollRequest;
 
-    const permCheck = await verifyUserPermission(sessionId, body.guild_id);
+    const permCheck = await verifyUserPermission(req, body.guild_id);
     if (!permCheck.valid) {
         return res.status(permCheck.status || 403).json({ error: permCheck.error });
     }
@@ -553,63 +684,70 @@ router.post('/polls', async (req: Request, res: Response) => {
     }
 
     try {
-        // Import dependencies for rendering and sharding
         const { Renderer } = await import('../lib/renderer');
-        const { getShardingManager } = await import('../webhook');
 
         const shardingManager = getShardingManager();
         if (!shardingManager) {
             return res.status(503).json({ error: 'Bot not ready, please try again' });
         }
 
-        // Get user info for creator display
-        const { data: userData } = await supabase
-            .from('users')
-            .select('username')
-            .eq('id', permCheck.userId)
-            .single();
+        const { serverAllowsButtons, serverLocale } = await getGuildPollSettings(body.guild_id);
 
-        const creatorName = userData?.username || 'Unknown';
+        // Get user info for creator display (same resolution as the bot)
+        const creatorName = await resolveCreatorName(permCheck.userId, body.guild_id);
 
-        // Render poll image
-        const imageBuffer = await Renderer.renderPoll({
-            title: body.title,
-            description: body.description || '',
-            options: body.options,
-            votes: body.options.map(() => 0),
+        // Build poll settings (respecting guild-level allow_poll_buttons)
+        const isPublic = body.settings?.public ?? true;
+        const allowClose = serverAllowsButtons ? (body.settings?.allow_close ?? true) : false;
+        const minVotes = body.settings?.min_votes ?? 1;
+        const maxVotes = Math.min(body.settings?.max_votes ?? Math.max(1, minVotes), body.options.length);
+        let createThread = body.settings?.allow_thread ?? false;
+
+        // Resolve mentions against guild cache before rendering
+        const resolved = await resolveMentionsOnShard(
+            body.guild_id,
+            body.title,
+            body.description || '',
+            body.options
+        );
+
+        // Render poll image (mirroring /poll: omit votes array when private)
+        const renderOptions: any = {
+            title: resolved.title,
+            description: resolved.description,
+            options: resolved.options,
             totalVotes: 0,
             creator: creatorName,
             closed: false,
-        });
+            locale: serverLocale,
+        };
+        if (isPublic) {
+            renderOptions.votes = body.options.map(() => 0);
+        }
 
-        // Convert buffer to base64 for transmission to shard
+        const imageBuffer = await Renderer.renderPoll(renderOptions);
         const imageBase64 = imageBuffer.toString('base64');
 
-        // Build poll settings
-        const settings = {
-            public: body.settings?.public ?? true,
-            allow_thread: body.settings?.allow_thread ?? false,
-            allow_close: body.settings?.allow_close ?? true,
-            allow_exports: body.settings?.allow_exports ?? true,
-            max_votes: body.settings?.max_votes ?? 1,
-            min_votes: body.settings?.min_votes ?? 1,
-            allowed_roles: body.settings?.allowed_roles ?? [],
-            vote_weights: body.settings?.vote_weights ?? {},
-            role_metadata: body.settings?.role_metadata,
-        };
+        // Build localized components (Select Menu + Close Poll + View Details)
+        const serializedComponents = PollManager.buildPollComponents({
+            options: body.options,
+            settings: {
+                min_votes: minVotes,
+                max_votes: maxVotes,
+                allow_close: allowClose,
+            },
+            active: true,
+            serverAllowsButtons,
+            serverLocale,
+        }).map(row => row.toJSON());
 
-        // Post message to Discord via shard
-        // We use broadcastEval to find the shard that has this guild and post there
         const pollData = {
             channelId: body.channel_id,
             guildId: body.guild_id,
             title: body.title,
-            description: body.description || '',
-            options: body.options,
-            settings,
-            creatorId: permCheck.userId,
-            creatorName,
             imageBase64,
+            components: serializedComponents,
+            createThread,
         };
 
         const results = await shardingManager.broadcastEval(
@@ -617,42 +755,36 @@ router.post('/polls', async (req: Request, res: Response) => {
                 const guild = client.guilds.cache.get(context.guildId);
                 if (!guild) return null;
 
-                const channel = guild.channels.cache.get(context.channelId);
-                if (!channel || !channel.isTextBased()) return null;
+                const targetChannel = guild.channels.cache.get(context.channelId)
+                    ?? await guild.channels.fetch(context.channelId).catch(() => null);
+                if (!targetChannel || !targetChannel.isTextBased()) return null;
 
-                // Import discord.js components
-                const { AttachmentBuilder, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
+                const { AttachmentBuilder } = require('discord.js');
+                const imgBuf = Buffer.from(context.imageBase64, 'base64');
+                const attachment = new AttachmentBuilder(imgBuf, { name: 'poll.png' });
 
-                // Create attachment from base64
-                const imageBuffer = Buffer.from(context.imageBase64, 'base64');
-                const attachment = new AttachmentBuilder(imageBuffer, { name: 'poll.png' });
-
-                // Build select menu options
-                const selectOptions = context.options.map((opt: string, i: number) => ({
-                    label: opt.substring(0, 100),
-                    value: i.toString(),
-                    description: `Vote for option ${i + 1}`,
-                }));
-
-                const selectMenu = new StringSelectMenuBuilder()
-                    .setCustomId('poll_vote')
-                    .setPlaceholder('Select your vote(s)')
-                    .setMinValues(context.settings.min_votes)
-                    .setMaxValues(Math.min(context.settings.max_votes, selectOptions.length))
-                    .addOptions(selectOptions);
-
-                const row = new ActionRowBuilder().addComponents(selectMenu);
-
-                // Send the poll message
-                const message = await (channel as any).send({
+                const message = await (targetChannel as any).send({
                     files: [attachment],
-                    components: [row],
+                    components: context.components,
                 });
+
+                let threadStarted = false;
+                if (context.createThread && typeof message.startThread === 'function') {
+                    try {
+                        await message.startThread({
+                            name: context.title.substring(0, 100),
+                            autoArchiveDuration: 1440,
+                        });
+                        threadStarted = true;
+                    } catch {
+                        threadStarted = false;
+                    }
+                }
 
                 return {
                     messageId: message.id,
                     channelId: message.channel.id,
-                    // Guild data so the DB layer can recover if the guilds row is missing
+                    threadStarted,
                     guild: {
                         id: guild.id,
                         name: guild.name,
@@ -666,11 +798,26 @@ router.post('/polls', async (req: Request, res: Response) => {
             { context: pollData }
         );
 
-        // Find the successful result
         const successResult = results.find(r => r !== null);
         if (!successResult) {
             return res.status(500).json({ error: 'Failed to post poll to Discord' });
         }
+
+        if (createThread && !successResult.threadStarted) {
+            createThread = false;
+        }
+
+        const settings = {
+            public: isPublic,
+            allow_thread: createThread,
+            allow_close: allowClose,
+            allow_exports: body.settings?.allow_exports ?? true,
+            max_votes: maxVotes,
+            min_votes: minVotes,
+            allowed_roles: body.settings?.allowed_roles ?? [],
+            vote_weights: body.settings?.vote_weights ?? {},
+            role_metadata: body.settings?.role_metadata,
+        };
 
         // Save poll to database
         const pollRow = {
@@ -729,11 +876,7 @@ router.post('/polls', async (req: Request, res: Response) => {
  * Close or reopen a poll from the dashboard
  */
 router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
-    // Support both cookie and header auth
-    const cookieSession = req.cookies?.[COOKIE_NAME];
-    const authHeader = req.headers.authorization;
-    const headerSession = authHeader?.replace('Bearer ', '');
-    const sessionId = cookieSession || headerSession;
+    const sessionId = getSessionIdFromRequest(req);
     const pollId = req.params.pollId as string;
     const { active } = req.body as { active: boolean };
 
@@ -741,8 +884,8 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
         return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    if (!pollId) {
-        return res.status(400).json({ error: 'Missing poll id' });
+    if (!pollId || !SNOWFLAKE_RE.test(pollId)) {
+        return res.status(400).json({ error: 'Valid poll ID is required' });
     }
 
     if (typeof active !== 'boolean') {
@@ -755,16 +898,16 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
             .from('polls')
             .select('*')
             .eq('message_id', pollId)
-            .single();
+            .maybeSingle();
 
         if (pollError || !pollData) {
             return res.status(404).json({ error: 'Poll not found' });
         }
 
         // 2. Verify user has permission on this guild
-        const permCheck = await verifyUserPermission(sessionId, pollData.guild_id);
+        const permCheck = await verifyUserPermission(req, pollData.guild_id);
         if (!permCheck.valid) {
-            return res.status(403).json({ error: permCheck.error || 'Permission denied' });
+            return res.status(permCheck.status || 403).json({ error: permCheck.error || 'Permission denied' });
         }
 
         // Rate limit check for poll mutations
@@ -777,58 +920,60 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
             });
         }
 
-        // 3. Update database
-        const { error: updateError } = await supabase
-            .from('polls')
-            .update({ active })
-            .eq('message_id', pollId);
+        cancelPendingRender(pollId);
 
-        if (updateError) {
-            logger.error('[PollManagement] Failed to update poll status:', updateError);
-            return res.status(500).json({ error: 'Failed to update poll status' });
-        }
-
-        // 4. Get vote data for re-rendering (weighted — consistent with /close
-        // via PollManager, which was switched to the same aggregation utility).
+        // 3. Get vote data for re-rendering (weighted — consistent with /close)
         const voteAgg = await aggregateVotes(pollId, pollData.options.length);
         if (voteAgg.error) {
-            // Revert the status flip we made above; we cannot render without counts.
-            await supabase.from('polls').update({ active: pollData.active }).eq('message_id', pollId);
             return res.status(500).json({ error: 'Failed to load vote data' });
         }
         const counts = voteAgg.counts;
         const totalVotes = voteAgg.totalWeight;
 
-        // 5. Get user info for creator display
-        const { data: userData } = await supabase
-            .from('users')
-            .select('username')
-            .eq('id', pollData.creator_id)
-            .single();
+        const { serverAllowsButtons, serverLocale } = await getGuildPollSettings(pollData.guild_id);
 
-        const creatorName = userData?.username || 'Unknown';
+        // 4. Get user info for creator display (same resolution as the bot)
+        const creatorName = await resolveCreatorName(pollData.creator_id, pollData.guild_id);
 
-        // 6. Update Discord message via broadcastEval
-        const { Renderer } = await import('../lib/renderer');
-        const { getShardingManager } = await import('../webhook');
-
-        const shardingManager = getShardingManager();
-        if (!shardingManager) {
-            // Still return success since DB was updated
-            logger.warn('[PollManagement] Sharding manager not available, Discord message not updated');
-            trackUsage({ source: 'dashboard', event_type: active ? 'poll_reopen' : 'poll_close', guild_id: pollData.guild_id, user_id: permCheck.userId });
-            return res.json({ ...pollData, active });
+        const dbUpdate: Record<string, any> = { active };
+        if (active && pollData.ends_at && new Date(pollData.ends_at).getTime() <= Date.now()) {
+            dbUpdate.ends_at = null;
         }
 
-        const showVotes = !active || (pollData.settings && pollData.settings.public);
+        // 5. Update Discord message via broadcastEval FIRST (matching PollManager.setPollStatus)
+        const { Renderer } = await import('../lib/renderer');
+        const shardingManager = getShardingManager();
+        if (!shardingManager) {
+            const { error: updateError } = await supabase
+                .from('polls')
+                .update(dbUpdate)
+                .eq('message_id', pollId);
+            if (updateError) {
+                logger.error('[PollManagement] Failed to update poll status:', updateError);
+                return res.status(500).json({ error: 'Failed to update poll status' });
+            }
+            logger.warn('[PollManagement] Sharding manager not available, Discord message not updated');
+            trackUsage({ source: 'dashboard', event_type: active ? 'poll_reopen' : 'poll_close', guild_id: pollData.guild_id, user_id: permCheck.userId });
+            return res.json({ ...pollData, ...dbUpdate });
+        }
+
+        const resolved = await resolveMentionsOnShard(
+            pollData.guild_id,
+            pollData.title,
+            pollData.description || '',
+            pollData.options
+        );
+
+        const showVotes = !active || (pollData.settings && pollData.settings.public !== false);
 
         const renderOptions: any = {
-            title: pollData.title,
-            description: pollData.description || '',
-            options: pollData.options,
+            title: resolved.title,
+            description: resolved.description,
+            options: resolved.options,
             totalVotes,
             creator: creatorName,
             closed: !active,
+            locale: serverLocale,
         };
 
         if (showVotes) {
@@ -838,79 +983,41 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
         const imageBuffer = await Renderer.renderPoll(renderOptions);
         const imageBase64 = imageBuffer.toString('base64');
 
+        const serializedComponents = PollManager.buildPollComponents({
+            options: pollData.options,
+            settings: pollData.settings,
+            active,
+            serverAllowsButtons,
+            serverLocale,
+        }).map(row => row.toJSON());
+
         const updateContext = {
+            guildId: pollData.guild_id,
             channelId: pollData.channel_id,
             messageId: pollId,
             imageBase64,
-            active,
-            options: pollData.options,
-            settings: pollData.settings,
+            components: serializedComponents,
         };
 
         const broadcastResults = await shardingManager.broadcastEval(
             async (client, context) => {
-                const { channelId, messageId, imageBase64, active, options, settings } = context;
-                const { ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = await import('discord.js');
+                const { guildId, channelId, messageId, imageBase64, components } = context;
+                if (!client.guilds.cache.has(guildId)) return null;
 
-                const channel = client.channels.cache.get(channelId);
-                if (!channel || !channel.isTextBased()) return { success: false, error: 'Channel not found' };
+                const { AttachmentBuilder } = await import('discord.js');
 
                 try {
+                    const channel = client.channels.cache.get(channelId)
+                        ?? await client.channels.fetch(channelId);
+                    if (!channel || !channel.isTextBased()) {
+                        return { success: false, error: 'Channel not found' };
+                    }
+
                     const message = await (channel as any).messages.fetch(messageId);
                     if (!message) return { success: false, error: 'Message not found' };
 
                     const imageBufferFromBase64 = Buffer.from(imageBase64, 'base64');
                     const attachment = new AttachmentBuilder(imageBufferFromBase64, { name: 'poll.png' });
-
-                    const components: any[] = [];
-
-                    if (active) {
-                        // Active poll: show vote menu + optional close button
-                        const maxVotes = Math.min(settings?.max_votes || 1, options.length);
-                        const minVotes = Math.min(settings?.min_votes || 1, maxVotes);
-
-                        const selectOptions = options.map((opt: string, i: number) => ({
-                            label: opt.substring(0, 100),
-                            value: i.toString(),
-                            description: `Vote for option ${i + 1}`,
-                        }));
-
-                        const selectMenu = new StringSelectMenuBuilder()
-                            .setCustomId('poll_vote')
-                            .setPlaceholder('Select your choice(s)...')
-                            .setMinValues(minVotes)
-                            .setMaxValues(maxVotes)
-                            .addOptions(selectOptions);
-
-                        components.push(new ActionRowBuilder().addComponents(selectMenu));
-
-                        if (settings?.allow_close !== false) {
-                            const closeButton = new ButtonBuilder()
-                                .setCustomId('poll_close')
-                                .setLabel('Close Poll')
-                                .setStyle(ButtonStyle.Secondary);
-
-                            const detailsButton = new ButtonBuilder()
-                                .setCustomId('view_details')
-                                .setLabel('View Details')
-                                .setStyle(ButtonStyle.Secondary);
-
-                            components.push(new ActionRowBuilder().addComponents(closeButton, detailsButton));
-                        }
-                    } else {
-                        // Closed poll: show reopen button
-                        const reopenButton = new ButtonBuilder()
-                            .setCustomId('poll_reopen')
-                            .setLabel('Reopen Poll')
-                            .setStyle(ButtonStyle.Primary);
-
-                        const detailsButton = new ButtonBuilder()
-                            .setCustomId('view_details')
-                            .setLabel('View Details')
-                            .setStyle(ButtonStyle.Secondary);
-
-                        components.push(new ActionRowBuilder().addComponents(reopenButton, detailsButton));
-                    }
 
                     await message.edit({
                         files: [attachment],
@@ -919,20 +1026,17 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
 
                     return { success: true };
                 } catch (err: any) {
-                    // Check if message was deleted (Unknown Message error)
                     if (err.code === 10008 || err.message?.includes('Unknown Message')) {
                         return { success: false, error: 'message_deleted' };
                     }
-                    // Check for permission errors
-                    // 50001: Missing Access (can't see the channel)
-                    // 50013: Missing Permissions (can see but can't perform action)
+                    if (err.code === 10003) {
+                        return { success: false, error: 'message_deleted' };
+                    }
                     if (err.code === 50001 || err.code === 50013) {
-                        // Determine which permissions are missing
                         const missingPerms: string[] = [];
                         if (err.code === 50001) {
                             missingPerms.push('View Channel');
                         } else {
-                            // Parse the error message to identify missing perms
                             const errMsg = err.message?.toLowerCase() || '';
                             if (errMsg.includes('send') || errMsg.includes('message')) {
                                 missingPerms.push('Send Messages');
@@ -943,7 +1047,6 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
                             if (errMsg.includes('embed')) {
                                 missingPerms.push('Embed Links');
                             }
-                            // Default if we can't parse specific permissions
                             if (missingPerms.length === 0) {
                                 missingPerms.push('Send Messages', 'Attach Files');
                             }
@@ -961,54 +1064,58 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
             { context: updateContext }
         );
 
-        // Check if any shard reported the message as deleted
-        const results = Array.isArray(broadcastResults) ? broadcastResults : [broadcastResults];
+        const results = (Array.isArray(broadcastResults) ? broadcastResults : [broadcastResults]).filter(r => r !== null);
         const messageDeleted = results.some((r: any) => r?.error === 'message_deleted');
 
         if (messageDeleted) {
             logger.warn(`[PollManagement] Poll ${pollId} Discord message was deleted`);
 
-            // The Discord message could not be updated, so the status flip did not
-            // take visible effect — revert `active` to its original value (matching
-            // the permission-error branch) and persist discord_deleted so the UI
-            // knows the message is gone.
             await supabase
                 .from('polls')
-                .update({ active: pollData.active, discord_deleted: true })
+                .update({ active: false, discord_deleted: true })
                 .eq('message_id', pollId);
 
             return res.status(410).json({
                 error: 'Discord message deleted',
                 message_deleted: true,
-                poll: { ...pollData, discord_deleted: true }
+                poll: { ...pollData, active: false, discord_deleted: true }
             });
         }
 
-        // Check for permission errors
         const permissionError = results.find((r: any) => r?.error === 'missing_permissions');
         if (permissionError) {
             logger.warn(`[PollManagement] Poll ${pollId} has permission issues: ${JSON.stringify(permissionError.missing_permissions)}`);
-
-            // Revert DB state since Discord update failed - this prevents UI confusion
-            // where the button state changes but the Discord message wasn't updated
-            await supabase
-                .from('polls')
-                .update({ active: pollData.active }) // Revert to original state
-                .eq('message_id', pollId);
 
             return res.status(403).json({
                 error: 'Bot missing permissions',
                 permission_error: true,
                 missing_permissions: permissionError.missing_permissions || ['View Channel', 'Send Messages', 'Attach Files'],
                 channel_id: pollData.channel_id,
-                poll: pollData // Return original poll data (with original active state)
+                poll: pollData
             });
+        }
+
+        const succeeded = results.some((r: any) => r?.success === true);
+        if (!succeeded) {
+            logger.error(`[PollManagement] Failed to update Discord message for poll ${pollId}:`, results);
+            return res.status(502).json({ error: 'Failed to update poll message on Discord' });
+        }
+
+        // 6. Persist status change in DB after Discord edit succeeded
+        const { error: updateError } = await supabase
+            .from('polls')
+            .update(dbUpdate)
+            .eq('message_id', pollId);
+
+        if (updateError) {
+            logger.error('[PollManagement] Failed to update poll status in DB after Discord edit:', updateError);
+            return res.status(500).json({ error: 'Failed to update poll status' });
         }
 
         logger.info(`[PollManagement] Poll ${pollId} status updated to ${active ? 'active' : 'closed'} by ${permCheck.userId}`);
         trackUsage({ source: 'dashboard', event_type: active ? 'poll_reopen' : 'poll_close', guild_id: pollData.guild_id, user_id: permCheck.userId });
 
-        return res.json({ ...pollData, active });
+        return res.json({ ...pollData, ...dbUpdate });
     } catch (error) {
         logger.error('[PollManagement] Error updating poll status:', error);
         return res.status(500).json({ error: 'Failed to update poll status' });
@@ -1020,15 +1127,15 @@ router.patch('/polls/:pollId/status', async (req: Request, res: Response) => {
  * Delete a poll from the database (useful for orphaned polls where Discord message was deleted)
  */
 router.delete('/polls/:pollId', async (req: Request, res: Response) => {
-    // Support both cookie and header auth
-    const cookieSession = req.cookies?.[COOKIE_NAME];
-    const authHeader = req.headers.authorization;
-    const headerSession = authHeader?.replace('Bearer ', '');
-    const sessionId = cookieSession || headerSession;
+    const sessionId = getSessionIdFromRequest(req);
     const pollId = req.params.pollId as string;
 
     if (!sessionId) {
         return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    if (!pollId || !SNOWFLAKE_RE.test(pollId)) {
+        return res.status(400).json({ error: 'Valid poll ID is required' });
     }
 
     try {
@@ -1037,16 +1144,16 @@ router.delete('/polls/:pollId', async (req: Request, res: Response) => {
             .from('polls')
             .select('guild_id, title')
             .eq('message_id', pollId)
-            .single();
+            .maybeSingle();
 
         if (pollError || !pollData) {
             return res.status(404).json({ error: 'Poll not found' });
         }
 
         // 2. Verify user has permission
-        const permCheck = await verifyUserPermission(sessionId, pollData.guild_id);
+        const permCheck = await verifyUserPermission(req, pollData.guild_id);
         if (!permCheck.valid) {
-            return res.status(403).json({ error: permCheck.error || 'Permission denied' });
+            return res.status(permCheck.status || 403).json({ error: permCheck.error || 'Permission denied' });
         }
 
         // Rate limit check for poll mutations
@@ -1058,6 +1165,8 @@ router.delete('/polls/:pollId', async (req: Request, res: Response) => {
                 message: `Too many requests. Please wait ${rateCheck.retryAfter} seconds.`,
             });
         }
+
+        cancelPendingRender(pollId);
 
         // 3. Delete votes first (foreign key constraint)
         await supabase
@@ -1091,39 +1200,27 @@ router.delete('/polls/:pollId', async (req: Request, res: Response) => {
  * Edit poll settings (not title/options to preserve vote integrity)
  */
 router.patch('/polls/:pollId', async (req: Request, res: Response) => {
-    // Support both cookie and header auth
-    const cookieSession = req.cookies?.[COOKIE_NAME];
-    const authHeader = req.headers.authorization;
-    const headerSession = authHeader?.replace('Bearer ', '');
-    const sessionId = cookieSession || headerSession;
+    const sessionId = getSessionIdFromRequest(req);
     const pollId = req.params.pollId as string;
-    const { settings: newSettings } = req.body as {
-        settings: {
-            public?: boolean;
-            allow_close?: boolean;
-            allow_exports?: boolean;
-            allowed_roles?: string[];
-            vote_weights?: Record<string, number>;
-            role_metadata?: Record<string, { name: string; color: number }>;
-        };
-    };
+    const { settings: rawSettings } = req.body as { settings?: unknown };
 
     if (!sessionId) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    if (!pollId) {
-        return res.status(400).json({ error: 'Missing poll id' });
+    if (!pollId || !SNOWFLAKE_RE.test(pollId)) {
+        return res.status(400).json({ error: 'Valid poll ID is required' });
     }
 
-    if (!newSettings || typeof newSettings !== 'object') {
+    if (!rawSettings || typeof rawSettings !== 'object') {
         return res.status(400).json({ error: 'settings object required' });
     }
 
-    const settingsValidation = validateUpdatePollSettings(newSettings);
-    if (!settingsValidation.success) {
+    const settingsValidation = validateUpdatePollSettings(rawSettings);
+    if (!settingsValidation.success || !settingsValidation.data) {
         return res.status(400).json({ error: 'Invalid settings', details: settingsValidation.errors });
     }
+    const newSettings = settingsValidation.data;
 
     try {
         // 1. Fetch poll
@@ -1131,16 +1228,16 @@ router.patch('/polls/:pollId', async (req: Request, res: Response) => {
             .from('polls')
             .select('*')
             .eq('message_id', pollId)
-            .single();
+            .maybeSingle();
 
         if (pollError || !pollData) {
             return res.status(404).json({ error: 'Poll not found' });
         }
 
         // 2. Verify permissions
-        const permCheck = await verifyUserPermission(sessionId, pollData.guild_id);
+        const permCheck = await verifyUserPermission(req, pollData.guild_id);
         if (!permCheck.valid) {
-            return res.status(403).json({ error: permCheck.error || 'Permission denied' });
+            return res.status(permCheck.status || 403).json({ error: permCheck.error || 'Permission denied' });
         }
 
         // Rate limit check for poll mutations
@@ -1153,12 +1250,17 @@ router.patch('/polls/:pollId', async (req: Request, res: Response) => {
             });
         }
 
-        // 3. Merge settings (only allowed fields)
+        cancelPendingRender(pollId);
+
+        const { serverAllowsButtons, serverLocale, globalWeights } = await getGuildPollSettings(pollData.guild_id);
+
+        // 3. Merge validated settings (only allowed fields)
         const currentSettings = pollData.settings || {};
+        const requestedAllowClose = newSettings.allow_close ?? currentSettings.allow_close;
         const updatedSettings = {
             ...currentSettings,
             public: newSettings.public ?? currentSettings.public,
-            allow_close: newSettings.allow_close ?? currentSettings.allow_close,
+            allow_close: serverAllowsButtons ? requestedAllowClose : false,
             allow_exports: newSettings.allow_exports ?? currentSettings.allow_exports,
             allowed_roles: newSettings.allowed_roles ?? currentSettings.allowed_roles,
             vote_weights: newSettings.vote_weights ?? currentSettings.vote_weights,
@@ -1176,166 +1278,188 @@ router.patch('/polls/:pollId', async (req: Request, res: Response) => {
             return res.status(500).json({ error: 'Failed to update poll settings' });
         }
 
-        // 5. Recalculate vote weights if vote_weights changed
+        const shardingManager = getShardingManager();
+
+        // 5. Recalculate vote weights if vote_weights changed (combining global + poll weights)
         const oldWeights = JSON.stringify(currentSettings.vote_weights || {});
         const newWeightsStr = JSON.stringify(updatedSettings.vote_weights || {});
+        const weightsChanged = oldWeights !== newWeightsStr;
+        const publicChanged = (currentSettings.public !== false) !== (updatedSettings.public !== false);
+        const allowCloseChanged = (currentSettings.allow_close !== false) !== (updatedSettings.allow_close !== false);
 
-        if (oldWeights !== newWeightsStr) {
+        if (weightsChanged) {
             logger.info(`[PollManagement] Vote weights changed for poll ${pollId}, recalculating...`);
 
-            // Get all unique voters for this poll
-            const { data: votes } = await supabase
-                .from('votes')
-                .select('user_id')
-                .eq('poll_id', pollId);
+            const { data: votes } = await fetchAllPollVotes(pollId);
 
-            if (votes && votes.length > 0) {
+            if (votes && votes.length > 0 && shardingManager) {
                 const uniqueUserIds = [...new Set(votes.map(v => v.user_id))];
 
-                const shardingManager = getShardingManager();
-                if (shardingManager) {
-                    // Use broadcastEval to get member roles for each user
-                    const memberWeights = await shardingManager.broadcastEval(
-                        async (client: any, context: { guildId: string; userIds: string[]; voteWeights: Record<string, number> }) => {
-                            const { guildId, userIds, voteWeights } = context;
-                            const guild = client.guilds.cache.get(guildId);
-                            if (!guild) return [];
-
-                            const results: Array<{ userId: string; weight: number }> = [];
-
-                            for (const userId of userIds) {
-                                try {
-                                    const member = await guild.members.fetch(userId).catch(() => null);
-                                    if (member) {
-                                        // Calculate weight based on member roles
-                                        let maxWeight = 1;
-                                        for (const roleId of member.roles.cache.keys()) {
-                                            const roleWeight = voteWeights[roleId];
-                                            if (roleWeight && roleWeight > maxWeight) {
-                                                maxWeight = roleWeight;
-                                            }
-                                        }
-                                        results.push({ userId, weight: maxWeight });
-                                    }
-                                } catch {
-                                    // Member not found, keep default weight
-                                }
-                            }
-
-                            return results;
-                        },
-                        {
-                            context: {
-                                guildId: pollData.guild_id,
-                                userIds: uniqueUserIds,
-                                voteWeights: updatedSettings.vote_weights || {},
-                            }
+                const memberWeights = await shardingManager.broadcastEval(
+                    async (
+                        client: any,
+                        context: {
+                            guildId: string;
+                            userIds: string[];
+                            globalWeights: Record<string, number>;
+                            pollWeights: Record<string, number>;
                         }
-                    );
+                    ) => {
+                        const { guildId, userIds, globalWeights: gWeights, pollWeights: pWeights } = context;
+                        const guild = client.guilds.cache.get(guildId);
+                        if (!guild) return [];
 
-                    // Flatten results from all shards
-                    const flatResults = (Array.isArray(memberWeights) ? memberWeights : [memberWeights])
-                        .flat()
-                        .filter((r): r is { userId: string; weight: number } => r !== null && typeof r === 'object');
+                        const results: Array<{ userId: string; weight: number }> = [];
 
-                    // Build a map of userId -> weight
-                    const weightMap = new Map<string, number>();
-                    for (const result of flatResults) {
-                        weightMap.set(result.userId, result.weight);
-                    }
-
-                    // Update votes with new weights
-                    for (const userId of uniqueUserIds) {
-                        const newWeight = weightMap.get(userId) || 1;
-                        await supabase
-                            .from('votes')
-                            .update({ weight: newWeight })
-                            .eq('poll_id', pollId)
-                            .eq('user_id', userId);
-                    }
-
-                    logger.info(`[PollManagement] Recalculated weights for ${uniqueUserIds.length} voters on poll ${pollId}`);
-
-                    // Update Discord message with new vote counts (weighted, via
-                    // the shared aggregation utility rather than a hand-rolled copy).
-                    const updatedAgg = await aggregateVotes(pollId, pollData.options.length);
-                    if (updatedAgg.error) {
-                        // Settings were already persisted; fail here so we don't
-                        // render a zero-filled image. The outer catch returns 500
-                        // and the (idempotent) update can be retried.
-                        throw new Error('Failed to aggregate votes after weight recalculation');
-                    }
-                    const newVoteCounts = updatedAgg.counts;
-                    const totalVotes = updatedAgg.totalWeight;
-
-                    // Get creator name for rendering
-                    const { data: userData } = await supabase
-                        .from('users')
-                        .select('username')
-                        .eq('id', pollData.creator_id)
-                        .single();
-                    const creatorName = userData?.username || 'Unknown';
-
-                    // Render updated poll image
-                    const { Renderer } = await import('../lib/renderer');
-                    const showVotes = !pollData.active || updatedSettings.public !== false;
-
-                    const renderOptions: any = {
-                        title: pollData.title,
-                        description: pollData.description || '',
-                        options: pollData.options,
-                        totalVotes,
-                        creator: creatorName,
-                        closed: !pollData.active,
-                    };
-
-                    if (showVotes) {
-                        renderOptions.votes = newVoteCounts;
-                    }
-
-                    const imageBuffer = await Renderer.renderPoll(renderOptions);
-                    const imageBase64 = imageBuffer.toString('base64');
-
-                    // Update Discord message
-                    await shardingManager.broadcastEval(
-                        async (client: any, context: any) => {
-                            const { channelId, messageId, imageBase64 } = context;
-                            const { AttachmentBuilder } = await import('discord.js');
-
-                            const channel = client.channels.cache.get(channelId);
-                            if (!channel || !channel.isTextBased()) return null;
-
+                        for (const userId of userIds) {
                             try {
-                                const message = await (channel as any).messages.fetch(messageId);
-                                if (!message) return null;
-
-                                const imageBufferFromBase64 = Buffer.from(imageBase64, 'base64');
-                                const attachment = new AttachmentBuilder(imageBufferFromBase64, { name: 'poll.png' });
-
-                                await message.edit({ files: [attachment] });
-                                return { success: true };
+                                const member = await guild.members.fetch(userId).catch(() => null);
+                                if (member) {
+                                    let maxWeight = 1;
+                                    for (const roleId of member.roles.cache.keys()) {
+                                        const gw = gWeights[roleId];
+                                        if (gw && gw > maxWeight) maxWeight = gw;
+                                        const pw = pWeights[roleId];
+                                        if (pw && pw > maxWeight) maxWeight = pw;
+                                    }
+                                    results.push({ userId, weight: maxWeight });
+                                }
                             } catch {
-                                return null;
-                            }
-                        },
-                        {
-                            context: {
-                                channelId: pollData.channel_id,
-                                messageId: pollId,
-                                imageBase64,
+                                // Member not found, keep default weight
                             }
                         }
-                    );
 
-                    logger.info(`[PollManagement] Updated Discord message for poll ${pollId} after weight recalculation`);
+                        return results;
+                    },
+                    {
+                        context: {
+                            guildId: pollData.guild_id,
+                            userIds: uniqueUserIds,
+                            globalWeights,
+                            pollWeights: updatedSettings.vote_weights || {},
+                        }
+                    }
+                );
+
+                const flatResults = (Array.isArray(memberWeights) ? memberWeights : [memberWeights])
+                    .flat()
+                    .filter((r): r is { userId: string; weight: number } => r !== null && typeof r === 'object');
+
+                const weightMap = new Map<string, number>();
+                for (const result of flatResults) {
+                    weightMap.set(result.userId, result.weight);
                 }
+
+                for (const userId of uniqueUserIds) {
+                    const newWeight = weightMap.get(userId) || 1;
+                    await supabase
+                        .from('votes')
+                        .update({ weight: newWeight })
+                        .eq('poll_id', pollId)
+                        .eq('user_id', userId);
+                }
+
+                logger.info(`[PollManagement] Recalculated weights for ${uniqueUserIds.length} voters on poll ${pollId}`);
             }
         }
+
+        // 6. Re-render and update Discord message whenever visual/component settings changed
+        if ((weightsChanged || publicChanged || allowCloseChanged) && shardingManager && !pollData.discord_deleted) {
+            const updatedAgg = await aggregateVotes(pollId, pollData.options.length);
+            if (updatedAgg.error) {
+                throw new Error('Failed to aggregate votes for poll settings update');
+            }
+
+            const creatorName = await resolveCreatorName(pollData.creator_id, pollData.guild_id);
+
+            const resolved = await resolveMentionsOnShard(
+                pollData.guild_id,
+                pollData.title,
+                pollData.description || '',
+                pollData.options
+            );
+
+            const { Renderer } = await import('../lib/renderer');
+            const showVotes = !pollData.active || updatedSettings.public !== false;
+
+            const renderOptions: any = {
+                title: resolved.title,
+                description: resolved.description,
+                options: resolved.options,
+                totalVotes: updatedAgg.totalWeight,
+                creator: creatorName,
+                closed: !pollData.active,
+                locale: serverLocale,
+            };
+
+            if (showVotes) {
+                renderOptions.votes = updatedAgg.counts;
+            }
+
+            const imageBuffer = await Renderer.renderPoll(renderOptions);
+            const imageBase64 = imageBuffer.toString('base64');
+
+            const serializedComponents = PollManager.buildPollComponents({
+                options: pollData.options,
+                settings: updatedSettings,
+                active: pollData.active,
+                serverAllowsButtons,
+                serverLocale,
+            }).map(row => row.toJSON());
+
+            await shardingManager.broadcastEval(
+                async (client: any, context: any) => {
+                    const { guildId, channelId, messageId, imageBase64: imgB64, components } = context;
+                    if (!client.guilds.cache.has(guildId)) return null;
+                    const { AttachmentBuilder } = await import('discord.js');
+
+                    try {
+                        const channel = client.channels.cache.get(channelId)
+                            ?? await client.channels.fetch(channelId);
+                        if (!channel || !channel.isTextBased()) return null;
+
+                        const message = await (channel as any).messages.fetch(messageId);
+                        if (!message) return null;
+
+                        const imageBufferFromBase64 = Buffer.from(imgB64, 'base64');
+                        const attachment = new AttachmentBuilder(imageBufferFromBase64, { name: 'poll.png' });
+
+                        await message.edit({ files: [attachment], components });
+                        return { success: true };
+                    } catch {
+                        return null;
+                    }
+                },
+                {
+                    context: {
+                        guildId: pollData.guild_id,
+                        channelId: pollData.channel_id,
+                        messageId: pollId,
+                        imageBase64,
+                        components: serializedComponents,
+                    }
+                }
+            );
+
+            logger.info(`[PollManagement] Updated Discord message for poll ${pollId} after settings edit`);
+        }
+
+        const { voteCounts, totalVotes, uniqueVoters, error: countsError } = await getVoteCountsForPoll(
+            pollId,
+            pollData.options as string[]
+        );
 
         logger.info(`[PollManagement] Poll ${pollId} settings updated by ${permCheck.userId}`);
         trackUsage({ source: 'dashboard', event_type: 'poll_edit', guild_id: pollData.guild_id, user_id: permCheck.userId });
 
-        return res.json({ ...pollData, settings: updatedSettings });
+        return res.json({
+            ...pollData,
+            settings: updatedSettings,
+            vote_counts: countsError ? null : voteCounts,
+            total_votes: countsError ? null : totalVotes,
+            unique_voters: countsError ? null : uniqueVoters,
+            counts_error: countsError,
+        });
     } catch (error) {
         logger.error('[PollManagement] Error updating poll settings:', error);
         return res.status(500).json({ error: 'Failed to update poll settings' });

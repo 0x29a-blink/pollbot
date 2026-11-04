@@ -5,6 +5,13 @@ import { logger } from '../lib/logger';
 export default {
     name: Events.GuildDelete,
     async execute(guild: Guild) {
+        // If guild.available is false, Discord is experiencing a temporary guild
+        // outage — the bot was NOT removed from the server. Never wipe polls/votes!
+        if (!guild.available) {
+            logger.warn(`[Persistence] Guild ${guild.id} became unavailable (outage). Skipping poll cleanup.`);
+            return;
+        }
+
         if (!process.env.SUPABASE_URL) return;
 
         logger.info(`[Persistence] Left guild ${guild.id}. Cleaning up poll data...`);

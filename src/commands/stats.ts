@@ -22,9 +22,7 @@ export default {
                 .single();
 
             if (error) {
-                console.error('Error fetching global stats:', error);
-                // Fallback to 0 if table is empty/error (e.g. widely used dev env without migration)
-                // But we should report error. For now, let's warn and continue with 0.
+                logger.error('Error fetching global stats:', error);
             }
 
             const totalPolls = globalStats?.total_polls || 0;
@@ -40,7 +38,7 @@ export default {
                     const results = await client.shard.fetchClientValues('guilds.cache.size') as number[];
                     activeServers = results.reduce((acc, guildCount) => acc + guildCount, 0);
                 } catch (e) {
-                    console.error('Error fetching shard values:', e);
+                    logger.error('Error fetching shard values:', e);
                     // fallback to local activeServers
                 }
             }
@@ -64,15 +62,13 @@ export default {
 
             const shards = client.shard?.count || 1;
 
-            // 3. System Stats
-            // CPU Load is hard to get instantly in Node without deps like 'systeminformation'
-            // We'll use a placeholder or simple loadavg if non-windows
+            // 3. System Stats (normalize 1-min load average across CPU cores into 0-100%)
             let cpuLoad = 0;
             const loadAvg = os.loadavg(); // [1, 5, 15]
             if (loadAvg && loadAvg.length > 0) {
-                cpuLoad = loadAvg[0] ?? 0; // This is not %, but load.
+                const coreCount = Math.max(os.cpus().length, 1);
+                cpuLoad = Math.min(100, Math.max(0, ((loadAvg[0] ?? 0) / coreCount) * 100));
             }
-            // For now, keep it 0 or mocked as "low" since we are lightweight
 
             const totalMem = os.totalmem();
             const freeMem = os.freemem();
@@ -88,7 +84,7 @@ export default {
                     .from('guild_settings')
                     .select('locale')
                     .eq('guild_id', interaction.guildId)
-                    .single();
+                    .maybeSingle();
 
                 if (guildSettings && guildSettings.locale) {
                     locale = guildSettings.locale;
@@ -127,7 +123,7 @@ export default {
             logger.info(`[${interaction.guild?.name || 'Unknown Guild'} (${interaction.guild?.memberCount || '?'})] ${interaction.user.tag} executed command /stats`);
 
         } catch (err) {
-            console.error(err);
+            logger.error('Error executing /stats:', err);
             await interaction.editReply({ content: I18n.t('messages.common.error', interaction.locale) });
         }
     }

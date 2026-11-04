@@ -39,6 +39,7 @@ const ALLOWED_RPCS = new Set([
     'get_active_voter_count',
     'get_total_members',
     'get_top_creators',
+    'get_top_creators_v2',
     'get_top_guilds',
     'get_guild_vote_counts',
     'get_poll_vote_counts',
@@ -47,6 +48,9 @@ const ALLOWED_RPCS = new Set([
     'get_usage_summary',
     'get_botlist_vote_history',
     'get_botlist_vote_totals',
+    'get_global_totals',
+    'get_guild_locale_counts',
+    'get_guild_browser',
 ]);
 
 // Headers we pass upstream. PostgREST needs Accept (`.single()` asks for

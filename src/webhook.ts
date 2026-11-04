@@ -1,7 +1,10 @@
+// Copyright (c) 2026 Simple Solutions.
+// Licensed under the MIT License. See LICENSE in the project root for details.
+
 import express from 'express';
 import cookieParser from 'cookie-parser';
-import { tunnel } from 'cloudflared';
 import { logger } from './lib/logger';
+import { startManagedTunnel } from './lib/cloudflaredTunnel';
 import { supabase } from './lib/db';
 import { classifyVoteWebhook, BotListVoteEvent } from './lib/botListVotes';
 import { dashboardAuthRouter } from './webapp/dashboardAuth';
@@ -12,7 +15,18 @@ import { ShardingManager } from 'discord.js';
 dotenv.config();
 
 const app = express();
+app.disable('x-powered-by');
+
+const host = process.env.WEBHOOK_HOST || '127.0.0.1';
 const port = 5000;
+
+app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    next();
+});
 
 // Middleware. The raw body is kept for the /vote route: Top.gg v1 webhooks
 // are authenticated by an HMAC over the exact bytes received.
@@ -54,7 +68,7 @@ app.use('/api/user', userPollsRouter);
 import { pollManagementRouter } from './webapp/pollManagement';
 app.use('/api/user', pollManagementRouter);
 
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
     res.status(200).send('OK');
 });
 
@@ -319,60 +333,15 @@ if (VOTE_WEBHOOK_SECRETS.topggAuth || VOTE_WEBHOOK_SECRETS.topggSignatureSecret 
     logger.warn('[Webhook] No vote webhook secrets set (TOPGG_WEBHOOK_AUTH / TOPGG_WEBHOOK_SECRET / DISCORDFORGE_WEBHOOK_AUTH) — the /vote endpoint is DISABLED.');
 }
 
-import { spawn } from 'child_process';
-import path from 'path';
-
-
 export async function startWebhookServer() {
-    app.listen(port, () => {
-        logger.info(`[Webhook] Server listening on port ${port}`);
+    app.listen(port, host, () => {
+        logger.info(`[Webhook] Server listening on http://${host}:${port}`);
     });
 
-    // Dynamically locate the cloudflared binary from the npm package
-    const cloudflaredDir = path.dirname(require.resolve('cloudflared'));
-    const binaryName = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared';
-    const binaryPath = path.join(cloudflaredDir, '..', 'bin', binaryName);
-
-    // Helper to start a tunnel
-    const startTunnel = (token: string, name: string) => {
-        try {
-            const child = spawn(binaryPath, ['tunnel', 'run', '--token', token]);
-
-            child.stdout.on('data', (data) => {
-                logger.info(`[cloudflared:${name}] ${data.toString().trim()}`);
-            });
-
-            child.stderr.on('data', (data) => {
-                logger.info(`[cloudflared:${name}] ${data.toString().trim()}`);
-            });
-
-            child.on('error', (err) => {
-                logger.error(`[cloudflared:${name}] Failed to spawn:`, err);
-            });
-
-            child.on('close', (code) => {
-                logger.warn(`[cloudflared:${name}] Process exited with code ${code}`);
-            });
-
-            // Handle shutdown
-            const cleanup = () => {
-                logger.info(`[cloudflared:${name}] Stopping tunnel...`);
-                child.kill();
-            };
-            process.on('SIGINT', cleanup);
-            process.on('SIGTERM', cleanup);
-
-            return child;
-        } catch (error) {
-            logger.error(`[cloudflared:${name}] Error starting tunnel:`, error);
-            return null;
-        }
-    };
-
-    // Start webhook tunnel (Top.gg)
+    // Start webhook tunnel (Top.gg / DiscordForge)
     if (process.env.WEBHOOK_CLOUDFLARED_TOKEN) {
         logger.info('[Webhook] Starting webhook tunnel (WEBHOOK_CLOUDFLARED_TOKEN)...');
-        startTunnel(process.env.WEBHOOK_CLOUDFLARED_TOKEN, 'webhook');
+        startManagedTunnel({ name: 'webhook', token: process.env.WEBHOOK_CLOUDFLARED_TOKEN });
     } else {
         logger.warn('[Webhook] No WEBHOOK_CLOUDFLARED_TOKEN provided. Webhook not accessible via tunnel.');
     }
@@ -380,7 +349,7 @@ export async function startWebhookServer() {
     // Start main tunnel (Dashboard at pollbot.win)
     if (process.env.MAIN_CLOUDFLARED_TOKEN) {
         logger.info('[Webhook] Starting main tunnel (MAIN_CLOUDFLARED_TOKEN)...');
-        startTunnel(process.env.MAIN_CLOUDFLARED_TOKEN, 'main');
+        startManagedTunnel({ name: 'main', token: process.env.MAIN_CLOUDFLARED_TOKEN });
     } else {
         logger.warn('[Webhook] No MAIN_CLOUDFLARED_TOKEN provided. Dashboard not accessible via tunnel.');
     }

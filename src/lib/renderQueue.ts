@@ -39,3 +39,16 @@ export function scheduleRender(pollId: string, job: RenderJob): void {
 
     pendingTimers.set(pollId, timer);
 }
+
+/**
+ * Cancels any pending debounced render for a poll (e.g., when closing,
+ * reopening, auto-closing, or deleting the poll so a trailing vote render
+ * cannot overwrite the new state).
+ */
+export function cancelPendingRender(pollId: string): void {
+    const existing = pendingTimers.get(pollId);
+    if (existing) {
+        clearTimeout(existing);
+        pendingTimers.delete(pollId);
+    }
+}

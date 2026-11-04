@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { Loader2, Settings2, Users, Scale } from 'lucide-react';
+import React, { useState } from 'react';
+import { Loader2, ChevronDown } from 'lucide-react';
 import { Modal } from './ui/Modal';
 import { Toggle } from './ui/Toggle';
+import { RoleChip } from './CreatePollModal';
+import { roleHex } from '../lib/format';
 
 interface PollSettings {
     public?: boolean;
@@ -29,8 +31,22 @@ interface EditPollModalProps {
         settings: PollSettings;
     };
     roles: Role[];
-    onSave: (pollId: string, settings: PollSettings) => Promise<void>;
+    onSave: (pollId: string, settings: PollSettings) => Promise<boolean>;
 }
+
+/** A form section: a 15px title, an optional grey line, then its fields. */
+const Section: React.FC<{ title: string; description?: React.ReactNode; aside?: React.ReactNode; children: React.ReactNode }> = ({ title, description, aside, children }) => (
+    <section className="pt-6 mt-6 first:pt-0 first:mt-0 border-t border-rule first:border-t-0">
+        <div className="flex items-baseline justify-between gap-3 mb-4">
+            <div className="min-w-0">
+                <h3 className="text-[15px] leading-5 font-semibold text-ink">{title}</h3>
+                {description && <p className="text-xs text-faint mt-1">{description}</p>}
+            </div>
+            {aside && <div className="shrink-0 text-xs text-faint num">{aside}</div>}
+        </div>
+        {children}
+    </section>
+);
 
 export const EditPollModal: React.FC<EditPollModalProps> = ({
     isOpen,
@@ -39,15 +55,9 @@ export const EditPollModal: React.FC<EditPollModalProps> = ({
     roles,
     onSave,
 }) => {
-    const [settings, setSettings] = useState<PollSettings>(poll.settings || {});
+    const [settings, setSettings] = useState<PollSettings>(() => poll.settings || {});
     const [loading, setLoading] = useState(false);
-    const [showRoleRestrictions, setShowRoleRestrictions] = useState(false);
     const [showVoteWeights, setShowVoteWeights] = useState(false);
-
-    // Reset form when poll changes
-    useEffect(() => {
-        setSettings(poll.settings || {});
-    }, [poll]);
 
     const handleSubmit = async () => {
         setLoading(true);
@@ -65,11 +75,13 @@ export const EditPollModal: React.FC<EditPollModalProps> = ({
                 }
             });
 
-            await onSave(poll.message_id, {
+            const saved = await onSave(poll.message_id, {
                 ...settings,
                 role_metadata: Object.keys(roleMetadata).length > 0 ? roleMetadata : undefined,
             });
-            onClose();
+            if (saved) {
+                onClose();
+            }
         } finally {
             setLoading(false);
         }
@@ -97,177 +109,135 @@ export const EditPollModal: React.FC<EditPollModalProps> = ({
         .filter(r => !r.managed && r.name !== '@everyone')
         .sort((a, b) => b.position - a.position);
 
+    // If role restrictions are set, only those roles can carry a weight
+    const restrictedCount = settings.allowed_roles?.length || 0;
+    const rolesToWeight = restrictedCount > 0
+        ? sortedRoles.filter(r => settings.allowed_roles?.includes(r.id))
+        : sortedRoles;
+    const weightCount = Object.keys(settings.vote_weights || {}).length;
+
     return (
         <Modal
             open={isOpen}
             onClose={onClose}
-            ariaLabel="Edit Poll Settings"
-            header={
-                <div>
-                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                        <Settings2 className="w-5 h-5 text-indigo-400" />
-                        Edit Poll Settings
-                    </h2>
-                    <p className="text-sm text-slate-400 mt-1 truncate max-w-xs">{poll.title}</p>
-                </div>
+            title="Edit poll settings"
+            subtitle={poll.title}
+            width="max-w-xl"
+            footer={
+                <>
+                    <button type="button" onClick={onClose} className="btn btn-outline">
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleSubmit}
+                        disabled={loading}
+                        className="btn btn-primary"
+                    >
+                        {loading && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
+                        Save changes
+                    </button>
+                </>
             }
         >
-                    {/* Content */}
-                    <div className="flex-1 overflow-y-auto p-5 space-y-4">
-                        {/* Toggle Settings */}
-                        <div className="space-y-3">
-                            <Toggle
-                                label="Show live results"
-                                checked={settings.public !== false}
-                                onChange={v => setSettings({ ...settings, public: v })}
-                                tooltip="When enabled, voters can see the current vote counts while the poll is open"
+            <Section title="Results and extras">
+                <div className="divide-y divide-rule -my-3">
+                    <Toggle
+                        label="Show live results"
+                        checked={settings.public !== false}
+                        onChange={v => setSettings({ ...settings, public: v })}
+                        tooltip="Voters see the current counts while the poll is open."
+                    />
+                    <Toggle
+                        label="Show close button"
+                        checked={settings.allow_close !== false}
+                        onChange={v => setSettings({ ...settings, allow_close: v })}
+                        tooltip="Adds a button for poll managers to close the poll early."
+                    />
+                    <Toggle
+                        label="Allow exports"
+                        checked={settings.allow_exports !== false}
+                        onChange={v => setSettings({ ...settings, allow_exports: v })}
+                        tooltip="Anyone can use /view and /export on this poll."
+                    />
+                </div>
+            </Section>
+
+            <Section
+                title="Who can vote"
+                description={restrictedCount === 0 ? 'Everyone in the channel can vote. Select roles to limit voting to them.' : `Only members with ${restrictedCount === 1 ? 'this role' : 'one of these roles'} can vote.`}
+                aside={restrictedCount > 0 ? `${restrictedCount} selected` : undefined}
+            >
+                {sortedRoles.length === 0 ? (
+                    <p className="text-sm text-faint">This server has no roles to pick from.</p>
+                ) : (
+                    <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto">
+                        {sortedRoles.map(role => (
+                            <RoleChip
+                                key={role.id}
+                                role={role}
+                                selected={settings.allowed_roles?.includes(role.id) || false}
+                                onToggle={() => toggleRoleRestriction(role.id)}
                             />
-                            <Toggle
-                                label="Show close button"
-                                checked={settings.allow_close !== false}
-                                onChange={v => setSettings({ ...settings, allow_close: v })}
-                                tooltip="When enabled, adds a button for poll managers to manually close the poll"
-                            />
-                            <Toggle
-                                label="Allow exports"
-                                checked={settings.allow_exports !== false}
-                                onChange={v => setSettings({ ...settings, allow_exports: v })}
-                                tooltip="When enabled, all users can use /view and /export commands"
-                            />
-                        </div>
+                        ))}
+                    </div>
+                )}
 
-                        {/* Role Restrictions */}
-                        <div className="border border-slate-700 rounded-lg overflow-hidden">
-                            <button
-                                onClick={() => setShowRoleRestrictions(!showRoleRestrictions)}
-                                className="w-full flex items-center justify-between p-3 bg-slate-800/50 hover:bg-slate-700/50 transition-colors"
-                            >
-                                <div className="flex items-center gap-2">
-                                    <Users className="w-4 h-4 text-indigo-400" />
-                                    <span className="text-sm font-medium text-slate-300">Role Restrictions</span>
-                                    {(settings.allowed_roles?.length || 0) > 0 && (
-                                        <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full">
-                                            {settings.allowed_roles?.length} selected
-                                        </span>
-                                    )}
-                                </div>
-                                <span className="text-slate-500 text-xs">{showRoleRestrictions ? '▲' : '▼'}</span>
-                            </button>
-                            {showRoleRestrictions && (
-                                <div className="p-3 border-t border-slate-700 max-h-40 overflow-y-auto space-y-1">
-                                    {sortedRoles.map(role => {
-                                        const isChecked = settings.allowed_roles?.includes(role.id) || false;
-                                        return (
-                                            <label
-                                                key={role.id}
-                                                className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-800/50 cursor-pointer transition-colors"
-                                            >
-                                                <div
-                                                    onClick={() => toggleRoleRestriction(role.id)}
-                                                    className={`w-5 h-5 rounded flex items-center justify-center border-2 transition-all ${isChecked
-                                                            ? 'bg-indigo-500 border-indigo-500'
-                                                            : 'border-slate-600 hover:border-slate-500'
-                                                        }`}
-                                                >
-                                                    {isChecked && (
-                                                        <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                                        </svg>
-                                                    )}
-                                                </div>
-                                                <span
-                                                    className="text-sm font-medium"
-                                                    style={{ color: role.color ? `#${role.color.toString(16).padStart(6, '0')}` : '#99AAB5' }}
-                                                >
-                                                    {role.name}
-                                                </span>
-                                            </label>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Vote Weights */}
-                        <div className="border border-slate-700 rounded-lg overflow-hidden">
-                            <button
-                                onClick={() => setShowVoteWeights(!showVoteWeights)}
-                                className="w-full flex items-center justify-between p-3 bg-slate-800/50 hover:bg-slate-700/50 transition-colors"
-                            >
-                                <div className="flex items-center gap-2">
-                                    <Scale className="w-4 h-4 text-amber-400" />
-                                    <span className="text-sm font-medium text-slate-300">Vote Weights</span>
-                                    {Object.keys(settings.vote_weights || {}).length > 0 && (
-                                        <span className="text-xs bg-violet-500/20 text-violet-400 px-2 py-0.5 rounded-full">
-                                            {Object.keys(settings.vote_weights || {}).length} weighted
-                                        </span>
-                                    )}
-                                </div>
-                                <span className="text-slate-500 text-xs">{showVoteWeights ? '▲' : '▼'}</span>
-                            </button>
-                            {showVoteWeights && (
-                                <div className="p-3 border-t border-slate-700 max-h-40 overflow-y-auto space-y-2">
-                                    {/* Filter roles: if role restrictions are set, only show those roles */}
-                                    {(() => {
-                                        const rolesToShow = (settings.allowed_roles?.length || 0) > 0
-                                            ? sortedRoles.filter(r => settings.allowed_roles?.includes(r.id))
-                                            : sortedRoles;
-
-                                        if (rolesToShow.length === 0) {
-                                            return (
-                                                <p className="text-xs text-slate-500 text-center py-2">
-                                                    Select roles above to configure weights
-                                                </p>
-                                            );
-                                        }
-
-                                        return rolesToShow.map(role => {
+                <div className="mt-5 rounded-card border border-line">
+                    <button
+                        type="button"
+                        onClick={() => setShowVoteWeights(!showVoteWeights)}
+                        aria-expanded={showVoteWeights}
+                        className="w-full flex items-center justify-between gap-3 px-4 h-11 rounded-card text-left hover:bg-[var(--state-hover)] transition-colors"
+                    >
+                        <span className="text-sm font-medium text-ink">
+                            Vote weights
+                            <span className="font-normal text-faint ml-2">
+                                {weightCount > 0 ? `${weightCount} ${weightCount === 1 ? 'role' : 'roles'} weighted` : 'Every vote counts once'}
+                            </span>
+                        </span>
+                        <ChevronDown className={`w-4 h-4 text-faint transition-transform ${showVoteWeights ? 'rotate-180' : ''}`} aria-hidden="true" />
+                    </button>
+                    {showVoteWeights && (
+                        <div className="px-4 pb-3 border-t border-rule">
+                            {rolesToWeight.length === 0 ? (
+                                <p className="text-xs text-faint py-3">Select roles above to configure weights.</p>
+                            ) : (
+                                <>
+                                    <p className="text-xs text-faint pt-3 pb-2">
+                                        A vote from a weighted role counts that many times. Default is 1.
+                                    </p>
+                                    <ul className="max-h-48 overflow-y-auto divide-y divide-rule">
+                                        {rolesToWeight.map(role => {
                                             const weight = settings.vote_weights?.[role.id] || 1;
                                             return (
-                                                <div key={role.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-800/50 transition-colors">
-                                                    <span
-                                                        className="text-sm font-medium"
-                                                        style={{ color: role.color ? `#${role.color.toString(16).padStart(6, '0')}` : '#99AAB5' }}
-                                                    >
-                                                        {role.name}
+                                                <li key={role.id} className="flex items-center justify-between gap-3 h-11">
+                                                    <span className="inline-flex items-center gap-2 min-w-0 text-sm text-muted">
+                                                        <span aria-hidden="true" className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: roleHex(role.color) }} />
+                                                        <span className="truncate">{role.name}</span>
                                                     </span>
-                                                    <div className="flex items-center gap-2">
+                                                    <span className="flex items-center gap-1.5 shrink-0">
                                                         <input
                                                             type="number"
                                                             min="1"
                                                             max="100"
                                                             value={weight}
                                                             onChange={e => updateVoteWeight(role.id, parseInt(e.target.value) || 1)}
-                                                            className="w-16 bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-sm text-white text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-colors"
+                                                            aria-label={`Vote weight for ${role.name}`}
+                                                            className="field num w-16 text-center"
                                                         />
-                                                        <span className="text-xs text-slate-500 font-medium">×</span>
-                                                    </div>
-                                                </div>
+                                                        <span className="text-xs text-faint" aria-hidden="true">×</span>
+                                                    </span>
+                                                </li>
                                             );
-                                        });
-                                    })()}
-                                </div>
+                                        })}
+                                    </ul>
+                                </>
                             )}
                         </div>
-                    </div>
-
-                    {/* Footer */}
-                    <div className="flex items-center justify-end gap-3 p-5 border-t border-slate-700">
-                        <button
-                            onClick={onClose}
-                            className="px-4 py-2 text-slate-400 hover:text-white transition-colors"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            onClick={handleSubmit}
-                            disabled={loading}
-                            className="flex items-center gap-2 px-5 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-                            Save Changes
-                        </button>
-                    </div>
+                    )}
+                </div>
+            </Section>
         </Modal>
     );
 };

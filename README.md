@@ -1,10 +1,10 @@
 <div align="center">
 
-# PollBot
+# Simple Poll Bot
 
 ### Polls your server will actually vote on.
 
-PollBot renders every poll as a crisp, live-updating image — not a wall of embed
+Simple Poll Bot renders every poll as a crisp, live-updating image — not a wall of embed
 text. Multi-select, weighted votes, private results, role-gated voting,
 scheduled auto-close, and a full web dashboard. One command and you're live.
 
@@ -117,14 +117,14 @@ Built with TypeScript, discord.js, and Playwright; data lives in Supabase
 
    ```bash
    npm install
-   cd dashboard && npm install && cd ..
+   cd dashboard && npm install && cd ..   # optional — skip for bot-only self-hosting
    ```
 
 2. Configure the environment:
 
    ```bash
-   cp .env.example .env            # backend — see comments in the file
-   cp dashboard/.env.example dashboard/.env   # dashboard build-time vars
+   cp .env.example .env                       # backend — see comments in the file
+   cp dashboard/.env.example dashboard/.env   # optional — dashboard build-time vars
    ```
 
    The important backend variables: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`,
@@ -158,7 +158,9 @@ Built with TypeScript, discord.js, and Playwright; data lives in Supabase
 
    The dashboard is served by the bot itself from `dashboard/dist`, so build
    it once (`cd dashboard && npm run build`) or use the Vite dev server for
-   hot reload (`cd dashboard && npm run dev`).
+   hot reload (`ENABLE_DASHBOARD=false` in `.env`, then `cd dashboard && npm run dev`).
+   For MIT bot-only self-hosting, set `ENABLE_DASHBOARD=false` (or omit the
+   `dashboard/` directory entirely) — the bot compiles and runs standalone.
 
 ## Development
 
@@ -201,6 +203,13 @@ Set `NODE_ENV=production` so the session cookie is marked Secure. The
 dashboard and Top.gg webhook are exposed through cloudflared tunnels
 configured by the `*_CLOUDFLARED_TOKEN` variables.
 
-## License
+## Legal and Licensing
 
-MIT
+© 2026 **Simple Solutions™**.
+
+- **Core Bot & Backend**: Published and open-sourced under the terms of the [MIT License](LICENSE).
+- **Web Dashboard (`dashboard/`)**: Source-available under the [PolyForm Shield License 1.0.0](dashboard/LICENSE) (see [`dashboard/NOTICE`](dashboard/NOTICE)). You may inspect, contribute to, and privately self-host the dashboard for non-competing use; offering a competing public bot or hosted dashboard service is prohibited.
+- **Trademarks & Branding**: **Simple Solutions™**, **Simple Poll Bot**, `pollbot.win`, and all official logos and visual assets remain the exclusive property of **Simple Solutions™**.
+- **Contributions**: Pull requests and commits are welcomed under the terms of our [Contributing Guide & CLA](CONTRIBUTING.md).
+
+By inviting **Simple Poll Bot** or interacting with our hosted services, you acknowledge and agree to follow our official [Terms of Service](https://github.com/0x29a-blink/pollbot/wiki/Terms) and [Privacy Policy](https://github.com/0x29a-blink/pollbot/wiki/Privacy).
