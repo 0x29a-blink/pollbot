@@ -22,15 +22,32 @@ export interface DiscordForgeVoteCheck {
     nextVoteAt?: string;
 }
 
+export interface DiscordForgeHeartbeatResponse {
+    success?: boolean;
+    message?: string;
+    status?: string;
+    uptimeChecks?: number;
+    uptimeOnline?: number;
+}
+
 export interface DiscordForgeClientOptions {
     /** Request timeout in ms (default 10s, matching the SDK). */
     timeout?: number;
     /** Max attempts per request including the first (default 3). */
     retries?: number;
+    /**
+     * Max `retry-after` seconds to sleep inline on 429 before throwing
+     * immediately so callers don't stall for 5+ minutes (default 15s).
+     */
+    maxRetryAfterSeconds?: number;
 }
 
 export class DiscordForgeError extends Error {
-    constructor(message: string, public readonly status?: number) {
+    constructor(
+        message: string,
+        public readonly status?: number,
+        public readonly retryAfter?: number
+    ) {
         super(message);
         this.name = 'DiscordForgeError';
     }
@@ -39,11 +56,13 @@ export class DiscordForgeError extends Error {
 export class DiscordForgeClient {
     private readonly timeout: number;
     private readonly retries: number;
+    private readonly maxRetryAfterSeconds: number;
 
     constructor(private readonly apiKey: string, options: DiscordForgeClientOptions = {}) {
         if (!apiKey) throw new DiscordForgeError('DiscordForge API key is required');
         this.timeout = options.timeout ?? 10_000;
         this.retries = Math.max(1, options.retries ?? 3);
+        this.maxRetryAfterSeconds = options.maxRetryAfterSeconds ?? 15;
     }
 
     /**
@@ -54,11 +73,13 @@ export class DiscordForgeClient {
     }
 
     /**
-     * POST /api/v1/bots/heartbeat — expected every ~5 minutes to show
-     * the bot as online on the listing.
+     * POST /api/v1/bots/heartbeat — keeps the bot marked online under
+     * DiscordForge's push-based uptime monitor. Safe to call every 60s:
+     * DiscordForge records 1 uptime check per 5-minute window and responds
+     * 200 OK ("Heartbeat received (rate-limited)") to intermediate pings.
      */
-    async heartbeat(status: 'online' | 'idle' | 'dnd' = 'online'): Promise<void> {
-        await this.request('POST', '/api/v1/bots/heartbeat', { status }, 'bearer');
+    async heartbeat(status: 'online' | 'idle' | 'dnd' = 'online'): Promise<DiscordForgeHeartbeatResponse | undefined> {
+        return await this.request<DiscordForgeHeartbeatResponse>('POST', '/api/v1/bots/heartbeat', { status }, 'bearer');
     }
 
     /**
@@ -113,8 +134,8 @@ export class DiscordForgeClient {
 
                 if (res.status === 429) {
                     const retryAfter = Number(res.headers.get('retry-after')) || 3;
-                    lastError = new DiscordForgeError(`Rate limited on ${path}`, 429);
-                    if (attempt < this.retries) {
+                    lastError = new DiscordForgeError(`Rate limited on ${path} (retry-after ${retryAfter}s)`, 429, retryAfter);
+                    if (attempt < this.retries && retryAfter <= this.maxRetryAfterSeconds) {
                         logger.warn(`[DiscordForge] 429 on ${path}, retrying in ${retryAfter}s (attempt ${attempt}/${this.retries})`);
                         await sleep(retryAfter * 1000);
                         continue;
@@ -139,8 +160,8 @@ export class DiscordForgeClient {
                     const msg = err instanceof Error ? err.message : String(err);
                     lastError = new Error(this.redact(msg));
                 }
-                // 4xx (other than 429) won't succeed on retry — bad key, bad payload.
-                if (err instanceof DiscordForgeError && err.status && err.status !== 429 && err.status < 500) {
+                // 4xx won't succeed on retry (eligible 429 retries already continued above).
+                if (err instanceof DiscordForgeError && err.status && err.status < 500) {
                     throw err;
                 }
                 if (attempt < this.retries) {

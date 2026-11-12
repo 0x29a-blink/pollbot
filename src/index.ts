@@ -10,6 +10,7 @@ import path from 'path';
 import { logger } from './lib/logger';
 import { checkDbConnectionWithRetry } from './lib/db';
 import { I18n } from './lib/i18n';
+import { BotListService } from './services/BotListService';
 import { fork, ChildProcess } from 'child_process';
 import { setGlobalDispatcher, Agent } from 'undici';
 
@@ -164,14 +165,18 @@ function startServices() {
         });
     }
 
-    // DiscordForge stats + heartbeat + command sync (own client, no SDK)
+    // DiscordForge stats + heartbeat + command sync (own client, no SDK).
+    // Initialized synchronously before spawnShardsWithRetry so Shard 0's ready
+    // event immediately sends our first online heartbeat.
+    let botListService: BotListService | null = null;
     const discordForgeKey = process.env.DISCORDFORGE_API_KEY;
     if (discordForgeKey && !devOnlyMode) {
-        import('./services/BotListService').then(({ BotListService }) => {
-            new BotListService(manager, discordForgeKey).start();
-        }).catch(err => {
+        try {
+            botListService = new BotListService(manager, discordForgeKey);
+            botListService.start();
+        } catch (err) {
             logger.error('[Manager] Failed to start BotListService:', err);
-        });
+        }
     } else {
         logger.info('[Manager] DISCORDFORGE_API_KEY not set — DiscordForge posting disabled.');
     }
@@ -196,13 +201,18 @@ function startServices() {
         });
     }
 
-    spawnShardsWithRetry(manager);
+    void spawnShardsWithRetry(manager).then(() => {
+        if (!shuttingDown) {
+            botListService?.onShardsSpawned();
+        }
+    });
 
     // Handle Shutdown
     const handleShutdown = (signal: string) => {
         if (shuttingDown) return;
         shuttingDown = true;
         logger.info(`[Manager] ${signal} received. Killing Services...`);
+        botListService?.stop();
         dashboardSupervisor?.stop();
         process.exit(0);
     };

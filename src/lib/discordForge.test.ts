@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { DiscordForgeClient } from './discordForge';
+import { DiscordForgeClient, DiscordForgeError } from './discordForge';
 
 describe('DiscordForgeClient', () => {
     afterEach(() => {
@@ -56,5 +56,77 @@ describe('DiscordForgeClient', () => {
         const client = new DiscordForgeClient('df_secret_key_123', { retries: 1 });
         await expect(client.postStats({ server_count: 1 })).rejects.toThrow('[REDACTED]');
         await expect(client.postStats({ server_count: 1 })).rejects.not.toThrow('df_secret_key_123');
+    });
+
+    it('returns parsed uptime counters from heartbeat()', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(
+                JSON.stringify({
+                    success: true,
+                    message: 'Heartbeat recorded successfully',
+                    status: 'online',
+                    uptimeChecks: 4823,
+                    uptimeOnline: 2594,
+                }),
+                { status: 200, headers: { 'content-type': 'application/json' } }
+            )
+        );
+
+        const client = new DiscordForgeClient('df_secret_key_123', { retries: 1 });
+        const res = await client.heartbeat('online');
+        expect(res).toEqual({
+            success: true,
+            message: 'Heartbeat recorded successfully',
+            status: 'online',
+            uptimeChecks: 4823,
+            uptimeOnline: 2594,
+        });
+    });
+
+    it('throws immediately on long 429 retry-after instead of stalling for 5 minutes', async () => {
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response('Too Many Requests', {
+                status: 429,
+                headers: { 'retry-after': '300' },
+            })
+        );
+
+        const client = new DiscordForgeClient('df_secret_key_123', {
+            retries: 3,
+            maxRetryAfterSeconds: 15,
+        });
+
+        await expect(client.postStats({ server_count: 100 })).rejects.toMatchObject({
+            name: 'DiscordForgeError',
+            status: 429,
+            retryAfter: 300,
+        } satisfies Partial<DiscordForgeError>);
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('auto-retries short 429 retry-after within maxRetryAfterSeconds', async () => {
+        let calls = 0;
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+            calls++;
+            if (calls === 1) {
+                return new Response('Too Many Requests', {
+                    status: 429,
+                    headers: { 'retry-after': '0.01' },
+                });
+            }
+            return new Response(JSON.stringify({ hasVoted: true }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+            });
+        });
+
+        const client = new DiscordForgeClient('df_secret_key_123', {
+            retries: 2,
+            maxRetryAfterSeconds: 15,
+        });
+
+        const res = await client.checkVote('911731627498041374', '123456789012345678');
+        expect(res.hasVoted).toBe(true);
+        expect(calls).toBe(2);
     });
 });
