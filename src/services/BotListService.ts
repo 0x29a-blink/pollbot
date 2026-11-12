@@ -6,11 +6,14 @@ import { logger } from '../lib/logger';
 // place the Top.gg AutoPoster lives).
 //
 // Heartbeat and stats are intentionally decoupled:
-//   1. Heartbeat runs every 60s (per DiscordForge's official setup guide) and
-//      fires immediately when the first shard comes online so restarts/updates
-//      never leave a 5–10m blind spot. DiscordForge deduplicates recorded
-//      uptime checks to 1 per 5m window while returning 200 OK to intermediate
-//      pings, so 60s pings never 429 and never miss a 5m check boundary.
+//   1. Heartbeat runs every 5m 10s (scheduled *after* each HTTP call completes)
+//      and fires immediately when the first shard comes online.
+//      Important: DiscordForge's /api/v1/bots/heartbeat docs in agent-setup
+//      suggest 60s, while their API reference states 5 minutes. Live testing
+//      showed that pings inside 5m return 200 "Heartbeat received (rate-limited)"
+//      AND reset the server's 5m cooldown timer — so pinging every 60s freezes
+//      uptimeChecks/uptimeOnline completely. Using 5m 10s post-completion
+//      guarantees >300s between requests even across IPC/network/clock jitter.
 //   2. Stats run every 10m (well clear of /api/v1/bots/stats's 1 req / 5m rate
 //      limit) and only when all shards are ready so partial server counts are
 //      never reported and stats 429s/IPC hiccups can never block heartbeats.
@@ -19,13 +22,14 @@ import { logger } from '../lib/logger';
 // All failures are logged and swallowed: a listing outage must never affect
 // the bot.
 
-export const HEARTBEAT_INTERVAL_MS = 60 * 1000;
+export const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000 + 10 * 1000;
 export const STATS_INTERVAL_MS = 10 * 60 * 1000;
 
 export class BotListService {
     private readonly forge: DiscordForgeClient;
     private heartbeatTimer: NodeJS.Timeout | null = null;
     private statsTimer: NodeJS.Timeout | null = null;
+    private running = false;
     private heartbeatInFlight = false;
     private statsInFlight = false;
     private initialHeartbeatTriggered = false;
@@ -36,7 +40,8 @@ export class BotListService {
     }
 
     start(): void {
-        if (this.heartbeatTimer || this.statsTimer) return;
+        if (this.running) return;
+        this.running = true;
 
         // Fire an immediate heartbeat as soon as the very first shard connects
         // (typically ~3–5s into boot) rather than waiting for all shards or the
@@ -55,28 +60,31 @@ export class BotListService {
             attachShardReadyHook(shard);
         }
 
-        this.heartbeatTimer = setInterval(() => void this.sendHeartbeat(), HEARTBEAT_INTERVAL_MS);
-        this.heartbeatTimer.unref();
+        this.scheduleNextHeartbeat(HEARTBEAT_INTERVAL_MS);
 
         this.statsTimer = setInterval(() => void this.postStats(), STATS_INTERVAL_MS);
         this.statsTimer.unref();
 
         void this.syncCommands();
 
-        logger.info('[BotList] DiscordForge poster started (heartbeat every 60s, stats every 10m).');
+        logger.info('[BotList] DiscordForge poster started (heartbeat every 5m10s, stats every 10m).');
     }
 
     /**
      * Called by the manager once `manager.spawn()` resolves and all shards are ready.
-     * Immediately publishes full cluster stats and ensures a heartbeat has gone out.
+     * Immediately publishes full cluster stats (and ensures an initial heartbeat
+     * ran if none fired yet).
      */
     onShardsSpawned(): void {
-        void this.sendHeartbeat();
+        if (!this.initialHeartbeatTriggered) {
+            this.triggerInitialHeartbeat();
+        }
         void this.postStats();
     }
 
     stop(): void {
-        if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+        this.running = false;
+        if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
         if (this.statsTimer) clearInterval(this.statsTimer);
         this.heartbeatTimer = null;
         this.statsTimer = null;
@@ -85,6 +93,16 @@ export class BotListService {
             this.manager.off('shardCreate', this.shardCreateListener);
             this.shardCreateListener = null;
         }
+    }
+
+    private scheduleNextHeartbeat(delayMs: number): void {
+        if (!this.running) return;
+        if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
+        this.heartbeatTimer = setTimeout(() => {
+            this.heartbeatTimer = null;
+            void this.sendHeartbeat();
+        }, delayMs);
+        this.heartbeatTimer.unref();
     }
 
     private triggerInitialHeartbeat(): void {
@@ -96,7 +114,10 @@ export class BotListService {
     async sendHeartbeat(): Promise<void> {
         if (this.heartbeatInFlight) return;
         const readyShards = Array.from(this.manager.shards.values()).filter(s => s.ready);
-        if (readyShards.length === 0) return;
+        if (readyShards.length === 0) {
+            this.scheduleNextHeartbeat(HEARTBEAT_INTERVAL_MS);
+            return;
+        }
 
         this.heartbeatInFlight = true;
         try {
@@ -109,14 +130,20 @@ export class BotListService {
             if (!anyConnected) return;
 
             const res = await this.forge.heartbeat('online');
-            const suffix = res?.uptimeChecks !== undefined
-                ? ` (${res.uptimeOnline}/${res.uptimeChecks}${res.message ? ` — ${res.message}` : ''})`
+            const counts = res?.uptimeChecks !== undefined
+                ? ` (${res.uptimeOnline}/${res.uptimeChecks})`
                 : '';
-            logger.debug(`[BotList] Sent heartbeat to DiscordForge${suffix}.`);
+            const msg = res?.message ?? '';
+            if (msg.toLowerCase().includes('rate-limited')) {
+                logger.warn(`[BotList] DiscordForge heartbeat rate-limited${counts} — ${msg}`);
+            } else {
+                logger.info(`[BotList] DiscordForge heartbeat recorded${counts}${msg ? ` — ${msg}` : ''}`);
+            }
         } catch (err) {
             logger.error('[BotList] Failed to send heartbeat to DiscordForge:', err);
         } finally {
             this.heartbeatInFlight = false;
+            this.scheduleNextHeartbeat(HEARTBEAT_INTERVAL_MS);
         }
     }
 

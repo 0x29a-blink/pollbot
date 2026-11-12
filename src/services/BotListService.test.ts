@@ -64,7 +64,7 @@ describe('BotListService', () => {
         };
     }
 
-    it('sends an immediate heartbeat when the first shard becomes ready and ticks every 60s', async () => {
+    it('sends an immediate heartbeat when the first shard becomes ready and ticks every 5m10s', async () => {
         const manager = new FakeManager();
         manager.totalShards = 2;
         const forge = makeForgeStub();
@@ -83,7 +83,12 @@ describe('BotListService', () => {
         expect(forge.heartbeat).toHaveBeenCalledTimes(1);
         expect(forge.postStats).not.toHaveBeenCalled(); // Shard 1 not spawned yet
 
-        await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
+        // Does NOT double-ping inside the 5-minute window (which would reset DiscordForge's cooldown)
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(forge.heartbeat).toHaveBeenCalledTimes(1);
+
+        // Next ping fires after the full 5m10s post-completion delay
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS - 60_000);
         expect(forge.heartbeat).toHaveBeenCalledTimes(2);
 
         svc.stop();
@@ -137,7 +142,7 @@ describe('BotListService', () => {
         await svc.postStats();
         expect(forge.postStats).not.toHaveBeenCalled();
 
-        // All shards ready: onShardsSpawned fires both; stats 429 does not block heartbeat
+        // All shards ready: onShardsSpawned fires stats and triggers initial heartbeat if none sent yet
         shard1.ready = true;
         svc.onShardsSpawned();
         await vi.advanceTimersByTimeAsync(0);
@@ -150,10 +155,49 @@ describe('BotListService', () => {
         });
         expect(forge.heartbeat).toHaveBeenCalledTimes(1);
 
+        // Calling onShardsSpawned again does NOT emit a duplicate heartbeat inside 5m
+        svc.onShardsSpawned();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(forge.heartbeat).toHaveBeenCalledTimes(1);
+
         // Next 10m stats interval succeeds cleanly
         svc.start();
         await vi.advanceTimersByTimeAsync(STATS_INTERVAL_MS);
-        expect(forge.postStats).toHaveBeenCalledTimes(2);
+        expect(forge.postStats).toHaveBeenCalledTimes(3);
+        svc.stop();
+    });
+
+    it('logs a warning and still waits the full 5m10s if DiscordForge replies rate-limited', async () => {
+        const manager = new FakeManager();
+        manager.shards.set(0, new FakeShard(0, true));
+        const forge = makeForgeStub();
+        forge.heartbeat
+            .mockResolvedValueOnce({
+                success: true,
+                message: 'Heartbeat received (rate-limited)',
+                status: 'online',
+                uptimeChecks: 4826,
+                uptimeOnline: 2597,
+            })
+            .mockResolvedValueOnce({
+                success: true,
+                message: 'Heartbeat recorded successfully',
+                status: 'online',
+                uptimeChecks: 4827,
+                uptimeOnline: 2598,
+            });
+
+        const svc = new BotListService(manager as any, 'df_test', forge as any);
+        svc.start();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(forge.heartbeat).toHaveBeenCalledTimes(1);
+
+        // Must still wait the full 5m10s before the next heartbeat so it clears the cooldown
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS - 1000);
+        expect(forge.heartbeat).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(forge.heartbeat).toHaveBeenCalledTimes(2);
         svc.stop();
     });
 });
